@@ -58,8 +58,14 @@ public sealed class MercadoPublicoOpciones
     /// <summary>
     /// Cada cuánto refresca la pantalla sola mientras está abierta.
     ///
-    /// Con la API caída casi siempre, un refresco cada 5 minutos son 12
-    /// peticiones por hora: una fracción del cupo diario de 10.000.
+    /// El intervalo se justificó en su día diciendo que "con la API caída casi
+    /// siempre" era poco. Esa premisa era FALSA: el `500` era nuestro, no suyo.
+    /// El motivo ahora es más simple: la consulta es automática y nadie está
+    /// esperando, así que refrescar cada 5 minutos no le cuesta nada a quien mira
+    /// y hace que las publicaciones del día aparezcan sin recargar a mano.
+    ///
+    /// Solo se refresca la semana EN CURSO. Las pasadas no cambian, y
+    /// repreguntarlas gastaría cupo a cambio de nada.
     /// </summary>
     public int MinutosEntreRefrescos { get; set; } = 5;
 

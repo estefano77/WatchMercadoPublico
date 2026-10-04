@@ -10,13 +10,23 @@ La empresa vigilada (nombre, RUT y código de proveedor) se lee de
 - **Servidor:** ASP.NET Core 10, minimal API, sin base de datos
 - **Estilos:** Tailwind CSS 4 (modo claro y oscuro)
 
-> **El problema que resuelve.** Mercado Público rechaza las primeras ~10-15
-> peticiones de cada sesión con `500` y `429`. Una versión anterior de esta
-> aplicación preguntaba un día que elegía el usuario y, cuando la API fallaba,
-> llegaba a mostrar "Sin licitaciones en la semana" sin haber podido preguntar
-> nada. Ahora la consulta es automática y al cargar la página, así que el
-> servidor **insiste hasta un minuto** antes de renderse; y si tampoco así, lo
-> dice y reintenta solo.
+> **El problema que resuelve.** Una versión anterior preguntaba un día que
+> elegía el usuario y, cuando la API fallaba, llegaba a mostrar "Sin licitaciones
+> en la semana" **sin haber podido preguntar nada**. Eso es lo que no puede
+> pasar: si no se pudo comprobar, hay que decir que no se pudo comprobar.
+>
+> La solución no es "la API está caída y hay que esperar": es distinguir los tres
+> casos —hay algo, no hay nada, no se pudo saber— y reintentar solo el tercero.
+> El servidor insiste hasta un minuto, y si tampoco así lo dice y reintenta solo.
+>
+> **Lo que NO era el problema, y durante mucho tiempo se dio por hecho:** que
+> Mercado Público rechazase las primeras ~10-15 peticiones de cada sesión. Es
+> falso. Ese `500` constante era nuestro: la fecha iba sin el cero del día y la
+> API respondía `{"Codigo":10300,"Mensaje":"El formato del parametro fechas es
+> incorrecto"}`. Ver [`fecha` con los DOS campos rellenos](#%EF%B8%8F-fecha-con-los-dos-campos-rellenos-o-no-funciona).
+>
+> El `429` **sí** es real, y es lo único que justifica los reintentos: es un
+> límite de ritmo, medido con dos peticiones seguidas.
 
 ---
 
@@ -348,9 +358,12 @@ primera, en ~450 ms.
 Lo que **sí** es real es el `429`: se reproduce haciendo dos peticiones seguidas,
 incluso con `curl`, y con `User-Agent` de navegador. El ritmo importa de verdad.
 
-Los reintentos se quedan —son baratos y el `429` existe— pero el motivo real es
-el que acaba con el `Codigo 10300`. Insistir un minuto ante un error de formato
-es tiempo perdido: seis intentos idénticos siempre dan el mismo resultado.
+Los reintentos se quedan, pero **solo** por el `429`. Y conviene ser honesto
+sobre qué se consigue con ellos: si el fallo es un `500` de la API por algo
+nuestro, seis intentos idénticos siempre dan el mismo resultado y son tiempo
+perdido. Por eso el mensaje de la API llega ahora a la pantalla, para que un
+error de formato se vea en un segundo y no después de un minuto de insistencia
+inútil.
 
 El servidor hace **6 intentos con esperas de 2, 4, 8, 16, 30 y 30 segundos**
 —unos 90 s en el peor caso— antes de rendirse. La consulta es automática al

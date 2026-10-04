@@ -22,13 +22,19 @@ public static class LicitacionesEndpoints
     /// <summary>
     /// Cuántos intentos se hacen, contando el primero.
     ///
-    /// Mucho más alto que antes, a propósito. Mercado Público rechaza las
-    /// primeras ~10-15 peticiones de cada sesión con 500 y 429; con dos
-    /// intentos se acumulaban los "No se pudo consultar ese día". Ahora la
-    /// consulta es automática y al cargar la página —nadie está esperando un
-    /// clic— así que insistir un minuto no le cuesta nada al usuario.
+    /// NADA que ver con un "las primeras peticiones de cada sesión". Esa idea
+    /// estaba aquí y era FALSA: el 500 constante que motivó subir los intentos
+    /// desde 2 hasta 6 no era de Mercado Público, era nuestra URL con la fecha mal
+    /// formada. Corregido eso, la primera petición responde bien a la primera.
     ///
-    /// Con esperas de 2, 4, 8, 16, 30 y 30 s son ~90 s en el peor caso.
+    /// Lo que SÍ ocurre, medido: dos peticiones seguidas se ganan un <b>429</b>.
+    /// Se vio repetidamente con `curl`, sin más. Es un límite de ritmo, no un
+    /// calentamiento, y se nota también al barrer un mes: de cada diez
+    /// peticiones, más o menos una vuelve con 429.
+    ///
+    /// Así que insistir tiene sentido por el 429, no por un 500 de apertura. Con
+    /// esperas de 2, 4, 8, 16, 30 y 30 s son ~90 s en el peor caso, y en una
+    /// semana son cinco peticiones seguidas donde alguna caerá.
     /// </summary>
     private const int IntentosPorDia = 6;
 
