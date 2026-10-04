@@ -177,11 +177,19 @@ MercadoPublico__Ticket = "tu-ticket"
 
 Tres endpoints, en el orden en que se usan.
 
+> **Los datos de los ejemplos de esta sección son inventados.** El RUT
+> `99.999.999-9` y el nombre `EMPRESA DE EJEMPLO SPA` no corresponden a nadie:
+> el RUT es inválido a propósito, porque un ejemplo con el RUT real de la
+> empresa convertiría el repositorio en un registro de datos identificables, y
+> eso no tiene ninguna ventaja para quien lee. Los que sí son reales, porque
+> describen el comportamiento de la API y sin ellos las tablas no se
+> entienden, son los **códigos** y los **recuentos**.
+
 ### 1) RUT → código de proveedor
 
 ```
 GET https://api.mercadopublico.cl/servicios/v1/Publico/Empresas/BuscarProveedor
-    ?rutempresaproveedor=86.130.200-8&ticket=...
+    ?rutempresaproveedor=99.999.999-9&ticket=...
 ```
 
 Respuesta real:
@@ -191,7 +199,7 @@ Respuesta real:
   "Cantidad": 1,
   "listaEmpresas": [
     { "CodigoEmpresa": "71284",
-      "NombreEmpresa": "SISTEMAS MODULARES DE COMPUTACION SPA" }
+      "NombreEmpresa": "EMPRESA DE EJEMPLO SPA" }
   ]
 }
 ```
@@ -291,7 +299,7 @@ cerrado    147.432.000 CLP      <- lo que se adjudicó (1 × 147.432.000)
 cierre     21 sept 2026 12:30      adjudicación 27 sept 2026
 oferentes  4     acta N° 143
 ítem       Software del sistema de administración de bases de datos
-           a SISTEMAS MODULARES DE COMPUTACION SPA (86.130.200-8)
+           a EMPRESA DE EJEMPLO SPA (99.999.999-9)
 ```
 
 ### El monto que se muestra es el adjudicado, no el estimado
