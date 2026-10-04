@@ -1,16 +1,15 @@
 @*
     Símbolo + rótulo de la aplicación.
 
-    El símbolo (la "M" en zigzag sobre el degradado azul-violeta-rojo) es una
-    marca PROPIA dibujada para este proyecto. No reproduce ni fusiona los
-    logotipos de Mercado Público / ChileCompra ni los de SMC, que son marcas
-    registradas de terceros: copiar su arte en una marca nueva es infracción de
-    marca, no solo de copyright.
+    El símbolo (la "M" en zigzag sobre el degradado azul-violeta-rojo) y el
+    nombre WatchMercadoPublico son una marca PROPIA, dibujada para este
+    proyecto. No reproduce ni fusiona los logotipos de Mercado Público /
+    ChileCompra, que son marcas registradas de terceros: copiar su arte en una
+    marca nueva es infracción de marca, no solo de copyright.
 
-    "Mercado Público" y "SMC" NO aparecen en la marca: son marcas registradas de
-    terceros y este rótulo es identidad propia de la herramienta. Siguen
-    apareciendo como TEXTO PLANO en el pie de página, que es uso nominativo
-    legítimo al describir con qué se integra.
+    El logotipo de SMC va aparte, en LogoSmc.razor y en la cabecera: se muestra
+    porque esta herramienta es INTERNA de SMC, no porque su marca sea parte de
+    la marca de la aplicación. Aquí no sale ningún nombre de tercero.
 *@
 
 <span class="@Contenedor">
@@ -43,7 +42,7 @@
            desborda hacia la derecha, así que por debajo de 380 px se oculta el
            nombre; el icono ya identifica la aplicación. *@
         <span class="hidden text-[1.15rem] leading-none font-extrabold tracking-tight min-[380px]:inline sm:text-[1.3rem]">
-            Watch<span class="marca-texto">MercadoPúblico</span>
+            Watch<span class="marca-texto">MercadoPublico</span>
         </span>
     }
 </span>

@@ -62,8 +62,18 @@ public sealed class MercadoPublicoCliente
     public async Task<List<Licitacion>> ListarLicitacionesDelDiaAsync(
         string codigoProveedor, DateOnly fecha, CancellationToken ct)
     {
+        // OJO con el formato: la API pide DDMMAAAA con AMBOS campos rellenos.
+        // En .NET "d" es el día SIN cero a la izquierda y "dd" el día CON cero.
+        // Con "dMMyyyy" el 4 de octubre se mandaba "4102026" —siete dígitos— y la
+        // API respondía 500 con {"Codigo":10300,"Mensaje":"El formato del
+        // parametro fechas es incorrecto"}.
+        //
+        // Lo que lo escondía es que "d" y "dd" solo se diferencian en los días 1
+        // al 9: a partir del 10 el día ya tiene dos cifras y el bug desaparece
+        // solo. Por eso parecía funcionar y "a veces" fallaba, y por qué no se
+        // vio nunca en las fechas de prueba (28/09/2026 era día 28).
         var url = $"publico/licitaciones.json" +
-                  $"?fecha={fecha:dMMyyyy}" +
+                  $"?fecha={fecha:ddMMyyyy}" +
                   $"&CodigoProveedor={Uri.EscapeDataString(codigoProveedor)}" +
                   $"&ticket={Uri.EscapeDataString(opciones.Ticket)}";
 
@@ -231,12 +241,24 @@ public sealed class MercadoPublicoCliente
     private MercadoPublicoException ConstruirError(HttpStatusCode estado, string cuerpo)
     {
         string? mensaje = null;
+        int codigoApi = 0;
+
         try
         {
             using var doc = JsonDocument.Parse(cuerpo);
+
+            // "Mensaje" y "Codigo" es como responde la API cuando el problema es
+            // NUESTRO y no suyo. Sin leerlos, un {"Codigo":10300,"Mensaje":"El
+            // formato del parametro fechas es incorrecto"} salía en el log como
+            // "(null)" y en la pantalla como "Mercado Público está con problemas",
+            // que señalaba a la API cuando el fallo estaba en la URL que le
+            // mandamos. Un error con explicación tiene que llegar a quien lee.
             mensaje = LeerRuta(doc.RootElement, "error", "message")
+                      ?? Leer(doc.RootElement, "Mensaje")
                       ?? Leer(doc.RootElement, "Descripcion")
                       ?? Leer(doc.RootElement, "Message");
+
+            codigoApi = LeerEntero(doc.RootElement, "Codigo") ?? 0;
         }
         catch (JsonException)
         {
@@ -251,15 +273,28 @@ public sealed class MercadoPublicoCliente
                 "El ticket no es válido, está inactivo o se agotó su cupo diario. Revísalo en Mercado Público.",
             429 =>
                 "Mercado Público está limitando las peticiones. Espera un momento e inténtalo de nuevo.",
+            // El 500 de esta API casi nunca es un problema de la API: lo que
+            // llega es una queja sobre lo que le hemos mandado (una fecha mal
+            // formada, un parámetro que no existe). Decir "está con problemas"
+            // manda a mirar donde no está el fallo, así que se prioriza su
+            // mensaje sobre nuestra interpretación del código.
+            >= 500 when !string.IsNullOrWhiteSpace(mensaje) =>
+                $"Mercado Público rechazó la consulta: {mensaje.Trim()}",
             >= 500 =>
                 "Mercado Público está con problemas en este momento.",
             _ => "No se pudo completar la consulta a Mercado Público.",
         };
 
-        if (!string.IsNullOrWhiteSpace(mensaje))
+        if (!string.IsNullOrWhiteSpace(mensaje) && codigo < 500)
             explicacion += $" ({mensaje.Trim()})";
 
-        log.LogWarning("Mercado Público respondió {Codigo}: {Detalle}", codigo, mensaje);
+        if (codigoApi > 0)
+            log.LogWarning(
+                "Mercado Público respondió {Codigo} (código propio {CodigoApi}): {Detalle}",
+                codigo, codigoApi, mensaje);
+        else
+            log.LogWarning("Mercado Público respondió {Codigo}: {Detalle}", codigo, mensaje);
+
         return new MercadoPublicoException(
             explicacion, null, codigo is 401 or 403 ? 502 : codigo);
     }

@@ -191,6 +191,39 @@ select option:checked {
 
 /* ---------------- Degradado de la marca ---------------- */
 
+/* ---------------- Logotipo de SMC ----------------
+
+   El PNG es blanco PURO con alfa variable: el RGB es #FFFFFF en todos los
+   píxeles visibles y solo cambia la opacidad (128 niveles, comprobado en la
+   paleta del fichero). Por eso se usa como MÁSCARA en vez de como <img>: el
+   alfa dibuja la forma y el background-color la pinta. Así un solo fichero da
+   los dos colores que hacen falta —azul de marca en claro y blanco en oscuro—
+   y se ve nítido a cualquier tamaño.
+
+   OJO con la ruta: tiene que ser ABSOLUTA. Este CSS se sirve en /css/app.css,
+   y una ruta relativa se resuelve respecto a él, no al documento: con
+   url("logo-smc.png") pedía /css/logo-smc.png, daba 404, y el elemento se
+   quedaba SIN MÁSCARA — que es el fallo silencioso de este truco, porque en vez
+   de desaparecer el logo se ve como un rectángulo de color sólido. Conviene
+   comprobar que /logo-smc.png responde 200.
+
+   Los prefijos -webkit- son por Safari antiguo; mask-image sin prefijo es
+   Firefox 53+, Chrome 120+ y Safari 15.4+. */
+.logo-smc {
+    aspect-ratio: 300 / 72;
+    background-color: var(--app-marca-a);
+    -webkit-mask-image: url("/logo-smc.png");
+    mask-image: url("/logo-smc.png");
+    -webkit-mask-size: contain;
+    mask-size: contain;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+}
+
+.dark .logo-smc {
+    background-color: #ffffff;
+}
+
 .marca {
     background-image: linear-gradient(135deg,
         var(--app-marca-a) 0%,

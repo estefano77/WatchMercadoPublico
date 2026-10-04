@@ -12,7 +12,7 @@
     <section>
         <h1 class="text-2xl font-extrabold tracking-tight sm:text-3xl">
             Novedades de hoy en
-            <span class="marca-texto">Mercado Público</span>
+            <span class="marca-texto">Mercado Publico</span>
         </h1>
 
         @* Sin mencionar el refresco automático: es un detalle de funcionamiento
@@ -63,9 +63,19 @@
     @* ------------------------------------------------------------------ *@
     @* Estado de la consulta                                                *@
     @* ------------------------------------------------------------------ *@
-    @if (Estado is { Servible: true })
+    @* Dos cosas se esconden detrás de "Ocupado", y por eso NO es solo Cargando:
+         1. Una consulta en vuelo.
+         2. El arranque, antes de saber si la API está servible.
+
+       La condición del bloque es "Estado is not { Servible: false }" y no
+       "Servible: true" a propósito. Con la estricta, mientras /api/estado no
+       responde (Estado == null) no se cumplía NINGUNA y la pantalla pintaba la
+       cabecera, el título y a continuación un hueco vacío durante un minuto: sin
+       panel de cargando ni de error. Y como en Blazor asignar un campo no
+       repinta, el "Consultando" tampoco salía hasta terminar el await. *@
+    @if (Estado is not { Servible: false })
     {
-        @if (Cargando)
+        @if (Ocupado)
         {
             <Aviso Tipo="info" Titulo="Consultando a Mercado Público…" Cerrable="false">
                 <p class="mt-1.5 text-sm leading-relaxed text-ink-soft">
@@ -73,6 +83,18 @@
                     insiste hasta un minuto antes de rendirse. No hace falta hacer nada: la pantalla se
                     actualiza sola.
                 </p>
+                @* Los segundos solo cuando ya tarda. En el caso rápido —que es
+                   el normal— el contador sería ruido. *@
+                @if (SegundosEsperando > 8)
+                {
+                    <p class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
+                        <span class="inline-flex items-center gap-1.5 font-semibold text-ink-soft">
+                            <Icon Name="reloj" Size="14" />
+                            @SegundosEsperando s
+                        </span>
+                        <span>Sigo insistiendo; el error sale al agotar los intentos.</span>
+                    </p>
+                }
             </Aviso>
         }
         else if (ErrorConsulta is not null)
@@ -164,8 +186,30 @@
     private EstadoApi? Estado { get; set; }
     private PaginaLicitaciones? Pagina { get; set; }
 
+    /// <summary>
+    /// Hay una consulta en vuelo.
+    ///
+    /// No nace en true: arrancarla en true haría que la primera llamada a
+    /// <c>CargarAsync</c> saliera por su guarda <c>if (Cargando) return;</c> y la
+    /// consulta inicial no llegaría a lanzarse. El arranque lo cubre
+    /// <see cref="Ocupado"/>.
+    /// </summary>
     private bool Cargando { get; set; }
+
     private string? ErrorConsulta { get; set; }
+
+    /// <summary>
+    /// occupied la pantalla sin poder mostrar un resultado todavía: o hay una
+    /// consulta en vuelo, o aún no se sabe si la API está servible.
+    ///
+    /// Sin el segundo caso, el primer render (con <see cref="Estado"/> a null y
+    /// <see cref="Cargando"/> a false) no cumplía ninguna condición y pintaba un
+    /// hueco vacío durante el tiempo que tarda el servidor en insistir.
+    /// </summary>
+    private bool Ocupado => Cargando || (Estado is null && ErrorConsulta is null);
+
+    /// <summary>Segundos que lleva esperando la respuesta, para el contador.</summary>
+    private int SegundosEsperando { get; set; }
 
     /// <summary>
     /// Refresco automático mientras la pantalla está abierta.
@@ -176,6 +220,16 @@
     /// pantalla. Un temporizador sin desuscribir es exactamente ese bug.
     /// </summary>
     private System.Timers.Timer? temporizador;
+
+    /// <summary>
+    /// Cuenta los segundos de espera, a 1 por segundo.
+    ///
+    /// Hace falta porque Blazor solo repinta cuando termina un <c>await</c>: con
+    /// el servidor insistir un minuto, el "Consultando" se quedaba congelado
+    /// durante los 90 s y parecía una página colgada. El contador deja claro que
+    /// algo se está moviendo.
+    /// </summary>
+    private System.Timers.Timer? reloj;
 
     // Detalle abierto
     private Licitacion? abierta { get; set; }
@@ -195,8 +249,20 @@
         if (estado is null)
         {
             ErrorConsulta = error ?? "No se pudo conectar con el servidor.";
+
+            // Sin este repintado, el error no se vería nunca: el primer
+            // render ya salió con el panel de cargando, y como asignar
+            // campos no repinta, el aviso solo aparecería al terminar el
+            // siguiente await.
+            Cargando = false;
+            StateHasChanged();
             return;
         }
+
+        // Igual aquí: con el nombre de la empresa ya se puede pintar el
+        // encabezado, y el "Consultando" pasa a tener el contexto de a qué
+        // empresa se está mirando.
+        StateHasChanged();
 
         await CargarAsync();
         ProgramarRefresco();
@@ -212,10 +278,14 @@
     /// </summary>
     private async Task CargarAsync()
     {
+        // El guard salta en la recarga del temporizador mientras aún no ha
+        // terminado la anterior: el servidor no necesita dos consultas a la vez
+        // del mismo día, que además gastarían el cupo.
         if (Cargando) return;
 
         Cargando = true;
         ErrorConsulta = null;
+        IniciarReloj();
 
         try
         {
@@ -232,7 +302,37 @@
         finally
         {
             Cargando = false;
+            PararReloj();
         }
+    }
+
+    /// <summary>Arranca el contador de segundos de espera.</summary>
+    private void IniciarReloj()
+    {
+        SegundosEsperando = 0;
+
+        reloj?.Dispose();
+        reloj = new System.Timers.Timer(1000) { AutoReset = true };
+
+        reloj.Elapsed += (_, _) => InvokeAsync(() =>
+        {
+            SegundosEsperando++;
+
+            // Repintar a mano: al no haber ningún await en curso, Blazor solo
+            // repintaría cuando terminara la consulta, y el contador se
+            // quedaría en 0 durante los 90 s.
+            StateHasChanged();
+        });
+
+        reloj.Start();
+    }
+
+    /// <summary>Para el contador de segundos.</summary>
+    private void PararReloj()
+    {
+        reloj?.Stop();
+        reloj?.Dispose();
+        reloj = null;
     }
 
     /// <summary>
@@ -323,5 +423,9 @@
         // pantalla cerrada.
         temporizador?.Stop();
         temporizador?.Dispose();
+
+        // El reloj también: si no, seguiría pidiendo repintados sobre un
+        // componente ya descartado, que en Blazor lanza.
+        PararReloj();
     }
 }

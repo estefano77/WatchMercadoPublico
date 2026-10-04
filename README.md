@@ -213,6 +213,26 @@ Cada registro trae **solo cuatro campos**:
   "FechaCierre": "2026-09-21T15:30:00" }
 ```
 
+### ⚠️ `fecha` con los DOS campos rellenos, o no funciona
+
+La API acepta **un solo formato**: `DDMMAAAA`, con el día y el mes siempre a dos
+dígitos. Se comprobaron todos:
+
+| `fecha=` | Resultado |
+|---|---|
+| `04102026` | **HTTP 200** |
+| `4102026` | 500 `{"Codigo":10300,"Mensaje":"El formato del parametro fechas es incorrecto"}` |
+| `2026-10-04` | 500, mismo mensaje |
+| `04-10-2026` | 500, mismo mensaje |
+| `20261004` | 500 `{"Codigo":...,"Mensaje":"Mes inválido, el Mes debe ser entre 1 y 12."}` |
+
+En .NET el día con relleno es **`dd`**, no `d`. Con `dMMyyyy` el 4 de octubre se
+mandaba `4102026`, de siete dígitos, y la API respondía 500 siempre. Como `d` y
+`dd` solo se diferencian **en los días 1 a 9**, a partir del 10 el día ya tiene
+dos cifras y el fallo desaparece solo: por eso el bug se escondía detrás del
+calendario y solo se rompía en la primera quincena de cada mes. La fecha de
+prueba (28/09/2026) era día 28, así que nunca lo dejó ver.
+
 - El código se llama **`CodigoExterno`**, no `CodigoLicitacion`.
 - **`CodigoProveedor` solo filtra si mandas `fecha`.** Es la diferencia entre
   que esto sirva o no, y se comprobó de las dos formas:
@@ -287,19 +307,38 @@ ticket sin necesidad.
 
 ### ⚠️ La API falla, y hay que decirlo
 
-Medido: al empezar, las primeras peticiones de cada sesión fallan con `500` y
-`429` sea cual sea la espera. Con dos intentos se acumulaban los "No se pudo
-consultar ese día".
+**Corrección importante.** Este apartado decía antes, como si estuviera medido,
+que "las primeras peticiones de cada sesión fallan con `500` y `429` sea cual sea
+la espera". **No era verdad.** El `500` constante era **nuestro**: la fecha
+mandada sin el cero del día. Corregido eso, la consulta responde `200` a la
+primera, en ~450 ms.
 
-Ahora el servidor hace **6 intentos con esperas de 2, 4, 8, 16, 30 y 30
-segundos** —unos 90 s en el peor caso— antes de rendirse. Antes de este cambio
-la consulta la disparaba un clic del usuario; ahora es automática al cargar la
-página, así que **nadie está esperando**: insistir un minuto no le cuesta nada.
+Lo que **sí** es real es el `429`: se reproduce haciendo dos peticiones seguidas,
+incluso con `curl`, y con `User-Agent` de navegador. El ritmo importa de verdad.
+
+Los reintentos se quedan —son baratos y el `429` existe— pero el motivo real es
+el que acaba con el `Codigo 10300`. Insistir un minuto ante un error de formato
+es tiempo perdido: seis intentos idénticos siempre dan el mismo resultado.
+
+El servidor hace **6 intentos con esperas de 2, 4, 8, 16, 30 y 30 segundos**
+—unos 90 s en el peor caso— antes de rendirse. La consulta es automática al
+cargar la página, así que **nadie está esperando**: insistir un minuto no le
+cuesta nada.
 
 Y si aun así se agotan los intentos, se responde con un `502` y un mensaje que
 dice explícitamente que no se pudo comprobar. **Nunca** se devuelve una lista
 vacía por no haber preguntado: afirmar "no hay licitaciones" cuando no se sabe
 es peor que mostrar un error.
+
+**El `500` de esta API casi nunca significa que la API esté caída.** Suele ser
+quejarse de lo que le hemos mandado, y lo dice: `{"Codigo":10300,"Mensaje":"El
+formato del parametro fechas es incorrecto"}`. Como `ConstruirError` solo miraba
+`error.message`, `Descripcion` y `Message` — y la API escribe **`Mensaje`** en
+español — el mensaje se perdía, el log decía `(null)` y la pantalla culpaba a
+Mercado Público de estar "con problemas". Un error que sabe decir qué le molesta
+tiene que leerse; si no, se depura la mitad equivocada durante horas. Ahora se
+lee `Mensaje` y `Codigo`, y un `500` con explicación dice *"Mercado Público
+rechazó la consulta: …"* en vez de *"está con problemas"*.
 
 Tres mensajes distintos, según lo que pasó:
 
@@ -467,6 +506,46 @@ devuelve 500 a la vez, mira `Program.cs` antes que los endpoints.
 `ChildContent` y sin `Mensaje`, **no pintaba nada** y parecía que la condición
 que lo rodea estuviera mal. La guarda mira las dos cosas.
 
+### ⚠️ Asignar un campo NO repinta: el "Consultando" no salía en un minuto
+
+El más traicionero de todos, y eran **tres fallos encadenados** que se tapaban:
+
+1. El bloque de resultados estaba condicionado a `Estado is { Servible: true }`.
+   `Estado` es `null` hasta que responde `/api/estado`, y `null` **no** cumple esa
+   condición: durante el arranque no se cumplía ninguna y la pantalla pintaba la
+   cabecera, el título y a continuación un hueco vacío.
+2. En Blazor, `Estado = estado;` **no repinta**. El siguiente repintado llega
+   cuando termina el `await` siguiente, es decir, **90 s después**, ya con el
+   error. Por eso nunca se veía el panel de cargando, ni el de error.
+3. `Cargando` arrancaba en `false`, así que el primer render —con `Estado` a
+   `null`— no tenía nada que enseñar.
+
+Ahora hay tres piezas:
+
+- La condición del bloque es `Estado is not { Servible: false }`, para que `null`
+  caiga en el panel de cargando en vez de en ningún sitio.
+- `StateHasChanged()` explícito tras asignar `Estado`, en los dos caminos.
+- **`Ocupado`**, que **no** es lo mismo que `Cargando`:
+
+  ```csharp
+  private bool Ocupado => Cargando || (Estado is null && ErrorConsulta is null);
+  ```
+
+  Arranca en `Cargando`, o hay una consulta en vuelo, o aún no se sabe si la API
+  está servible. Los dos casos son indistinguibles para quien mira, y ninguno
+  puede enseñar un resultado.
+
+⚠️ **No "arreglar" esto poniendo `Cargando = true` al inicializar.** Parece el
+fix obvious y es un bug peor: la primera llamada a `CargarAsync` sale por su
+guarda `if (Cargando) return;` y **la consulta inicial no llega a lanzarse**. El
+panel se queda en "Consultando" para siempre. Son dos conceptos distintos y van
+en campos distintos.
+
+Además, como 90 s sin que se mueva nada parece una página colgada, hay un
+`temporizador` de 1 s (`reloj`) que lleva la cuenta y solo se muestra a partir
+del segundo 9 — en el caso rápido, que es el normal, sería ruido. Se para en el
+`finally` de `CargarAsync` y en `Dispose`.
+
 ### Los grupos de miles se cuentan desde la derecha
 
 `76123456` es `76.123.456`, no `761.234.56`. Agrupar de tres en tres desde la
@@ -552,9 +631,12 @@ Por **síntoma**, no por causa interna:
 | Síntoma | Qué mirar |
 |---|---|
 | Se queda en "Cargando" tras publicar | Falta el target `SuperponerClienteBlazor`, o el `index.html` publicado sin sustituir. |
+| Cabecera y título, y debajo un hueco vacío durante un minuto | Estado muerto en el render: el panel no se pintaba porque `Estado` aún era `null` y `Estado is { Servible: true }` no se cumplía. Ver [el aviso que no se veía](#%EF%B8%8F-asignar-un-campo-no-repinta-el-consultando-no-sal%C3%ADa-en-un-minuto). |
 | `404` en `/_framework/*.wasm` | Recursos de una build anterior, cacheados un año. `Ctrl+F5`. |
 | `Failed to find a valid digest … 47DEQpj8HBSa+` | Variante comprimida vacía: se colaron `.br`/`.gz`. Revisa las cinco propiedades de `Directory.Build.props`. |
 | La pantalla dice "No se pudo consultar" | Mercado Público está rechazando. Se intentó 6 veces durante un minuto y no respondió. **No** significa que no haya nada hoy. Se reintenta solo cada 5 min. |
+| Los 6 intentos salen con `500` y `Codigo 10300` | Casi siempre es **nuestro**, no de la API: se queja de lo que le mandamos. El mensaje concreto ahora llega a pantalla y al log, así que léelo antes de culpar a Mercado Público. |
+| Falla solo entre el día 1 y el 9 de cada mes | El día sin relleno a la izquierda en la fecha: `dMMyyyy` en vez de `ddMMyyyy`. Ver [`fecha` con los DOS campos rellenos](#%EF%B8%8F-fecha-con-los-dos-campos-rellenos-o-no-funciona). |
 | La lista sale vacía | Consulta real y de verdad no hay nada publicado hoy. La pantalla lo dice como "Nada nuevo hoy", no como error. |
 | `401` o `403` al consultar | El ticket caducó, se revocó o se agotó su cupo diario. |
 | Aviso naranja en pantalla | Estás en `ModoConsulta: "demo"`: son datos inventados. |
@@ -565,45 +647,77 @@ Por **síntoma**, no por causa interna:
 
 ## Marcas y propiedad intelectual
 
-El símbolo (la *M* en zigzag sobre el degradado azul → violeta → rojo) y el
-nombre **WatchMercadoPublico** son una **marca propia**, dibujada para este
-proyecto.
+Hay **dos marcas** en pantalla, y conviene no confundirlas:
 
-**No reproducen ni combinan los logotipos de Mercado Público / ChileCompra ni los
-de SMC.** Ambas son marcas registradas de terceros, y fusionar su arte en una
-marca nueva es infracción de marca, no solo de copyright: no es algo que se
-resuelva pidiendo permiso a las partes.
+| Marca | De quién es | Dónde sale |
+|---|---|---|
+| La *M* en zigzag + `WatchMercadoPublico` | **Propia**, dibujada para este proyecto | Símbolo y nombre de la herramienta |
+| El rótulo `SMC` | **De SMC**, la empresa para la que es la herramienta | Logotipo en la cabecera, a la derecha |
 
-Lo que sí se mezcla es la **identidad visual** —el azul institucional de la
-plataforma pública y el rojo de la empresa—, y los nombres *"Mercado Público"* y
-*"SMC"* aparecen siempre como **texto plano**, que es uso nominativo legítimo al
-describir con qué se integra la herramienta.
+El logotipo de SMC se muestra porque la herramienta es **interna de SMC**: es una
+marca que se usa con permiso y para identificar al propietario, no una marca
+registrada de la aplicación. Por eso va **en el otro extremo** de la cabecera, con la
+marca propia a la izquierda y el logotipo a la derecha, sin mezclarlos en un solo
+rótulo. No se pone una línea divisoria entre ellos: con la barra a 1.152 px de
+ancho quedan a cientos de píxeles el uno del otro y la línea quedaría flotando
+en mitad del hueco.
+
+Lo que **no** se hace, en ningún caso: reproducir, combinar ni fusionar el
+logotipo de Mercado Público / ChileCompra con la marca propia. Es una marca
+registrada de un tercero, y eso es infracción de marca, no solo de copyright.
+
+### El archivo del logo, y por qué se pinta con máscara
+
+`wwwroot/logo-smc.png` es la derivada de 300×72 del logo oficial que usa
+`smc.cl` en su propia cabecera (`smc_b-300x72.png`, 2,8 KB). Se copia al
+proyecto en vez de enlazarla para que la aplicación no dependa de que `smc.cl`
+esté accesible: puede desplegarse en una red interna sin salida a internet.
+
+Se prefirió la derivada y no el original de 2.297 px por dos razones medibles:
+pesa 2,8 KB en vez de 16,8 KB, y tiene **128 niveles de alfa** en vez de 17, así
+que el suavizado se ve mejor al tamaño al que se muestra.
+
+Se pinta con `mask-image` y no como `<img>` porque el PNG es **blanco puro con
+alfa variable**: el RGB es `#FFFFFF` en todos los píxeles visibles y solo cambia
+la opacidad. Con el alfa como máscara, un solo fichero da los dos colores que
+hacen falta —el azul de marca en claro y el blanco en oscuro— sin degradar la
+imagen:
+
+```css
+.logo-smc          { background-color: var(--app-marca-a); }  /* #1d4ed8 */
+.dark .logo-smc    { background-color: #fff; }
+```
+
+**El fallo silencioso a vigilar:** si la máscara no se aplicara, el elemento
+saldría como un rectángulo de color sólido. Por eso el `<span>` lleva
+`aria-label="SMC"`: si el logo se pierde, el nombre sigue leyiéndose.
+
+Y la ruta del PNG tiene que ser **absoluta** (``/logo-smc.png``). El CSS se sirve
+en ``/css/app.css``, y una ruta relativa se resuelve respecto a él, no al
+documento: con ``url("logo-smc.png")`` pedía ``/css/logo-smc.png``, daba 404 y el
+elemento se quedaba sin máscara. Pasó de verdad al montarlo, y por eso la
+comprobación de cabecera mira el ``maskImage`` ya resuelto.
 
 ### Dónde aparece cada nombre
 
-**Ni SMC ni ChileCompra aparecen en ninguna parte de la aplicación.** Verificado
-sobre la publicación: `smcEnPagina: false` y `chileCompraEnPagina: false`, también
-dentro del modal de detalle.
-
 | Dónde | Qué sale | Por qué |
 |---|---|---|
-| Cabecera | Solo el símbolo y `WatchMercadoPublico` | Identidad propia |
+| Cabecera, izquierda | Símbolo propio + `WatchMercadoPublico` | Identidad de la herramienta |
+| Cabecera, derecha | Logotipo de **SMC** | Identifica al propietario: herramienta interna suya |
 | Encabezado de la página | "Novedades de hoy en **Mercado Público**" | Uso nominativo: describe la plataforma de la que salen los datos |
 | Pie | "© WatchMercadoPublico" | Solo la autoría del producto |
 | Pie | "Documentación de la API" → `api.mercadopublico.cl` | Enlace externo, con `rel="noopener noreferrer"` |
 | Aviso de demo | "No se está llamando a **Mercado Público**" | Uso nominativo |
 | Ficha de una licitación | Nombre del organismo y su RUT | Son los datos de la plataforma, no un atributo nuestro |
 
-El pie tuvo antes dos cosas que se han ido por sobriedad: *"Herramienta interna
-para SMC"* y la nota *"WatchMercadoPublico no es una marca de ChileCompra ni de
-SMC"*. El primero atribuía la herramienta a SMC; el segundo despejaba dudas
-marcarias. Ninguno hace falta ya: el símbolo y el nombre son propios, y no se
-reproduce ni se combina ningún logotipo de terceros.
+**ChileCompra no aparece por ninguna parte**, y de SMC solo el logotipo.
+"WatchMercadoPublico" y el logo de SMC conviven en la cabecera sin mezclarse: están
+en extremos opuestos de la barra, y además el logo es blanco plano sobre el fondo
+mientras que el nombre propio va en degradado.
 
-Lo que **queda** es "Mercado Público" en el encabezado, en el aviso de demo y en
-los enlaces a `mercadopublico.cl`. Es uso nominativo, y conviene que se quede:
-sin él, un aviso de error de la plataforma se confundiría con un fallo propio de
-la herramienta.
+Lo que **conviene que se quede** es "Mercado Público" en el encabezado, en el
+aviso de demo y en los enlaces a `mercadopublico.cl`: sin eso, un aviso de error
+de la plataforma se confundiría con un fallo propio de la herramienta.
 
 Iconos de [Lucide](https://lucide.dev) (licencia ISC). Tipografía
 *Plus Jakarta Sans* (SIL Open Font License).

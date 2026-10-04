@@ -1,0 +1,29 @@
+@*
+    Logotipo de SMC en la cabecera.
+
+    Se pinta con una MÁSCARA CSS, no como <img>: el PNG es blanco puro con alfa
+    variable, así que el alfa dibuja la forma y el background-color la pinta.
+    Con un solo fichero sale azul de marca en claro y blanco en oscuro.
+
+    El color NO se decide aquí sino en .logo-smc (tailwind.css), para que el
+    cambio de tema no dependa de Blazor: la clase .dark la pone el script en
+    línea de index.html antes de pintar, y no hay parpadeo.
+
+    Va como <span> y no como enlace. Enlazarlo a smc.cl añadiría una salida a
+    internet desde una herramienta interna, que puede desplegarse en una red sin
+    salida. Si algún día hace falta, se envuelve en <a> y ya está.
+*@
+
+<span class="@Clase" role="img" aria-label="SMC"></span>
+
+@code {
+    /// <summary>Alto del logo. El ancho sale del aspect-ratio del PNG.</summary>
+    [Parameter] public string Alto { get; set; } = "h-5";
+
+    [Parameter] public string? Class { get; set; }
+
+    private string Clase =>
+        string.IsNullOrWhiteSpace(Class)
+            ? $"logo-smc {Alto} shrink-0"
+            : $"logo-smc {Alto} shrink-0 {Class}";
+}
