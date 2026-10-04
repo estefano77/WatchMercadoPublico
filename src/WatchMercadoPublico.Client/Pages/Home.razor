@@ -484,8 +484,23 @@
     /// cambia NADA visible hasta que se pulse "Actualizar". Sin este aviso el
     /// selector parece roto. Con él se ve qué está pendiente de traer.
     /// </summary>
+    /// <summary>
+    /// ¿El desplegable apunta a algo distinto de lo que está en pantalla?
+    ///
+    /// Hay que comparar AÑO, MES y semana, no solo el número de semana. El
+    /// número se repite en todos los periodos: la semana 1 de octubre de 2026 y
+    /// la semana 1 de febrero de 2026 se llaman igual, así que comparando solo
+    /// el número, cambiar de mes o de año se creería que no había cambiado nada
+    /// y el aviso no salía. Los datos en pantalla seguían siendo los de octubre
+    /// mientras el desplegable decía febrero, sin ninguna señal de ello.
+    ///
+    /// Es el mismo error que tuvo <see cref="EsSemanaActual"/> cuando se
+    /// escribió comparando solo la semana. Esa está bien porque compara las tres
+    /// cosas; por eso las dos comprobaciones se dejan juntas y a la vista.
+    /// </summary>
     private bool HaySemanaPendiente =>
-        Semana is not null && NumeroSemana != Semana.Semana;
+        Semana is not null
+        && (Anio != Semana.Anio || Mes != Semana.Mes || NumeroSemana != Semana.Semana);
 
     /// <summary>
     /// El botón de la barra late cuando hay algo pendiente de traer.
