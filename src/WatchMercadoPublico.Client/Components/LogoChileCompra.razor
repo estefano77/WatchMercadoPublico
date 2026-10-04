@@ -1,0 +1,59 @@
+@*
+    Logotipo de ChileCompra en el pie de página.
+
+    POR QUÉ SON DOS FICHEROS
+
+    El que traía la aplicación, LogoChc.png, es solo la versión BLANCA del logo:
+    "Dirección ChileCompra" en blanco sobre fondo transparente. Es la versión
+    para fondos oscuros, y sobre el fondo claro de la aplicación el texto blanco
+    se perdía.
+
+    La primera solución fue ponerle un recuadro oscuro debajo. Funcionaba, pero
+    quedaba feo: el recuadro se veía como una caja suelta en el pie. Además el
+    PNG traía un halo difuso —1.963 píxeles con alfa entre 1 y 80— que sobre
+    ese recuadro lo enturbía, y el logo salía con un tono oliva que no está en
+    el original.
+
+    Así que se limpió la imagen y se sacaron las dos variantes. La de tinta
+    oscura es para el tema claro, la blanca para el tema oscuro, y ninguna
+    necesita recuadro. La limpieza quito el halo y normalizó el blanco del
+    texto, que en el original era un gris claro (rgb 224,224,224) y no blanco.
+
+    La bandera azul y roja se respeta: tiene saturación alta, así que el
+    tratamiento de "esto es blanco y lo pinto" no la toca. Si la tocara, el
+    logo perdería su color.
+
+    Va como <span> con background-image y no como máscara, porque una máscara de
+    un solo color dejaría la bandera en monocroma. Y no como <img>, porque
+    entonces habría dos imágenes y habría que decidir en Blazor cuál mostrar:
+    el intercambio por tema lo hace la clase .dark del CSS, que el script en
+    línea de index.html pone antes de pintar, sin parpadeo.
+
+    NO se usa prefers-color-scheme: el tema también se cambia a mano con el
+    botón, y una media query seguiría al sistema en vez de al botón.
+
+    Las dos variantes llevan el mismo margen, así que al cambiar de tema el logo
+    no se mueve.
+
+    La herramienta que generó los dos ficheros estaba fuera del repositorio, en
+    una carpeta temporal: es de una sola vez y no forma parte del proyecto.
+*@
+
+<span class="@Clase" role="img" aria-label="Dirección ChileCompra"></span>
+
+@code {
+    /// <summary>
+    /// Alto del logo. El ancho sale del aspect-ratio del CSS.
+    ///
+    /// El alto incluye el margen que traen las dos imágenes, así que el logo en
+    /// sí queda algo más pequeño que este número.
+    /// </summary>
+    [Parameter] public string Alto { get; set; } = "h-12";
+
+    [Parameter] public string? Class { get; set; }
+
+    private string Clase =>
+        string.IsNullOrWhiteSpace(Class)
+            ? $"logo-chilecompra {Alto} shrink-0"
+            : $"logo-chilecompra {Alto} shrink-0 {Class}";
+}

@@ -324,6 +324,38 @@ select option:checked {
     box-shadow: none;
 }
 
+/* ---------------------------------------------------------------------------
+   Logo de ChileCompra para el pie.
+
+   Son dos ficheros, no uno con máscara como .logo-smc: este logo tiene la barra
+   azul y roja de la bandera, y una máscara de un solo color la dejaría en
+   monocroma. El original era solo la versión blanca, que sobre el fondo claro
+   de la aplicación se volvía invisible, y por eso llevaba un recuaddo oscuro
+   debajo que lo embarría.
+
+   Con las dos variantes no hace falta el recuaddo: el logo va sobre el fondo de
+   la página y se lee igual en los dos temas.
+
+   El intercambio lo hace la clase .dark, que el script en línea de index.html
+   pone antes de pintar. NO se usa prefers-color-scheme a propósito: el tema
+   también se cambia a mano con el botón, y una media query lo seguiría al
+   sistema y no al botón, con lo que el logo se quedaría en la variante
+   equivocada.
+
+   Los dos ficheros llevan el mismo margen, así que al cambiar de tema el logo
+   no se mueve un pixel. */
+.logo-chilecompra {
+  aspect-ratio: 228 / 100;
+  background-image: url("/LogoChc-oscuro.png");
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.dark .logo-chilecompra {
+  background-image: url("/LogoChc-blanco.png");
+}
+
 @media (prefers-reduced-motion: reduce) {
     .esqueleto,
     .entrada-suave,

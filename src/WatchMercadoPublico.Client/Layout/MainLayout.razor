@@ -36,17 +36,33 @@
     </main>
 
     <footer class="pb-safe relative border-t border-line pt-8">
-        @* Pie sobrio: solo la autoría y el enlace a la documentación. Aquí no aparece
-       ningún nombre de tercero: ni SMC ni ChileCompra. "WatchMercadoPublico" es
-       el nombre del producto y "Mercado Público" aparece solo en el encabezado
-       de la página, como uso nominativo para decir de dónde salen los datos. *@
-        <div class="mx-auto flex max-w-6xl flex-col items-center gap-2 px-4 text-center text-xs text-muted">
+        @* Pie sobrio: la autoría y el logo de ChileCompra.
+
+           El logo se incluye porque los datos que se muestran SON de ChileCompra:
+           poner de dónde salen es lo mínimo que corresponde cuando se muestra una
+           información que viene de otra entidad. Va en su propio componente
+           porque son dos variantes, una por tema; ver LogoChileCompra.razor.
+
+           El pie lleva un enlace, y es a propósito: el crédito de quién hizo la
+           herramienta. Se quitó antes el de la documentación de la API, que en
+           una herramienta interna de consulta diaria no llevaba a ninguna parte
+           útil y convertía el pie en un menú. La diferencia entre uno y otro es
+           que este no es navegación: es atribución, y una entrega sin saber
+           quién la hizo no está terminada. Aunque la herramienta se despliegue
+           en una red sin salida a internet, este enlace se queda.
+
+           Ojo al añadir más nombres de terceros aquí: el pie se llena enseguida
+           de rótulos que parecen piezas de la aplicación cuando no lo son. *@
+        <div class="mx-auto flex max-w-6xl flex-col items-center gap-4 px-4 text-center text-xs text-muted">
             <p>© @DateTime.Now.Year WatchMercadoPublico</p>
-            <a href="https://api.mercadopublico.cl/" target="_blank" rel="noopener noreferrer"
-               class="inline-flex items-center gap-1.5 font-semibold transition hover:text-marca-b">
-                <Icon Name="externo" Size="13" />
-                Documentación de la API
-            </a>
+
+            <p>
+                Desarrollado por
+                <a href="https://smc.cl/" target="_blank" rel="noopener noreferrer"
+                   class="font-semibold text-ink-soft transition hover:text-marca-b">SMC Spa</a>
+            </p>
+
+            <LogoChileCompra />
         </div>
     </footer>
 </div>
