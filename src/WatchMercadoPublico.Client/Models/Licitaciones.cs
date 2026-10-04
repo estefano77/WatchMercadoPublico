@@ -154,13 +154,13 @@ public sealed class ItemAdjudicado
 }
 
 /// <summary>
-/// Lo que hay publicado HOY para la empresa configurada.
+/// Una semana de licitaciones de la empresa configurada.
 ///
-/// No hay selector de día ni paginación: la pantalla solo mira el día actual, y
-/// en un día una empresa publica pocas licitaciones. Sin "días pendientes",
-/// porque un día es una petición y o sale o no sale.
+/// Sin paginación: una semana son cinco días hábiles y una empresa publica pocas
+/// cosas en ellos. Y sin "días pendientes" porque un día se consulta entero o no
+/// se consulta: lo que no se pudo comprobar viene en DiasSinRespuesta, que es
+/// distinto de "no había nada".
 /// </summary>
-/// Una semana de licitaciones. Sustituye a la página de un solo día.
 public sealed class SemanaLicitaciones
 {
     public List<Licitacion> Items { get; set; } = [];

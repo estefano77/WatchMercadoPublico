@@ -9,13 +9,14 @@ namespace WatchMercadoPublico.Server.Endpoints;
 /// <summary>
 /// Endpoints que consume la aplicación Blazor.
 ///
-/// La pantalla es una sola: las licitaciones de HOY de una empresa fija. No hay
-/// selector de día, ni de mes, ni filtro de palabras, ni búsqueda por RUT. Todo
-/// eso se quitó porque cada opción era una forma de equivocarse y ninguna
-/// ayudaba a responder la única pregunta que se hace: ¿ha salido algo hoy?
+/// La unidad es UNA SEMANA de una empresa fija: la pantalla elige año, mes y
+/// semana, y con los tres juntos se consulta una semana, no un año entero. Sigo
+/// sin filtro de palabras ni búsqueda por RUT, que se quitaron porque eran una
+/// forma de equivocarse sin ayudar a responder la pregunta.
 ///
 /// Aquí se hace el trabajo que la API no hace: insistir hasta que responda,
-/// ordenar lo que llega, y no inventar una lista vacía cuando falla.
+/// ordenar lo que llega, saltar los fines de semana y los días que todavía no
+/// han llegado, y no inventar una lista vacía cuando falla.
 /// </summary>
 public static class LicitacionesEndpoints
 {

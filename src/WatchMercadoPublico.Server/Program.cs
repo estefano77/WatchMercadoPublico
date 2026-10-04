@@ -83,7 +83,7 @@ else if (!opciones.TieneTicket)
 {
     app.Logger.LogWarning(
         "No hay ticket de Mercado Público. La empresa se puede mostrar, " +
-        "pero las consultas al día de hoy fallarán.");
+        "pero las consultas fallarán.");
 }
 else if (!opciones.TieneCodigoProveedor)
 {
