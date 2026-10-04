@@ -98,46 +98,25 @@
                a propósito— y el selector parece no funcionar.
 
                Va como aviso y no como una línea de texto porque aquí lo que hay
-               que conseguir es que se pulse un botón, y una frase gris se lee
-               como informative y se pasa. El botón además late, para que la
-               mirada termine en la acción y no en el texto. *@
+               que conseguir es que se pulse el botón de la barra, que por eso
+               late. El aviso solo explica; el botón de arriba es la acción. *@
             @if (HaySemanaPendiente)
             {
-                <Aviso Tipo="aviso" Titulo="@TituloSemanaPendiente" Cerrable="false">
-                    <p class="mt-1 text-sm leading-relaxed text-ink-soft">
-                        En el selector has elegido la
-                        <strong class="font-semibold text-ink">semana @NumeroSemana</strong>,
-                        pero lo que sigue en pantalla es de la
-                        <strong class="font-semibold text-ink">semana @SemanaMostrada</strong>.
-                        Pulsa <strong class="font-semibold text-ink">Actualizar</strong>
-                        para traerla.
-                    </p>
-
-                    @* El mismo botón, aquí dentro. En pantallas anchas es el de
-                       la barra de arriba; repetirlo evita tener que subir la
-                       mirada a buscarlo. *@
-                    <div class="mt-3 flex flex-wrap items-center gap-2">
-                        <button type="button"
-                                class="boton-actualizar"
-                                @onclick="ActualizarAsync"
-                                disabled="@Cargando">
-                            @if (Cargando)
-                            {
-                                <span class="icono-girando"><Icon Name="recargar" Size="17" /></span>
-                                <span>Consultando…</span>
-                            }
-                            else
-                            {
-                                <Icon Name="recargar" Size="17" />
-                                <span>Traer la semana @NumeroSemana</span>
-                            }
-                        </button>
-                        <span class="text-xs text-muted">
-                            No gasta más consultas: los días que ya se miraron
-                            están guardados.
-                        </span>
-                    </div>
-                </Aviso>
+                @* El margen va en un envoltorio y no en el Aviso: el componente
+                   no admite clases de fuera, y pegado a la fila de los
+                   desplegables parecía parte de ella en vez de un aviso. *@
+                <div class="mt-5">
+                    <Aviso Tipo="aviso" Titulo="@TituloSemanaPendiente" Cerrable="false">
+                        <p class="mt-1 text-sm leading-relaxed text-ink-soft">
+                            En el selector has elegido la
+                            <strong class="font-semibold text-ink">semana @NumeroSemana</strong>,
+                            pero lo que sigue en pantalla es de la
+                            <strong class="font-semibold text-ink">semana @SemanaMostrada</strong>.
+                            Pulsa <strong class="font-semibold text-ink">Actualizar</strong>
+                            para traerla.
+                        </p>
+                    </Aviso>
+                </div>
             }
 
             @* Aquí ya no va el periodo. Estaba debajo de los filtros y se leía como si
@@ -263,7 +242,7 @@
                 <span class="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-field text-muted">
                     <Icon Name="calendario" Size="26" />
                 </span>
-                <p class="mt-4 text-base font-bold text-ink">Nada en esa semana</p>
+                <p class="mt-4 text-base font-bold text-ink">Nada en la semana @SemanaMostrada</p>
                 <p class="mx-auto mt-1.5 max-w-lg text-sm leading-relaxed text-muted">
                     Se consultaron @TextoDiasConsultados y no hay ninguna licitación
                     para este período.
