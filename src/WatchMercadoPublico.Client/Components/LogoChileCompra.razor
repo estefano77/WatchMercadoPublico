@@ -16,7 +16,7 @@
 
     Así que se limpió la imagen y se sacaron las dos variantes. La de tinta
     oscura es para el tema claro, la blanca para el tema oscuro, y ninguna
-    necesita recuadro. La limpieza quito el halo y normalizó el blanco del
+    necesita recuadro. La limpieza quitó el halo y normalizó el blanco del
     texto, que en el original era un gris claro (rgb 224,224,224) y no blanco.
 
     La bandera azul y roja se respeta: tiene saturación alta, así que el
@@ -35,8 +35,17 @@
     Las dos variantes llevan el mismo margen, así que al cambiar de tema el logo
     no se mueve.
 
-    La herramienta que generó los dos ficheros estaba fuera del repositorio, en
-    una carpeta temporal: es de una sola vez y no forma parte del proyecto.
+    El logo tal como venía no se conserva en el repositorio: era solo la versión
+    blanca, y con el pie reducido a la autoría no había sitio para un recuadro
+    oscuro debajo, que es lo que hacía falta para que el texto blanco se viera
+    en el tema claro. Las dos variantes de aquí son la versión buena.
+
+    ATENCIÓN: no se puede regenerar. La herramienta que hizo las dos variantes
+    estaba fuera del repositorio, en una carpeta temporal, y el original ya no
+    está. Si alguna vez hay que volver a hacerlas, el tratamiento está descrito
+    en el mensaje del commit que las trajo -qué píxeles son halo y cuáles son
+    tinta- pero no hay script que lo ejecute. Si eso llega a hacer falta, hay que
+    escribirlo de nuevo.
 *@
 
 <span class="@Clase" role="img" aria-label="Dirección ChileCompra"></span>
