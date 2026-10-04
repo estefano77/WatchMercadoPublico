@@ -78,6 +78,12 @@ public static class LicitacionesEndpoints
         var config = opciones.Value;
         var hoy = DateOnly.FromDateTime(DateTime.Today);
 
+        // El periodo pedido, ya saneado. Un año o un mes que no existen se
+        // sustituyen por el actual en vez de propagar el error: un dato raro en
+        // una ruta no puede ser razón de que la pantalla se quede en blanco.
+        var anioPedido = anio is >= 1 and <= 9999 ? anio.Value : hoy.Year;
+        var mesPedido = mes is >= 1 and <= 12 ? mes.Value : hoy.Month;
+
         return Results.Ok(new
         {
             // En modo demo no hace falta ticket: los datos son inventados.
@@ -107,16 +113,14 @@ public static class LicitacionesEndpoints
             // un cambio de formato en un sitio y no en el otro mostraría
             // semanas que no existen.
             AniosDisponibles = SemanasDelMes.Anios(hoy.Year),
-            MesesDisponibles = CalendarioDelMes.TodosLosMeses(),
+            MesesDisponibles = MesesVisibles(hoy, anioPedido),
 
             // Los rangos de las semanas del mes pedido. Van aquí, y no en el
             // cliente, para que el cálculo de "de lunes a domingo" exista en UN
             // solo sitio. El cliente los pinta; no los calcula. Antes estaba
             // copiado en los dos lados, que es una forma segura de que un día
             // se desincronicen sin que nada avise.
-            Semanas = DescribirSemanas(
-                anio is >= 1 and <= 9999 ? anio.Value : hoy.Year,
-                mes is >= 1 and <= 12 ? mes.Value : hoy.Month),
+            Semanas = DescribirSemanas(anioPedido, mesPedido, hoy),
 
             MinutosEntreRefrescos = config.MinutosRefresco,
 
@@ -132,32 +136,71 @@ public static class LicitacionesEndpoints
     /// de que no haya dos copias de la regla "de lunes a domingo" que acaben
     /// discrepando sin que nada se note.
     /// </summary>
-    private static List<object> DescribirSemanas(int anio, int mes)
+    /// <summary>
+    /// Una semana del mes, tal como se la pasa al cliente para el desplegable.
+    ///
+    /// Es un tipo con nombre y no un <c>object</c> anónimo a propósito: sin él
+    /// esta función no se puede probar, porque un tipo anónimo no se puede
+    /// nombrar desde el proyecto de pruebas. Y lo que hay que probar aquí es
+    /// justamente el CORTE de las semanas futuras.
+    /// </summary>
+    internal sealed record SemanaDescrita(
+        int Numero,
+        string Desde,
+        string Hasta,
+        string Texto,
+        int DiasHabiles);
+
+    internal static List<SemanaDescrita> DescribirSemanas(int anio, int mes, DateOnly hoy)
     {
-        var resultado = new List<object>();
+        var resultado = new List<SemanaDescrita>();
         var total = SemanasDelMes.Cuantas(anio, mes);
 
         for (var s = 1; s <= total; s++)
         {
             var (desde, hasta) = SemanasDelMes.Rango(anio, mes, s);
 
-            resultado.Add(new
-            {
-                Numero = s,
-                Desde = $"{desde:yyyy-MM-dd}",
-                Hasta = $"{hasta:yyyy-MM-dd}",
+            // Una semana que todavía NO HA EMPEZADO no se ofrece. Elegirla
+            // gastaba una llamada al servidor para obtener semanas enteras
+            // marcadas como pendientes, y devolvía una pantalla vacía que
+            // parecía un fallo. La semana en curso sí se ofrece, y se muestra
+            // con los días que faltan sin consultar.
+            if (desde > hoy) break;
+
+            resultado.Add(new SemanaDescrita(
+                s,
+                $"{desde:yyyy-MM-dd}",
+                $"{hasta:yyyy-MM-dd}",
 
                 // El texto YA escrito de cara al desplegable: "23 al 28 de
                 // febrero". Viaja desde aquí para que el cliente no tenga que
                 // nombrar meses: el cliente ya tuvo un array de días ordenado
                 // al revés y por eso salió un día corrido en todas las fechas.
-                Texto = TextosDeFecha.Rango(desde, hasta),
+                TextosDeFecha.Rango(desde, hasta),
 
-                DiasHabiles = SemanasDelMes.DiasHabiles(anio, mes, s).Count,
-            });
+                SemanasDelMes.DiasHabiles(anio, mes, s).Count));
         }
 
         return resultado;
+    }
+
+    /// <summary>
+    /// Los meses que se pueden elegir de un año, sin llegar al futuro.
+    ///
+    /// Un año pasado ofrece los doce. El año en curso, solo hasta el mes de
+    /// hoy: en octubre no tiene sentido noviembre ni diciembre, y proponerlos
+    /// llevaba a pantallas vacías.
+    ///
+    /// Un año futuro no ofrece ninguno, que es el caso que hace que la
+    /// petición sea absurda y no una simple molestia.
+    /// </summary>
+    internal static List<string> MesesVisibles(DateOnly hoy, int anio)
+    {
+        if (anio < hoy.Year) return [.. CalendarioDelMes.TodosLosMeses()];
+
+        if (anio > hoy.Year) return [];
+
+        return CalendarioDelMes.TodosLosMeses().Take(hoy.Month).ToList();
     }
 
     // =====================================================================

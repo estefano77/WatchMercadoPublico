@@ -50,10 +50,14 @@
                         Mes
                     </label>
                     <select id="f-mes" class="campo" value="@Mes" @onchange="CambiarMes">
-                        @for (var m = 1; m <= 12; m++)
+                        @* Los meses llegan YA FILTRADOS por el servidor: en el
+                           año en curso solo hasta el mes de hoy. Aquí no se arma
+                           la lista, que es lo que hacía que se pudieran elegir
+                           meses que aún no han ocurrido. *@
+                        @for (var m = 0; m < (Estado?.MesesDisponibles.Count ?? 0); m++)
                         {
-                            var numero = m;
-                            var nombre = NombreDeMes(numero);
+                            var numero = m + 1;
+                            var nombre = Estado!.MesesDisponibles[m];
                             <option value="@numero" selected="@(numero == Mes)">@nombre</option>
                         }
                     </select>
@@ -416,33 +420,6 @@
     private bool Ocupado => Cargando || (Estado is null && ErrorConsulta is null);
 
     /// <summary>
-    /// Nombre del mes, para el desplegable y los rótulos.
-    ///
-    /// Acota a 1..12 porque <c>DateTimeFormat.GetMonthName(0)</c> lanza
-    /// ArgumentOutOfRangeException, y que un rótulo tumbe la pantalla es peor que
-    /// un rótulo feo.
-    /// </summary>
-    private string NombreDeMes(int m)
-    {
-        m = Math.Clamp(m, 1, 12);
-
-        return Estado?.MesesDisponibles is { Count: >= 12 } nombres
-            ? nombres[m - 1]
-            : CultureInfo.CurrentCulture.DateTimeFormat.GetMonthName(m);
-    }
-
-    /// <summary>
-    /// <summary>
-    /// Rango de la semana tal como se muestra en el desplegable: "5 al 11 de
-    /// Octubre". Incluye sábado y domingo porque la semana va de lunes a
-    /// domingo; solo el PROCESAMIENTO se queda con los días hábiles.
-    ///
-    /// NO hay aquí ningún cálculo de fechas: el servidor manda el rango ya
-    /// hecho. Antes esta función repetía la regla de lunes a domingo en el
-    /// cliente, y dos copias de una regla se desincronizan solas en cuanto una
-    /// se toca y la otra no.
-    /// </summary>
-    private string TextoDe(SemanaInfo semana) => semana.Texto;
 
     /// <summary>
     /// ¿Lo que se está mirando es la semana en que estamos?
