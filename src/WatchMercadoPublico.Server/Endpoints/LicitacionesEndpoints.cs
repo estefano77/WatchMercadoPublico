@@ -290,14 +290,14 @@ public static class LicitacionesEndpoints
         // El rango se muestra completo, fines de semana incluidos: el lunes y el
         // domingo de la semana son los dos extremos de lo que se está mirando,
         // aunque solo se consulten los días hábiles de en medio.
-        var primero = SemanasDelMes.PrimerDia(anio, mes, semana);
+        var (desde, hasta) = SemanasDelMes.Rango(anio, mes, semana);
 
         return new RespuestaSemana(
             anio,
             mes,
             semana,
-            $"{primero:yyyy-MM-dd}",
-            $"{primero.AddDays(6):yyyy-MM-dd}",
+            $"{desde:yyyy-MM-dd}",
+            $"{hasta:yyyy-MM-dd}",
             diasConsultados + diasPendientes,
             diasConsultados,
             sinRespuesta.Count,

@@ -432,6 +432,46 @@ La API devuelve **un día por consulta**: no hay forma de preguntar "el mes de
 marzo" en una llamada. Encadenando los tres filtros, el rango máximo son cinco
 peticiones.
 
+### Las semanas van de lunes a domingo, recortadas al mes
+
+El desplegable lo dice: **"Semana 2 · 5 al 11 de Octubre"**. El 5 de octubre de
+2026 es lunes y el 11 es el domingo de esa semana.
+
+No son las semanas ISO, que se numeran por el año y pueden empezar en diciembre
+del anterior. Aquí van numeradas **dentro del mes**, y **recortadas**: ninguna
+se sale al mes siguiente, porque dentro de un desplegable de octubre un "26 de
+octubre al 1 de noviembre" confunde más de lo que ayuda.
+
+Para octubre de 2026, que empieza en jueves:
+
+| Semana | Rango | Días hábiles que se consultan |
+|---|---|---|
+| 1 | del 1 al 4 | 2 (jueves y viernes) |
+| 2 | del 5 al 11 | 5 |
+| 3 | del 12 al 18 | 5 |
+| 4 | del 19 al 25 | 5 |
+| 5 | del 26 al 31 | 5 |
+
+El rango **incluye** sábado y domingo porque la semana va de lunes a domingo.
+Solo el **procesamiento** se queda con los días hábiles: en Chile no se publica
+nada en fin de semana —comprobado: el 3 y el 4 de octubre de 2026 dieron 0—,
+así que consultarlos duplicaría las peticiones sin aportar nada.
+
+⚠️ El cálculo está en `SemanasDelMes` (servidor) y **copiado** en
+`Home.razor` (cliente), porque rotular cuatro opciones no justifica una llamada
+al servidor. Lo que ata las dos copias es `SemanasDelMesTests`, que fija todos
+los rangos de octubre de 2026. **Si se cambia la regla, hay que cambiar las dos
+cosas.**
+
+Dos fallos que teve el cálculo, y que los tests ahora fijan:
+
+- En .NET, `DayOfWeek` empieza por **DOMINGO = 0**, no por lunes. Calcular la
+  primera semana como `7 - diaDeSemana` daba un número que parecía correcto y
+  desplazaba todas las semanas un día: el 5 caía en la semana 1.
+- La primera semana no se recortaba al **primer domingo** del mes, así que un mes
+  que empezaba en jueves decía "del 1 al 7" y la semana 2 arrancaba el 8, que es
+  lunes pero no el lunes del calendario.
+
 ### Días futuros: no se consultan, y no son un fallo
 
 Una semana que aún no ha terminado tiene días que no han llegado. La API no

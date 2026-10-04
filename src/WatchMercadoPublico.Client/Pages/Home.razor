@@ -63,7 +63,7 @@
                     <select id="f-semana" class="campo" value="@NumeroSemana" @onchange="CambiarSemana">
                         @foreach (var s in SemanasDisponibles)
                         {
-                            <option value="@s" selected="@(s == NumeroSemana)">Semana @s</option>
+                            <option value="@s" selected="@(s == NumeroSemana)">Semana @s - @RangoDeSemana(s)</option>
                         }
                     </select>
                 </div>
@@ -408,7 +408,78 @@
         }
     }
 
-    private static int SemanaDe(DateOnly d) => ((d.Day - 1) / 7) + 1;
+    /// <summary>
+    /// Rango de la semana tal como se muestra en el desplegable: "5 al 11 de
+    /// Octubre". Incluye sábado y domingo, porque una semana va de lunes a
+    /// domingo; solo el PROCESO se queda con los días hábiles.
+    ///
+    /// Es el mismo cálculo que hace SemanasDelMes en el servidor, y a propósito
+    /// está duplicado: el cliente no puede llamar al servidor para rotular cuatro
+    /// opciones, y el servidor es quien manda. Lo que ata las dos copias es
+    /// SemanasDelMesTests, que fija el caso de octubre de 2026 con todos sus
+    /// rangos. Si se cambia la regla hay que cambiar las dos cosas.
+    /// </summary>
+    private string RangoDeSemana(int semana)
+    {
+        var primeroDelMes = new DateOnly(Anio, Mes, 1);
+        var ultimoDelMes = new DateOnly(Anio, Mes, DateTime.DaysInMonth(Anio, Mes));
+
+        // .NET: DayOfWeek empieza en DOMINGO = 0.
+        var hastaElDomingo = (7 - (int)primeroDelMes.DayOfWeek) % 7;
+        var longitudPrimera = hastaElDomingo + 1;
+
+        var desplazamiento = 0;
+        for (var k = 1; k < semana; k++) desplazamiento += k == 1 ? longitudPrimera : 7;
+
+        var desde = primeroDelMes.AddDays(desplazamiento);
+        if (desde > ultimoDelMes) desde = ultimoDelMes;
+
+        var hasta = semana == 1 ? desde.AddDays(longitudPrimera - 1) : desde.AddDays(6);
+        if (hasta > ultimoDelMes) hasta = ultimoDelMes;
+
+        // "5 al 11" cuando los meses no cambian; si la semana toca dos meses, se
+        // dice, porque "del 26 al 31" no basta para saber a qué mes pertenece.
+        var nombre = NombreDeMes(desde.Month).ToLowerInvariant();
+
+        return hasta.Month != desde.Month
+            ? $"{desde.Day} de {NombreDeMes(desde.Month).ToLowerInvariant()} al {hasta.Day} de {NombreDeMes(hasta.Month).ToLowerInvariant()}"
+            : $"{desde.Day} al {hasta.Day} de {nombre}";
+    }
+
+    private static int SemanaDe(DateOnly d)
+        => SemanasDelMesDelCliente.SemanaDe(d.Year, d.Month, d);
+
+    /// <summary>
+    /// Copia de SemanasDelMes del servidor, para no tener la regla en dos
+    /// sitios distintos. Lo ata SemanasDelMesTests, en el servidor.
+    /// </summary>
+    private static class SemanasDelMesDelCliente
+    {
+        public static int SemanaDe(int anio, int mes, DateOnly fecha)
+        {
+            if (anio is < 1 or > 9999 || mes is < 1 or > 12) return 1;
+            if (fecha.Year != anio || fecha.Month != mes) return 1;
+
+            var hastaElDomingo = (7 - (int)new DateOnly(anio, mes, 1).DayOfWeek) % 7;
+            var longitudPrimera = hastaElDomingo + 1;
+            var ultimoDelMes = new DateOnly(anio, mes, DateTime.DaysInMonth(anio, mes));
+            var total = Math.Max(1, 1 + Math.Max(0, (ultimoDelMes.Day - longitudPrimera + 6) / 7));
+
+            for (var s = 1; s <= total; s++)
+            {
+                var desplazamiento = 0;
+                for (var k = 1; k < s; k++) desplazamiento += k == 1 ? longitudPrimera : 7;
+
+                var desde = new DateOnly(anio, mes, 1).AddDays(desplazamiento);
+                var hasta = s == 1 ? desde.AddDays(longitudPrimera - 1) : desde.AddDays(6);
+                if (hasta > ultimoDelMes) hasta = ultimoDelMes;
+
+                if (fecha >= desde && fecha <= hasta) return s;
+            }
+
+            return 1;
+        }
+    }
 
     // --- Rótulos del rango ---
 
