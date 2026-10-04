@@ -10,6 +10,15 @@
 
   <ItemGroup>
     <!--
+      Los tests necesitan poder llamar a ConstruirUrlDia y ConstruirError, que
+      son internal para no ensuciar la API pública del servidor. Hace falta
+      abrirles la puerta a un ensamblado, y solo a ese.
+    -->
+    <InternalsVisibleTo Include="WatchMercadoPublico.Server.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
       La configuración local contiene el TICKET de Mercado Público: es una
       credencial personal y no debe viajar en la publicación ni en el
       repositorio. En producción el ticket va por variable de entorno:

@@ -117,6 +117,15 @@ dotnet run --project src\WatchMercadoPublico.Server
 
 Abre <http://localhost:5xxx> y escribe el RUT de la empresa.
 
+### 5. Tests
+
+```powershell
+dotnet test
+```
+
+32 tests, **sin red y sin ticket**: no tocan la API, comprueban funciones puras.
+Ver [Tests](#tests) para qué hay que leerlos antes de tocar nada.
+
 ---
 
 ## Probarlo sin ticket: modo demo
@@ -232,6 +241,21 @@ mandaba `4102026`, de siete dígitos, y la API respondía 500 siempre. Como `d` 
 dos cifras y el fallo desaparece solo: por eso el bug se escondía detrás del
 calendario y solo se rompía en la primera quincena de cada mes. La fecha de
 prueba (28/09/2026) era día 28, así que nunca lo dejó ver.
+
+**Verificado con un barrido real de los 30 días de septiembre de 2026**, en
+memoria, secuencial y con 4 s entre peticiones:
+
+- **30 de 30** días responden `200`.
+- **9 de 9** días del 1 al 9 fallaban con el formato viejo, y funcionan con el
+  nuevo. El contraste está medido, no deducido.
+- El día 28 devuelve la licitación `1456839-6-LP26`; los otros 29, ninguna.
+- **Ningún 429** con ese ritmo. En paralelo sí los hay.
+
+Que 29 de 30 días salgan a cero no significa que la consulta esté rota: con el
+mismo día y **sin** filtro de proveedor la API devuelve 733 (día 15) y 1295
+(día 28) licitaciones de todo el país. Un código inexistente devuelve 0 igual
+que SMC, así que el filtro sigue distinguiendo. Para distinguir "no hay nada"
+de "no se pudo preguntar" está el `502` explícito del endpoint.
 
 - El código se llama **`CodigoExterno`**, no `CodigoLicitacion`.
 - **`CodigoProveedor` solo filtra si mandas `fecha`.** Es la diferencia entre
@@ -724,11 +748,62 @@ Iconos de [Lucide](https://lucide.dev) (licencia ISC). Tipografía
 
 ---
 
+## Tests
+
+```powershell
+dotnet test
+```
+
+**No hay que tener ticket, ni red, ni la API en pie.** Eso no es una comodidad:
+es lo que hace posible testear. Un método que hace una petición no se puede
+comprobar sin pedirla, y para la aplicación casi todo lo que se rompió no
+necesitaba la API para estar mal.
+
+Por eso `ConstruirUrlDia` y `ConstruirError` están extraídos del cliente como
+funciones estáticas, aunque solo los use un sitio: es el requisito para poder
+mirarlos desde un test. Para exponerlos hay un `InternalsVisibleTo` en el
+`.csproj` del servidor, y nada más.
+
+### Qué cubren, y por qué existen
+
+Los dos nacieron de bugs que estuvieron en producción:
+
+| Archivo | Qué ata |
+|---|---|
+| `FormatoDeFechaTests.cs` | La fecha va en `DDMMAAAA` con los dos campos rellenos, los **730 días** de dos años, y no depende del calendario de la cultura del servidor |
+| `ErroresDeApiTests.cs` | Que el mensaje de la API llegue a quien lee, y que un `500` no se traduzca en "la API está caída" cuando la API está diciendo otra cosa |
+
+### La prueba de que un test sirve
+
+Un test de regresión que nunca ha fallado no demuestra nada: puede estar
+comprobando lo que siempre se comprobó. Los dos se validaron **reintroduciendo
+el bug**:
+
+| Con el bug reintroducido | Resultado |
+|---|---|
+| `ddMMyyyy` → `dMMyyyy` | **Falla** en los 9 días de la primera decena |
+| Sin leer `Mensaje` | **Falla** en los 2 tests que dependen de ese mensaje |
+| Restaurado | **32 de 32** |
+
+Si alguna vez se toca `ConstruirUrlDia` o `ConstruirError`, ese truco es la
+forma de saber si el test sigue vigilando algo.
+
+### Detalle que sale de escribir el test
+
+Al recorrer los 730 días apareció un riesgo que no buscaba: `{"ddMMyyyy"}` usa
+el **calendario de la cultura actual**, y hay culturas que no es el gregoriano
+(`ar-SA` usa el islámico, `th-TH` el budista). Con la cultura equivocada se
+mandaría un año equivocado y no habría aviso: la fecha sería plausible. Por eso el
+formato va con `CultureInfo.InvariantCulture` explícito, y hay un test por
+cultura no gregoriana.
+
+---
+
 ## Estructura
 
 ```
 WatchMercadoPublico.slnx
-├── Directory.Build.props          # compresión desactivada (los dos proyectos)
+├── Directory.Build.props          # compresión desactivada (los dos que se publican)
 ├── nuget.config
 ├── package.json                   # scripts de Tailwind
 ├── secrets/                       # plantilla del ticket (fuera del repo)
@@ -741,12 +816,13 @@ WatchMercadoPublico.slnx
     │   ├── Pages/Home.razor       # la pantalla entera: hoy, y su refresco
     │   ├── Services/              # MercadoPublicoApi, Formato, ThemeService
     │   └── wwwroot/               # index.html, css/app.css, icono.svg, marca.svg
-    └── WatchMercadoPublico.Server # la API y el hosting de la SPA
-        ├── Endpoints/             # LicitacionesEndpoints (/estado, /hoy, detalle)
-        ├── Models/                # opciones y DTOs
-        ├── Services/              # MercadoPublicoCliente, CacheMercadoPublico,
-        │                          #   CalendarioDelMes (nombres de mes), DatosDemo
-        └── web.config
+    ├── WatchMercadoPublico.Server # la API y el hosting de la SPA
+    │   ├── Endpoints/             # LicitacionesEndpoints (/estado, /hoy, detalle)
+    │   ├── Models/                # opciones y DTOs
+    │   ├── Services/              # MercadoPublicoCliente, CacheMercadoPublico,
+    │   │                          #   CalendarioDelMes (nombres de mes), DatosDemo
+    │   └── web.config
+    └── WatchMercadoPublico.Server.Tests # tests, sin red y sin ticket
 ```
 
 `DatosDemo.cs` y el modo `demo` son **una ayuda de desarrollo**, no parte de la

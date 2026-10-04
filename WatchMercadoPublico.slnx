@@ -2,5 +2,6 @@
   <Folder Name="/src/">
     <Project Path="src/WatchMercadoPublico.Client/WatchMercadoPublico.Client.csproj" />
     <Project Path="src/WatchMercadoPublico.Server/WatchMercadoPublico.Server.csproj" />
+    <Project Path="src/WatchMercadoPublico.Server.Tests/WatchMercadoPublico.Server.Tests.csproj" />
   </Folder>
 </Solution>

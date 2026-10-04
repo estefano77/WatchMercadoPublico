@@ -62,20 +62,7 @@ public sealed class MercadoPublicoCliente
     public async Task<List<Licitacion>> ListarLicitacionesDelDiaAsync(
         string codigoProveedor, DateOnly fecha, CancellationToken ct)
     {
-        // OJO con el formato: la API pide DDMMAAAA con AMBOS campos rellenos.
-        // En .NET "d" es el día SIN cero a la izquierda y "dd" el día CON cero.
-        // Con "dMMyyyy" el 4 de octubre se mandaba "4102026" —siete dígitos— y la
-        // API respondía 500 con {"Codigo":10300,"Mensaje":"El formato del
-        // parametro fechas es incorrecto"}.
-        //
-        // Lo que lo escondía es que "d" y "dd" solo se diferencian en los días 1
-        // al 9: a partir del 10 el día ya tiene dos cifras y el bug desaparece
-        // solo. Por eso parecía funcionar y "a veces" fallaba, y por qué no se
-        // vio nunca en las fechas de prueba (28/09/2026 era día 28).
-        var url = $"publico/licitaciones.json" +
-                  $"?fecha={fecha:ddMMyyyy}" +
-                  $"&CodigoProveedor={Uri.EscapeDataString(codigoProveedor)}" +
-                  $"&ticket={Uri.EscapeDataString(opciones.Ticket)}";
+        var url = ConstruirUrlDia(codigoProveedor, fecha, opciones.Ticket);
 
         using var doc = await LeerJsonAsync(url, ct);
 
@@ -215,30 +202,52 @@ public sealed class MercadoPublicoCliente
         return resultado;
     }
 
-    // Lectura del JSON y errores
+    // Utilidades puras, sin red: lo que se puede testear de verdad
     // =====================================================================
 
-    private async Task<JsonDocument> LeerJsonAsync(string urlRelativa, CancellationToken ct)
-    {
-        using var respuesta = await http.GetAsync(urlRelativa, ct);
-        var cuerpo = await respuesta.Content.ReadAsStringAsync(ct);
+    /// <summary>
+    /// URL del listado de un día.
+    ///
+    /// OJO con el formato de la fecha: la API pide <c>DDMMAAAA</c> con **ambos**
+    /// campos rellenos. En .NET, <c>"d"</c> es el día SIN cero a la izquierda y
+    /// <c>"dd"</c> el día CON cero. Con <c>"dMMyyyy"</c> el 4 de octubre se
+    /// mandaba <c>4102026</c> —siete dígitos— y la API respondía 500 con
+    /// <c>{"Codigo":10300,"Mensaje":"El formato del parametro fechas es incorrecto"}</c>.
+    ///
+    /// Lo que lo escondía es que <c>"d"</c> y <c>"dd"</c> solo se diferencian en
+    /// los días 1 al 9: a partir del 10 el día ya tiene dos cifras y el fallo
+    /// desaparece solo. Por eso parecía intermitente, y por qué no salió nunca
+    /// en las fechas de prueba (28/09/2026 era día 28).
+    ///
+    /// El <c>InvariantCulture</c> no es adorno: sin él, <c>"y"</c> se interpreta
+    /// con el <b>calendario de la cultura actual</c>, y hay culturas cuyo
+    /// calendario no es el gregoriano —"ar-SA" usa el Umm al-Qura— de modo que la
+    /// misma línea habría enviado un año equivocado según el idioma del servidor.
+    ///
+    /// Está en un método aparte y no en línea porque es justo el sitio donde un
+    /// cambio de formato pasa desapercibido: nada en el código ni en la
+    /// compilación avisa de que <c>"dMMyyyy"</c> vuelve a ser un bug. Lo
+    /// comprueba <c>FormatoDeFechaTests</c> para los 365 días.
+    /// </summary>
+    internal static string ConstruirUrlDia(string codigoProveedor, DateOnly fecha, string ticket) =>
+        "publico/licitaciones.json" +
+        $"?fecha={fecha.ToString("ddMMyyyy", CultureInfo.InvariantCulture)}" +
+        $"&CodigoProveedor={Uri.EscapeDataString(codigoProveedor)}" +
+        $"&ticket={Uri.EscapeDataString(ticket)}";
 
-        if (!respuesta.IsSuccessStatusCode)
-            throw ConstruirError(respuesta.StatusCode, cuerpo);
-
-        try
-        {
-            return JsonDocument.Parse(cuerpo);
-        }
-        catch (JsonException ex)
-        {
-            log.LogError("Mercado Público devolvió un JSON ilegible: {Error}", ex.Message);
-            throw new MercadoPublicoException(
-                "Mercado Público devolvió una respuesta que no se pudo leer.", ex, 502);
-        }
-    }
-
-    private MercadoPublicoException ConstruirError(HttpStatusCode estado, string cuerpo)
+    /// <summary>
+    /// Traduce una respuesta que no es 2xx en una excepción con un mensaje que
+    /// dice la verdad.
+    ///
+    /// La API responde sus errores en español: <c>{"Codigo":10300,"Mensaje":"…"}</c>.
+    /// Antes solo se leía <c>error.message</c>, <c>Descripcion</c> y
+    /// <c>Message</c>, así que un <c>{"Codigo":…,"Mensaje":…}</c> se perdía
+    /// entero: el log ponía <c>(null)</c> y la pantalla culpaba a Mercado Público
+    /// de estar con problemas cuando el fallo era de la petición que le
+    /// mandábamos. Leer <c>Mensaje</c> es lo que permitió encontrar eso.
+    /// </summary>
+    internal static MercadoPublicoException ConstruirError(
+        HttpStatusCode estado, string cuerpo, ILogger log)
     {
         string? mensaje = null;
         int codigoApi = 0;
@@ -247,12 +256,6 @@ public sealed class MercadoPublicoCliente
         {
             using var doc = JsonDocument.Parse(cuerpo);
 
-            // "Mensaje" y "Codigo" es como responde la API cuando el problema es
-            // NUESTRO y no suyo. Sin leerlos, un {"Codigo":10300,"Mensaje":"El
-            // formato del parametro fechas es incorrecto"} salía en el log como
-            // "(null)" y en la pantalla como "Mercado Público está con problemas",
-            // que señalaba a la API cuando el fallo estaba en la URL que le
-            // mandamos. Un error con explicación tiene que llegar a quien lee.
             mensaje = LeerRuta(doc.RootElement, "error", "message")
                       ?? Leer(doc.RootElement, "Mensaje")
                       ?? Leer(doc.RootElement, "Descripcion")
@@ -297,6 +300,29 @@ public sealed class MercadoPublicoCliente
 
         return new MercadoPublicoException(
             explicacion, null, codigo is 401 or 403 ? 502 : codigo);
+    }
+
+    // Lectura del JSON y errores
+    // =====================================================================
+
+    private async Task<JsonDocument> LeerJsonAsync(string urlRelativa, CancellationToken ct)
+    {
+        using var respuesta = await http.GetAsync(urlRelativa, ct);
+        var cuerpo = await respuesta.Content.ReadAsStringAsync(ct);
+
+        if (!respuesta.IsSuccessStatusCode)
+            throw ConstruirError(respuesta.StatusCode, cuerpo, log);
+
+        try
+        {
+            return JsonDocument.Parse(cuerpo);
+        }
+        catch (JsonException ex)
+        {
+            log.LogError("Mercado Público devolvió un JSON ilegible: {Error}", ex.Message);
+            throw new MercadoPublicoException(
+                "Mercado Público devolvió una respuesta que no se pudo leer.", ex, 502);
+        }
     }
 
     /// <summary>
