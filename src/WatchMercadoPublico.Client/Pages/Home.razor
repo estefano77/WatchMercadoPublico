@@ -85,13 +85,21 @@
                 </button>
             </div>
 
-            @* Detalle de lo que se está mirando. Con los fines de semana incluidos
-            @* El periodo NO va aqui. Estava debajo de los filtros y se leia
-               como si describiera los desplegables; en realidad describe los
-               RESULTADOS, asi que ahora va junto al contador, donde se lee
-               "de estos dias hay esto". Con el aqui se ve de un vistazo cuando
-               cambia algo al elegir otra semana: antes solo cambiaba un numero
-               de semana y parecia que no se hubiera movido nada. *@
+            @* El desplegable cambia al instante pero los datos no: se traen al
+               pulsar "Actualizar". Sin este aviso, mover el desplegable no
+               cambia nada de lo que hay en pantalla —la insignia ya no se mueve
+               a propósito— y el selector parece no funcionar. *@
+            @if (HaySemanaPendiente)
+            {
+                <p class="mt-3 text-xs leading-relaxed text-muted">
+                    Sigues viendo la semana @SemanaMostrada. Pulsa "Actualizar" para
+                    traer la semana @NumeroSemana.
+                </p>
+            }
+
+            @* Aquí ya no va el periodo. Estaba debajo de los filtros y se leía como si
+               describiera los desplegables; en realidad describe los RESULTADOS,
+               así que ahora va junto al contador. *@
         </section>
     }
 
@@ -431,7 +439,34 @@
     private DateOnly? Desde => Semana?.Desde is { } d ? DateOnly.Parse(d) : null;
     private DateOnly? Hasta => Semana?.Hasta is { } h ? DateOnly.Parse(h) : null;
 
-    private string RangoCorto => $"Semana {NumeroSemana}";
+    /// <summary>
+    /// Número de la semana que se está MOSTRANDO, que no es el mismo dato que la
+    /// semana ELEGIDA en el desplegable.
+    ///
+    /// Son dos estados distintos y confundirlos era un bug. El evento
+    /// <c>CambiarSemana</c> mueve el selector al instante, sin consultar nada,
+    /// así que la insignia —que leía el selector— se adelantaba sola: ponía
+    /// "Semana 3" mientras el periodo y los resultados seguían siendo los de la
+    /// semana 2. Tres etiquetas que deberían describir la misma semana
+    /// discrepando, y la que más llama la atención era la equivocada.
+    ///
+    /// El rango y los resultados ya venían de la respuesta del servidor, que
+    /// trae el número. Ahora la insignia sale de ahí también, y las tres cuentan
+    /// lo mismo mientras no se pulse "Actualizar".
+    /// </summary>
+    private int SemanaMostrada => Semana?.Semana ?? NumeroSemana;
+
+    private string RangoCorto => $"Semana {SemanaMostrada}";
+
+    /// <summary>
+    /// ¿El desplegable apunta a una semana distinta de la que está en pantalla?
+    ///
+    /// Hace falta porque, con la insignia ya quieta, mover el desplegable no
+    /// cambia NADA visible hasta que se pulse "Actualizar". Sin este aviso el
+    /// selector parece roto. Con él se ve qué está pendiente de traer.
+    /// </summary>
+    private bool HaySemanaPendiente =>
+        Semana is not null && NumeroSemana != Semana.Semana;
 
     /// <summary>
     /// Cuántos días se CONSULTARON de verdad. Distinto del total de la semana:
@@ -506,6 +541,21 @@
         }
     }
 
+    /// <summary>
+    /// El desplegable de semanas cambia AL INSTANTE y no consulta nada. Los
+    /// datos de la semana elegida llegan al pulsar "Actualizar".
+    ///
+    /// Es deliberado: traer una semana son cinco peticiones a la API y el usuario
+    /// puede estar simplemente mirando el desplegable. Por eso aquí no se toca
+    /// <c>Semana</c>, que es lo que hay en pantalla.
+    ///
+    /// Lo que sí rompía era leer <c>NumeroSemana</c> para pintar la insignia
+    /// verde: como este método cambia ese campo al momento, la insignia se
+    /// adelantaba a los resultados y las tres etiquetas de la cabecera —
+    /// insignia, periodo y lista— contaban semanas distintas. Ahora la insignia
+    /// lee la respuesta del servidor, y mientras no se pulse "Actualizar" las
+    /// tres dicen lo mismo.
+    /// </summary>
     private void CambiarSemana(ChangeEventArgs e)
     {
         if (int.TryParse(e.Value?.ToString(), out var n) && n >= 1 && n != NumeroSemana)
