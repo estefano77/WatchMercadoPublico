@@ -39,28 +39,38 @@ public sealed class MercadoPublicoApi(HttpClient http)
     }
 
     /// <summary>
-    /// Licitaciones de HOY para la empresa configurada.
+    /// Licitaciones de UNA semana: "semana 2 de septiembre de 2026".
     ///
-    /// El día, el RUT y el código los pone el servidor: el cliente no elige
-    /// nada. El servidor insiste hasta un minuto antes de rendirse, así que
-    /// esta llamada puede tardar; la pantalla muestra "Consultando…" mientras.
+    /// El cliente elige qué semana mirar, pero NO elige días: los días hábiles
+    /// los calcula el servidor, que es quien sabe cuáles se saltan.
+    ///
+    /// El servidor insiste hasta un minuto antes de rendirse, y ahora son hasta
+    /// cinco peticiones una detrás de otra, así que esta llamada puede tardar
+    /// medio minuto. La pantalla muestra "Consultando…" mientras.
+    ///
+    /// <paramref name="refrescar"/> solo hace que se vuelva a preguntar el día
+    /// de hoy; los días pasados ya están cacheados porque no cambian.
     /// </summary>
-    public async Task<(PaginaLicitaciones? Data, string? Error)> GetHoyAsync()
+    public async Task<(SemanaLicitaciones? Data, string? Error)> GetSemanaAsync(
+        int anio, int mes, int semana, bool refrescar = false)
     {
         try
         {
-            using var respuesta = await http.GetAsync("api/hoy");
+            var url =
+                $"api/semana?anio={anio}&mes={mes}&semana={semana}&refrescar={(refrescar ? "true" : "false")}";
+
+            using var respuesta = await http.GetAsync(url);
             var cuerpo = await respuesta.Content.ReadAsStringAsync();
 
             if (respuesta.IsSuccessStatusCode)
             {
-                var pagina = Deserializar<PaginaLicitaciones>(cuerpo);
+                var pagina = Deserializar<SemanaLicitaciones>(cuerpo);
                 return pagina is null
                     ? (null, "El servidor devolvió una respuesta inesperada.")
                     : (pagina, null);
             }
 
-            return (null, ExtraerError(cuerpo) ?? "No se pudieron cargar las licitaciones de hoy.");
+            return (null, ExtraerError(cuerpo) ?? "No se pudieron cargar las licitaciones de esa semana.");
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or NotSupportedException)
         {

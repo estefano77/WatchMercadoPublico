@@ -2,27 +2,98 @@
 @implements IDisposable
 @inject MercadoPublicoApi Api
 
-<PageTitle>WatchMercadoPublico · Novedades de hoy</PageTitle>
+<PageTitle>WatchMercadoPublico · Licitaciones de la semana</PageTitle>
 
 <div class="space-y-6">
 
     @* ------------------------------------------------------------------ *@
-    @* Encabezado: qué empresa y qué día. Ya no hay nada que elegir.        *@
+    @* Encabezado                                                           *@
     @* ------------------------------------------------------------------ *@
     <section>
         <h1 class="text-2xl font-extrabold tracking-tight sm:text-3xl">
-            Novedades de hoy en
+            Novedades en
             <span class="marca-texto">Mercado Publico</span>
         </h1>
 
-        @* Sin mencionar el refresco automático: es un detalle de funcionamiento
-           que en la pantalla solo resta, y el usuario no puede cambiarlo. Va
-           documentado en el README, que es lo que serves para el manual. *@
         <p class="mt-2 max-w-2xl text-sm leading-relaxed text-ink-soft">
-            Licitaciones publicadas hoy para
+            Licitaciones de <strong class="text-ink">@RangoEnPalabras</strong> para
             <strong class="text-ink">@NombreEmpresa</strong>.
         </p>
     </section>
+
+    @* ------------------------------------------------------------------ *@
+    @* Filtros: año, mes y semana. Los tres CONCATENADOS: la unidad que se      *@
+    @* consulta es UNA semana, no un mes ni un año.                            *@
+    @* ------------------------------------------------------------------ *@
+    @if (Estado is not { Servible: false })
+    {
+        <section class="rounded-2xl border border-line bg-surface p-4">
+            <div class="flex flex-wrap items-end gap-3">
+
+                <div class="min-w-[7rem] flex-1">
+                    <label for="f-anio" class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted">
+                        Año
+                    </label>
+                    <select id="f-anio" class="campo" value="@Anio" @onchange="CambiarAnio">
+                        @foreach (var a in Estado?.AniosDisponibles ?? [])
+                        {
+                            <option value="@a" selected="@(a == Anio)">@a</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="min-w-[9rem] flex-1">
+                    <label for="f-mes" class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted">
+                        Mes
+                    </label>
+                    <select id="f-mes" class="campo" value="@Mes" @onchange="CambiarMes">
+                        @for (var m = 1; m <= 12; m++)
+                        {
+                            var numero = m;
+                            var nombre = NombreDeMes(numero);
+                            <option value="@numero" selected="@(numero == Mes)">@nombre</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="min-w-[9rem] flex-1">
+                    <label for="f-semana" class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted">
+                        Semana
+                    </label>
+                    <select id="f-semana" class="campo" value="@NumeroSemana" @onchange="CambiarSemana">
+                        @foreach (var s in SemanasDisponibles)
+                        {
+                            <option value="@s" selected="@(s == NumeroSemana)">Semana @s</option>
+                        }
+                    </select>
+                </div>
+
+                <button type="button" class="boton-actualizar" @onclick="ActualizarAsync" disabled="@Cargando">
+                    @if (Cargando)
+                    {
+                        <span class="icono-girando"><Icon Name="recargar" Size="17" /></span>
+                        <span>Consultando…</span>
+                    }
+                    else
+                    {
+                        <Icon Name="recargar" Size="17" />
+                        <span>Actualizar</span>
+                    }
+                </button>
+            </div>
+
+            @* Detalle de lo que se está mirando. Con los fines de semana incluidos
+               en el rango pero no consultados, que es una diferencia que sin decir
+               parece un error de cálculo. *@
+            <p class="mt-3 text-xs leading-relaxed text-muted">
+                Del @DiaCorto(Desde) al @DiaCorto(Hasta) · @TextoDiasHabiles
+                @if (!EsSemanaActual)
+                {
+                    <span>· Esta semana ya pasó, así que no se vuelve a preguntar lo mismo.</span>
+                }
+            </p>
+        </section>
+    }
 
     @* ------------------------------------------------------------------ *@
     @* Avisos                                                              *@
@@ -65,41 +136,54 @@
     @* ------------------------------------------------------------------ *@
     @* Dos cosas se esconden detrás de "Ocupado", y por eso NO es solo Cargando:
          1. Una consulta en vuelo.
-         2. El arranque, antes de saber si la API está servible.
-
-       La condición del bloque es "Estado is not { Servible: false }" y no
-       "Servible: true" a propósito. Con la estricta, mientras /api/estado no
-       responde (Estado == null) no se cumplía NINGUNA y la pantalla pintaba la
-       cabecera, el título y a continuación un hueco vacío durante un minuto: sin
-       panel de cargando ni de error. Y como en Blazor asignar un campo no
-       repinta, el "Consultando" tampoco salía hasta terminar el await. *@
+         2. El arranque, antes de saber si la API está servible. *@
     @if (Estado is not { Servible: false })
     {
+        @* Aviso de días que aún no han llegado. Va FUERA de la cadena de
+           estados a propósito: si estuviera dentro de "hay resultados", una
+           semana vacía y a medio terminar no lo enseñaría, y es justo el caso
+           en que hace falta. No es un fallo: es que el día no ha llegado. *@
+        @if (Semana is { AFuturo: true })
+        {
+            <p class="entrada-suave rounded-2xl border border-line bg-field px-4 py-3 text-sm leading-relaxed text-ink-soft">
+                @Semana.DiasPendientes
+                @(Semana.DiasPendientes == 1
+                    ? "día hábil de esta semana todavía no ha llegado"
+                    : "días hábiles de esta semana todavía no han llegado"),
+                así que no se han consultado. Es normal: la semana aún no
+                termina. Esta pantalla se actualiza sola.
+            </p>
+        }
+
         @if (Ocupado)
         {
-            <Aviso Tipo="info" Titulo="Consultando a Mercado Público…" Cerrable="false">
-                <p class="mt-1.5 text-sm leading-relaxed text-ink-soft">
-                    Mercado Público suele rechazar las primeras peticiones de cada sesión, así que se
-                    insiste hasta un minuto antes de rendirse. No hace falta hacer nada: la pantalla se
-                    actualiza sola.
-                </p>
-                @* Los segundos solo cuando ya tarda. En el caso rápido —que es
-                   el normal— el contador sería ruido. *@
-                @if (SegundosEsperando > 8)
-                {
-                    <p class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
-                        <span class="inline-flex items-center gap-1.5 font-semibold text-ink-soft">
-                            <Icon Name="reloj" Size="14" />
-                            @SegundosEsperando s
-                        </span>
-                        <span>Sigo insistiendo; el error sale al agotar los intentos.</span>
-                    </p>
-                }
-            </Aviso>
+            @* Esqueleto en vez de un simple "cargando": el usuario ve que hay
+               una pantalla formándose, no una página muerta. *@
+            <div class="space-y-4">
+                <div class="tarjeta-esqueleto">
+                    <div class="esqueleto h-5 w-52"></div>
+                    <div class="esqueleto mt-3 h-3.5 w-full"></div>
+                    <div class="esqueleto mt-2 h-3.5 w-4/5"></div>
+                </div>
+                <div class="tarjeta-esqueleto">
+                    <div class="esqueleto h-5 w-44"></div>
+                    <div class="esqueleto mt-3 h-3.5 w-full"></div>
+                    <div class="esqueleto mt-2 h-3.5 w-3/5"></div>
+                </div>
+
+                <div class="flex items-center justify-center gap-2.5 pt-1 text-sm text-ink-soft">
+                    <span class="punto-pulsante"></span>
+                    <span>Consultando a Mercado Público…</span>
+                    @if (SegundosEsperando > 4)
+                    {
+                        <span class="tabular-nums text-muted">@SegundosEsperando s</span>
+                    }
+                </div>
+            </div>
         }
         else if (ErrorConsulta is not null)
         {
-            <div class="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-6 py-10 text-center">
+            <div class="entrada-suave rounded-2xl border border-rose-500/30 bg-rose-500/10 px-6 py-10 text-center">
                 <span class="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-rose-500/15 text-rose-500">
                     <Icon Name="alerta" Size="26" />
                 </span>
@@ -110,65 +194,115 @@
                 @* No se puede decir "no hay licitaciones": lo que no se pudo fue
                    preguntar. Afirmar lo contrario sería mentir. *@
                 <p class="mx-auto mt-1.5 max-w-lg text-sm text-muted">
-                    Esto <strong>no</strong> significa que no haya nada publicado hoy: significa que no
-                    se pudo comprobar. La pantalla lo reintenta sola cada
-                    @MinutosRefresco @(MinutosRefresco == 1 ? "minuto" : "minutos").
+                    Esto <strong>no</strong> significa que no haya nada publicado esa semana: significa
+                    que no se pudo comprobar.
                 </p>
-                <button type="button" @onclick="CargarAsync" disabled="@Cargando"
-                        class="mt-5 inline-flex min-h-[46px] items-center gap-2 rounded-xl bg-gradient-to-r from-marca-a to-marca-b px-6 text-sm font-bold text-white shadow-lg shadow-violet-500/25 transition hover:brightness-110 disabled:opacity-60">
+                <button type="button" @onclick="ActualizarAsync" disabled="@Cargando"
+                        class="boton-actualizar mt-5">
                     <Icon Name="recargar" Size="17" />
                     Intentar ahora
                 </button>
             </div>
         }
-        else if (Pagina is { Total: 0 })
+        else if (Semana is { Total: 0 })
         {
-            @* Sin resultados: NO es un error. Y si hoy es fin de semana, se
-               dice, porque es lo más probable y evita que parezca un fallo. *@
-            <div class="rounded-2xl border border-dashed border-line bg-surface px-6 py-14 text-center">
+            @* Sin resultados: NO es un error, siempre que la semana se haya
+               comprobado entera. *@
+            <div class="entrada-suave rounded-2xl border border-dashed border-line bg-surface px-6 py-14 text-center">
                 <span class="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-field text-muted">
                     <Icon Name="calendario" Size="26" />
                 </span>
-                <p class="mt-4 text-base font-bold text-ink">
-                    @(Pagina.EsFinDeSemana
-                        ? $"{Pagina.FechaLegible} es fin de semana"
-                        : "Nada nuevo hoy")
-                </p>
+                <p class="mt-4 text-base font-bold text-ink">Nada en esa semana</p>
                 <p class="mx-auto mt-1.5 max-w-lg text-sm leading-relaxed text-muted">
-                    @(Pagina.EsFinDeSemana
-                        ? "Se consultó el día y no salió ninguna licitación. Es lo normal en fin de semana: lo habitual es que se publiquen de lunes a viernes. La página lo reintenta sola y aparecerá solo si se publica algo."
-                        : "Se consultó el día completo y esta empresa no tiene ninguna licitación publicada. Es una respuesta real, no un fallo: significa que hoy no hay novedad.")
+                    Se consultaron @TextoDiasConsultados y no salió ninguna licitación de esta
+                    empresa. Es una respuesta real, no un fallo.
                 </p>
             </div>
         }
-        else if (Pagina is not null)
+        else if (Semana is not null)
         {
+
             @* --- Cabecera de resultados --- *@
             <div class="flex flex-wrap items-center justify-between gap-2">
                 <div class="flex items-center gap-2">
                     <h2 class="text-base font-bold text-ink">
-                        @(Pagina.Total == 1 ? "1 novedad" : $"{Pagina.Total} novedades")
+                        @(Semana.Total == 1 ? "1 novedad" : $"{Semana.Total} novedades")
                     </h2>
                     <span class="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[0.68rem] font-bold text-emerald-600 uppercase dark:text-emerald-400">
-                        Hoy
+                        @RangoCorto
                     </span>
                 </div>
                 <p class="text-xs text-muted">
-                    @(Pagina.DesdeCache
-                        ? $"consultado a las {Formato.Hora(Pagina.Consultado)}"
-                        : $"consultado a la API a las {Formato.Hora(Pagina.Consultado)}")
+                    @(Semana.DesdeCache
+                        ? $"consultado a las {Formato.Hora(Semana.Consultado)}"
+                        : $"consultado a la API a las {Formato.Hora(Semana.Consultado)}")
                 </p>
             </div>
 
-            <div class="space-y-3">
-                @foreach (var licitacion in Pagina.Items)
+            @* --- Aviso de días sin comprobar --- *@
+            @* Es lo que impide que la pantalla insinúe un "no hay nada" cuando en
+               realidad hay días que nadie ha podido mirar. *@
+            @if (!Semana.Completa)
+            {
+                <Aviso Tipo="aviso" Titulo="La semana está incompleta" Cerrable="false">
+                    <p class="mt-2 text-sm leading-relaxed text-ink-soft">
+                        Se consultaron @Semana.DiasConsultados días hábiles pero
+                        <strong>@Semana.DiasFallidos no respondieron</strong>
+                        (@DiasFallidosEnPalabras). Lo que ves está completo, pero
+                        puede que falte algo de esos días. Vuelve a actualizar en unos
+                        segundos.
+                    </p>
+                </Aviso>
+            }
+
+            @* --- Resultados, agrupados por día --- *@
+            @* Agrupar evita repetir el día en cada ficha, que con una semana de
+               cinco días es una de cada dos líneas. *@
+            <div class="space-y-5">
+                @foreach (var grupo in Semana.PorDia)
                 {
-                    <FichaLicitacion Licitacion="licitacion" Palabras="@([])"
-                                     AbrirAsync="AbrirDetalleAsync" />
+                    <section class="entrada-suave">
+                        <h3 class="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-muted">
+                            <Icon Name="calendario" Size="13" />
+                            @DiaEnPalabras(grupo.Key)
+                            <span class="font-normal normal-case tracking-normal text-muted opacity-70">
+                                (@grupo.Count() @(grupo.Count() == 1 ? "novedad" : "novedades"))
+                            </span>
+                        </h3>
+
+                        <div class="space-y-3">
+                            @foreach (var licitacion in grupo)
+                            {
+                                <FichaLicitacion Licitacion="@licitacion" Palabras="@([])"
+                                                 AbrirAsync="AbrirDetalleAsync" />
+                            }
+                        </div>
+                    </section>
                 }
             </div>
         }
     }
+        else
+        {
+            @* Esta rama no debería verse NUNCA: todo lo demás está cubierto
+               arriba. Se deja igualmente porque el fallo de no tenerla es
+               silencioso y feo: la pantalla se queda con la cabecera y los
+               filtros, y debajo un hueco sin explicación. Con esta rama, si
+               algún día se cuela un estado sin pintar, se ve un texto en vez
+               de nada. *@
+            <div class="entrada-suave rounded-2xl border border-dashed border-line bg-surface px-6 py-10 text-center">
+                <p class="text-base font-bold text-ink">No hay nada que mostrar</p>
+                <p class="mx-auto mt-1.5 max-w-lg text-sm leading-relaxed text-muted">
+                    No se pudo pintar el contenido de la consulta. Vuelve a
+                    actualizar en unos segundos.
+                </p>
+                <button type="button" @onclick="ActualizarAsync" disabled="@Cargando"
+                        class="boton-actualizar mt-5">
+                    <Icon Name="recargar" Size="17" />
+                    <span>Actualizar</span>
+                </button>
+            </div>
+        }
 </div>
 
 @* --- Modal de detalle --- *@
@@ -184,51 +318,25 @@
 
 @code {
     private EstadoApi? Estado { get; set; }
-    private PaginaLicitaciones? Pagina { get; set; }
+    private SemanaLicitaciones? Semana { get; set; }
 
-    /// <summary>
-    /// Hay una consulta en vuelo.
-    ///
-    /// No nace en true: arrancarla en true haría que la primera llamada a
-    /// <c>CargarAsync</c> saliera por su guarda <c>if (Cargando) return;</c> y la
-    /// consulta inicial no llegaría a lanzarse. El arranque lo cubre
-    /// <see cref="Ocupado"/>.
-    /// </summary>
     private bool Cargando { get; set; }
-
     private string? ErrorConsulta { get; set; }
-
-    /// <summary>
-    /// occupied la pantalla sin poder mostrar un resultado todavía: o hay una
-    /// consulta en vuelo, o aún no se sabe si la API está servible.
-    ///
-    /// Sin el segundo caso, el primer render (con <see cref="Estado"/> a null y
-    /// <see cref="Cargando"/> a false) no cumplía ninguna condición y pintaba un
-    /// hueco vacío durante el tiempo que tarda el servidor en insistir.
-    /// </summary>
-    private bool Ocupado => Cargando || (Estado is null && ErrorConsulta is null);
 
     /// <summary>Segundos que lleva esperando la respuesta, para el contador.</summary>
     private int SegundosEsperando { get; set; }
 
-    /// <summary>
-    /// Refresco automático mientras la pantalla está abierta.
-    ///
-    /// Es un System.Timers.Timer y no un bucle con await Task.Delay porque al
-    /// cortar Blazor hay que PARARLO. Un bucle seguiría consultando en el
-    /// servidor del navegador, gastando el cupo del ticket sin que nadie mire la
-    /// pantalla. Un temporizador sin desuscribir es exactamente ese bug.
-    /// </summary>
-    private System.Timers.Timer? temporizador;
+    // Selección
+    // Selección. NO se dejan en 0 a propósito: el primer render ocurre antes de
+    // que GetEstadoAsync responda, y con Mes = 0 la cabecera pedía el nombre del
+    // mes 0 y Blazor tiraba ArgumentOutOfRangeException. Es el mismo fallo de
+    // antes en otra forma: el estado de arranque necesita una representación,
+    // aunque no sea la buena.
+    private int Anio { get; set; } = DateTime.Today.Year;
+    private int Mes { get; set; } = DateTime.Today.Month;
+    private int NumeroSemana { get; set; } = 1;
 
-    /// <summary>
-    /// Cuenta los segundos de espera, a 1 por segundo.
-    ///
-    /// Hace falta porque Blazor solo repinta cuando termina un <c>await</c>: con
-    /// el servidor insistir un minuto, el "Consultando" se quedaba congelado
-    /// durante los 90 s y parecía una página colgada. El contador deja claro que
-    /// algo se está moviendo.
-    /// </summary>
+    private System.Timers.Timer? temporizador;
     private System.Timers.Timer? reloj;
 
     // Detalle abierto
@@ -238,8 +346,109 @@
     private bool detalleDesdeCache { get; set; }
     private string? errorDetalle { get; set; }
 
+    private static readonly string[] DiasSemana =
+        ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"];
+
     private string NombreEmpresa => Estado?.Empresa?.Nombre ?? "…";
     private int MinutosRefresco => Estado?.MinutosEntreRefrescos is > 0 ? Estado.MinutosEntreRefrescos : 5;
+
+    /// <summary>
+    /// occupied la pantalla sin poder mostrar un resultado todavía: o hay una
+    /// consulta en vuelo, o aún no se sabe si la API está servible.
+    /// </summary>
+    private bool Ocupado => Cargando || (Estado is null && ErrorConsulta is null);
+
+    /// <summary>
+    /// Nombre del mes, para el desplegable y los rótulos.
+    ///
+    /// Acota a 1..12 porque <c>DateTimeFormat.GetMonthName(0)</c> lanza
+    /// ArgumentOutOfRangeException, y que un rótulo tumbe la pantalla es peor que
+    /// un rótulo feo.
+    /// </summary>
+    private string NombreDeMes(int m)
+    {
+        m = Math.Clamp(m, 1, 12);
+
+        return Estado?.MesesDisponibles is { Count: >= 12 } nombres
+            ? nombres[m - 1]
+            : CultureInfo.CurrentCulture.DateTimeFormat.GetMonthName(m);
+    }
+
+    /// <summary>
+    /// Cuántas semanas tiene el mes elegido. Se calcula igual que en el servidor:
+    /// la última puede ser más corta y una puede caer entera en fin de semana.
+    ///
+    /// Con un año o un mes imposibles devuelve una sola semana en vez de lanzar:
+    /// <c>DateTime.DaysInMonth(0, 0)</c> revienta, y este valor se calcula en
+    /// cada render, también el primero.
+    /// </summary>
+    private List<int> SemanasDisponibles
+    {
+        get
+        {
+            var dias = Anio is < 1 or > 9999 || Mes is < 1 or > 12
+                ? 31
+                : DateTime.DaysInMonth(Anio, Mes);
+
+            var total = (dias + 6) / 7;
+            return Enumerable.Range(1, total).ToList();
+        }
+    }
+
+    /// <summary>
+    /// ¿Lo que se está mirando es la semana en que estamos? Decide si tiene
+    /// sentido el refresco automático: una semana pasada no va a cambiar.
+    /// </summary>
+    private bool EsSemanaActual
+    {
+        get
+        {
+            var hoy = DateOnly.FromDateTime(DateTime.Today);
+            return Anio == hoy.Year && Mes == hoy.Month && NumeroSemana == SemanaDe(hoy);
+        }
+    }
+
+    private static int SemanaDe(DateOnly d) => ((d.Day - 1) / 7) + 1;
+
+    // --- Rótulos del rango ---
+
+    private DateOnly? Desde => Semana?.Desde is { } d ? DateOnly.Parse(d) : null;
+    private DateOnly? Hasta => Semana?.Hasta is { } h ? DateOnly.Parse(h) : null;
+
+    private string RangoEnPalabras =>
+        $"la semana {NumeroSemana} de {NombreDeMes(Mes).ToLowerInvariant()} de {Anio}";
+
+    private string RangoCorto => $"Semana {NumeroSemana}";
+
+    private string TextoDiasHabiles =>
+        Semana is null
+            ? "los días hábiles de la semana"
+            : Semana.DiasHabiles == 1 ? "1 día hábil" : $"{Semana.DiasHabiles} días hábiles";
+
+    /// <summary>
+    /// Cuántos días se CONSULTARON de verdad. Distinto del total de la semana:
+    /// si la semana aún no termina, no se han preguntado los días futuros, y
+    /// decir "se consultaron 5" cuando se preguntaron 2 es mentir.
+    /// </summary>
+    private string TextoDiasConsultados =>
+        Semana is null
+            ? "los días hábiles de la semana"
+            : Semana.DiasConsultados == 1 ? "1 día hábil" : $"{Semana.DiasConsultados} días hábiles";
+
+    private string DiaCorto(DateOnly? d) =>
+        d is null ? "—" : $"{d.Value.Day} de {NombreDeMes(d.Value.Month).ToLowerInvariant()}";
+
+    private string DiaEnPalabras(DateOnly d) =>
+        $"{DiasSemana[(int)d.DayOfWeek]} {d.Day} de {NombreDeMes(d.Month).ToLowerInvariant()}";
+
+    private string DiasFallidosEnPalabras
+    {
+        get
+        {
+            var n = Semana?.DiasFallidos ?? 0;
+            return n == 1 ? "1 día" : $"{n} días";
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -249,38 +458,86 @@
         if (estado is null)
         {
             ErrorConsulta = error ?? "No se pudo conectar con el servidor.";
-
-            // Sin este repintado, el error no se vería nunca: el primer
-            // render ya salió con el panel de cargando, y como asignar
-            // campos no repinta, el aviso solo aparecería al terminar el
-            // siguiente await.
             Cargando = false;
             StateHasChanged();
             return;
         }
 
-        // Igual aquí: con el nombre de la empresa ya se puede pintar el
-        // encabezado, y el "Consultando" pasa a tener el contexto de a qué
-        // empresa se está mirando.
+        // Arranca en la semana en curso, que es lo que se mira casi siempre.
+        Anio = estado.Anio;
+        Mes = estado.Mes;
+        NumeroSemana = estado.Semana;
+
         StateHasChanged();
 
         await CargarAsync();
         ProgramarRefresco();
     }
 
+    // ------------------------------------------------------------------
+    // Filtros
+    // ------------------------------------------------------------------
+
+    private void CambiarAnio(ChangeEventArgs e)
+    {
+        // Se valida antes de guardar: un año imposible dejaría la pantalla
+        // en un estado que no se puede ni pintar.
+        if (int.TryParse(e.Value?.ToString(), out var n) && n is >= 1 and <= 9999 && n != Anio)
+        {
+            Anio = n;
+            AjustarSemanaAlMes();
+        }
+    }
+
+    private void CambiarMes(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var n) && n is >= 1 and <= 12 && n != Mes)
+        {
+            Mes = n;
+            AjustarSemanaAlMes();
+        }
+    }
+
+    private void CambiarSemana(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var n) && n >= 1 && n != NumeroSemana)
+        {
+            NumeroSemana = n;
+        }
+    }
+
     /// <summary>
-    /// Consulta las novedades de hoy.
-    ///
-    /// No lleva CancellationToken a propósito: si la cancelamos a mitad, el
-    /// servidor sigue insistiendo con sus reintentos y el trabajo se tira
-    /// (junto con el cupo). El botón queda bloqueado mientras tanto, así que no
-    /// se solapan peticiones.
+    /// Al cambiar de mes, la semana elegida puede no existir: octubre tiene 5 y
+    /// septiembre 5, pero no todos los meses. Se deja la última, que siempre
+    /// existe, en vez de dejar el número colgando sin opción a la que
+    /// pertenecer.
     /// </summary>
-    private async Task CargarAsync()
+    private void AjustarSemanaAlMes()
+    {
+        var maximo = SemanasDisponibles.Count;
+        if (NumeroSemana > maximo) NumeroSemana = maximo;
+        if (NumeroSemana < 1) NumeroSemana = 1;
+    }
+
+    /// <summary>Botón "Actualizar".</summary>
+    private Task ActualizarAsync() => CargarAsync(refrescar: true);
+
+    // ------------------------------------------------------------------
+    // Consulta
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Consulta la semana seleccionada.
+    ///
+    /// No lleva CancellationToken a propósito: si se cancela a mitad, el
+    /// servidor sigue insistiendo con sus reintentos y el trabajo se tira
+    /// (junto con el cupo). El botón queda bloqueado mientras tanto, así que
+    /// no se solapan peticiones.
+    /// </summary>
+    private async Task CargarAsync(bool refrescar = false)
     {
         // El guard salta en la recarga del temporizador mientras aún no ha
-        // terminado la anterior: el servidor no necesita dos consultas a la vez
-        // del mismo día, que además gastarían el cupo.
+        // terminado la anterior.
         if (Cargando) return;
 
         Cargando = true;
@@ -289,7 +546,7 @@
 
         try
         {
-            var (resultado, error) = await Api.GetHoyAsync();
+            var (resultado, error) = await Api.GetSemanaAsync(Anio, Mes, NumeroSemana, refrescar);
 
             if (error is not null)
             {
@@ -297,7 +554,7 @@
                 return;
             }
 
-            Pagina = resultado;
+            Semana = resultado;
         }
         finally
         {
@@ -320,7 +577,7 @@
 
             // Repintar a mano: al no haber ningún await en curso, Blazor solo
             // repintaría cuando terminara la consulta, y el contador se
-            // quedaría en 0 durante los 90 s.
+            // quedaría en 0 durante los 30 s.
             StateHasChanged();
         });
 
@@ -336,15 +593,19 @@
     }
 
     /// <summary>
-    /// Refresco periódico. Se para en Dispose.
+    /// Refresco automático, SOLO si se está mirando la semana en curso.
     ///
-    /// Con 5 minutos son 12 peticiones por hora: una fracción del cupo diario de
-    /// 10.000, y como el servidor insiste hasta un minuto cuando falla, la caché
-    /// de 4 minutos hace que la mayoría de estos refrescos pregunten de verdad.
+    /// Una semana pasada no va a cambiar: repreguntarla gastaría cuota para
+    /// devolver exactamente lo mismo. Por eso el temporizador se rearma al
+    /// cambiar de semana y no se programa en absoluto para las antiguas.
     /// </summary>
     private void ProgramarRefresco()
     {
-        if (MinutosRefresco <= 0) return;
+        temporizador?.Stop();
+        temporizador?.Dispose();
+        temporizador = null;
+
+        if (MinutosRefresco <= 0 || !EsSemanaActual) return;
 
         temporizador = new System.Timers.Timer
         {
@@ -352,9 +613,9 @@
             AutoReset = false,
         };
 
-        // AutoReset = false y se rearma al final: si el servidor tardó un minuto
-        // con sus reintentos, el siguiente disparo se cuenta desde que terminó y
-        // no se solapan. Con AutoReset = true se acumularían peticiones.
+        // AutoReset = false y se rearma al final: si el servidor tardó un
+        // minuto con sus reintentos, el siguiente disparo se cuenta desde que
+        // terminó y no se solapan.
         temporizador.Elapsed += async (_, _) =>
         {
             await InvokeAsync(async () =>

@@ -42,6 +42,16 @@ public sealed class MercadoPublicoOpciones
     /// </summary>
     public int MinutosDeCache { get; set; } = 4;
 
+    /// <summary>
+    /// Días de vida de la caché para los días YA PASADOS.
+    ///
+    /// Separate del de hoy a propósito: una licitación publicada hace meses no
+    /// cambia, así que borrarla a los 4 minutos obligaría a repreguntar cada vez
+    /// que se mira esa semana, que es lo contrario de lo que se quiere. Con 30
+    /// días, volver a una semana ya vista es instantáneo.
+    /// </summary>
+    public int DiasDeCacheHistorico { get; set; } = 30;
+
     /// <summary>Espera máxima a Mercado Público por petición.</summary>
     public int SegundosTimeout { get; set; } = 30;
 

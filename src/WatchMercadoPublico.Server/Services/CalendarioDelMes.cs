@@ -1,11 +1,11 @@
 namespace WatchMercadoPublico.Server.Services;
 
 /// <summary>
-/// Nombres de los meses en español, para las cabeceras.
+/// Nombres de los meses en español, para las cabeceras y el desplegable de mes.
 ///
-/// Antes aquí se repartía el mes en semanas y en días para pintar el selector.
-/// Ya no hay selector: la pantalla solo mira el día de hoy. De la clase entera
-/// solo sobrevive el nombre del mes, que se usa en las etiquetas.
+/// Las semanas del mes ya NO viven aquí: están en <see cref="SemanasDelMes"/>.
+/// Se separaron porque una cosa es "cómo se llama septiembre" y otra "qué días
+/// abarca su semana 3".
 /// </summary>
 public static class CalendarioDelMes
 {
@@ -17,4 +17,10 @@ public static class CalendarioDelMes
 
     /// <summary>Nombre del mes, para las cabeceras.</summary>
     public static string NombreMes(int mes) => Nombres[Math.Clamp(mes, 1, 12) - 1];
+
+    /// <summary>
+    /// Los doce meses, en orden, para el desplegable. Va en el servidor para
+    /// que el cliente no tenga su propia copia que se pueda desincronizar.
+    /// </summary>
+    public static string[] TodosLosMeses() => [.. Nombres];
 }

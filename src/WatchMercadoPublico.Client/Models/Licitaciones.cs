@@ -160,26 +160,66 @@ public sealed class ItemAdjudicado
 /// en un día una empresa publica pocas licitaciones. Sin "días pendientes",
 /// porque un día es una petición y o sale o no sale.
 /// </summary>
-public sealed class PaginaLicitaciones
+/// Una semana de licitaciones. Sustituye a la página de un solo día.
+public sealed class SemanaLicitaciones
 {
     public List<Licitacion> Items { get; set; } = [];
 
-    /// <summary>Cuántas se han publicado hoy.</summary>
+    /// <summary>Cuántas se han publicado en la semana.</summary>
     public int Total { get; set; }
 
-    /// <summary>El día consultado, en ISO (aaaa-mm-dd).</summary>
-    public string? Fecha { get; set; }
+    public int Anio { get; set; }
+    public int Mes { get; set; }
+    public int Semana { get; set; }
 
-    /// <summary>"3 de Octubre de 2026", para las cabeceras.</summary>
-    public string? FechaLegible { get; set; }
+    /// <summary>Primer día de la semana, en ISO. Puede ser sábado.</summary>
+    public string? Desde { get; set; }
 
-    /// <summary>Hoy es sábado o domingo. No es un error: lo normal es que no haya nada.</summary>
-    public bool EsFinDeSemana { get; set; }
+    /// <summary>Último día de la semana, en ISO. Puede ser domingo.</summary>
+    public string? Hasta { get; set; }
 
-    /// <summary>Salió de la caché del servidor sin gastar consulta.</summary>
+    /// <summary>Cuántos días hábiles tenía la semana (lunes a viernes).</summary>
+    public int DiasHabiles { get; set; }
+    /// <summary>
+    /// Cuántos de esos días se preguntaron DE VERDAD. Es menor que DiasHabiles
+    /// cuando la semana todavía no ha terminado: los días futuros no se
+    /// consultan porque no hay nada que preguntar, y no sería honesto contarlos
+    /// como fallidos.
+    /// </summary>
+    public int DiasConsultados { get; set; }
+
+    /// <summary>Días hábiles que todavía no han llegado. No es un fallo.</summary>
+    public int DiasPendientes { get; set; }
+
+    /// <summary>
+    /// Cuántos días NO se pudieron consultar.
+    ///
+    /// Es lo que permite no mentir: si es mayor que cero, lo que se ve está
+    /// incompleto y la pantalla tiene que decirlo. Un 0 aquí significa que se
+    /// preguntaron todos los días de verdad.
+    /// </summary>
+    public int DiasFallidos { get; set; }
+
+    /// <summary>Los días concretos que fallaron, en ISO.</summary>
+    public List<string> DiasSinRespuesta { get; set; } = [];
+
+    /// <summary>Sale de la caché del servidor sin gastar consulta.</summary>
     public bool DesdeCache { get; set; }
 
     public DateTimeOffset Consultado { get; set; }
+
+    /// <summary>¿Se pudo comprobar la semana entera?</summary>
+    public bool Completa => DiasFallidos == 0;
+
+    /// <summary>¿La semana todavía no ha terminado?</summary>
+    public bool AFuturo => DiasPendientes > 0;
+
+    /// <summary>Las licitaciones agrupadas por día, para no repetir el día en cada ficha.</summary>
+    public IEnumerable<IGrouping<DateOnly, Licitacion>> PorDia =>
+        Items
+            .Where(l => l.FechaPublicacion is not null)
+            .GroupBy(l => DateOnly.FromDateTime(l.FechaPublicacion!.Value.DateTime))
+            .OrderBy(g => g.Key);
 }
 
 /// <summary>La empresa vigilada, tal como viene de la configuración del servidor.</summary>
@@ -226,6 +266,27 @@ public sealed class EstadoApi
 
     public string? FechaLegible { get; set; }
     public bool EsFinDeSemana { get; set; }
+
+    // --- Qué se puede elegir en los desplegables ---
+    // Los calcula el servidor para que el cliente no tenga su propia copia que
+    // pueda desincronizarse: el número de semanas de un mes depende de cuántos
+    // días tiene, y cada sitio que lo calculara por su cuenta daría un número
+    // distinto.
+
+    /// <summary>La semana en que está hoy, dentro de su mes.</summary>
+    public int Semana { get; set; } = 1;
+
+    public int Anio { get; set; } = DateTime.Today.Year;
+    public int Mes { get; set; } = DateTime.Today.Month;
+
+    /// <summary>Años a elegir: el actual y cinco antes.</summary>
+    public List<int> AniosDisponibles { get; set; } = [];
+
+    /// <summary>Los doce nombres de mes, en español.</summary>
+    public List<string> MesesDisponibles { get; set; } = [];
+
+    /// <summary>Cuántas semanas tiene el mes en que está hoy.</summary>
+    public int SemanasDelMesActual { get; set; } = 5;
 
     /// <summary>Cada cuántos minutos se refresca sola la pantalla.</summary>
     public int MinutosEntreRefrescos { get; set; } = 5;

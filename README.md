@@ -399,14 +399,64 @@ aparecería ninguna novedad: el refresco automático sería decorativo.
 
 | Método | Ruta | Qué hace |
 |---|---|---|
-| `GET` | `/api/estado` | Empresa configurada, si hay ticket, día actual y cada cuánto se refresca. |
-| `GET` | `/api/hoy` | Licitaciones de hoy. Sin parámetros: el día y la empresa los pone el servidor. |
+| `GET` | `/api/estado` | Empresa configurada, si hay ticket, día actual, y **qué se puede elegir** en los tres desplegables: años, nombres de mes y cuántas semanas tiene el mes en curso. |
+| `GET` | `/api/semana?anio=&mes=&semana=&refrescar=` | Licitaciones de **una semana**: sus días hábiles y los días que no se pudieron consultar. |
 | `GET` | `/api/licitaciones/{codigo}` | Detalle de una licitación. `desdeCache` indica si gastó consulta. |
 | `POST` | `/api/refrescar` | Vacía la caché del proveedor para forzar consulta nueva. |
 
-Ya no existen `/api/proveedor` (buscar por RUT) ni `/api/calendario` (elegir
-día), ni los parámetros `anio`, `mes`, `semana`, `q`, `pagina` y `porPagina`.
-La pantalla es una consulta y ya está.
+`anio`, `mes` y `semana` van **explícitamente** como `[FromQuery]`. Son tipos
+simples, y sin el atributo el enlazador de minimal API los busca en la **ruta**,
+que no los tiene: responde `400` con el **cuerpo vacío**, un error que no dice
+nada de qué se Quejó.
+
+`refrescar=true` solo hace que se vuelva a preguntar el **día de hoy**. Los días
+pasados no se repreguntan porque no cambian, y repreguntarlos gastaría cupo para
+devolver justo lo mismo.
+
+Ya no existe `/api/hoy` (lo sustituyó `/api/semana`), ni `/api/proveedor`, ni
+`/api/calendario`, ni los parámetros `q`, `pagina` y `porPagina`.
+
+### La semana es la unidad, no el año
+
+Los tres filtros van **concatenados**: lo que se consulta es **una semana**, no
+un mes ni un año. No es una decisión de interfaz, es una consecuencia medida de
+la API:
+
+| Selección | Peticiones | Tiempo medido |
+|---|---|---|
+| Semana (5 días hábiles) | 5 | **~7 s** la primera vez, ~50 ms después |
+| Mes (22 días hábiles) | 22 | 4-5 min |
+| Año (261 días hábiles) | **261** | **50-55 min** |
+
+La API devuelve **un día por consulta**: no hay forma de preguntar "el mes de
+marzo" en una llamada. Encadenando los tres filtros, el rango máximo son cinco
+peticiones.
+
+### Días futuros: no se consultan, y no son un fallo
+
+Una semana que aún no ha terminado tiene días que no han llegado. La API no
+tiene nada que devolver de ellos, así que responde `500` y el cliente insistiría
+seis veces con esperas de 2 a 30 s. Una semana que empieza el día 4 del mes
+tenía **cuatro minutos y medio** de espera por tres días que no existen.
+
+Ahora los días posteriores a hoy **no se consultan** y se cuentan aparte, en
+`diasPendientes`. No van a `diasSinRespuesta` porque eso sería mentir: no falló
+nada, es que el día todavía no ha llegado. La respuesta trae las dos cuentas:
+
+```json
+{ "diasHabiles": 5, "diasConsultados": 2, "diasPendientes": 3, "diasFallidos": 0 }
+```
+
+### Un día que falla no tira la semana
+
+`ConsultarDiaAsync` devuelve `null` si agota los intentos, en vez de lanzar. El
+endpoint sigue con los demás días y anota el que falló en `diasSinRespuesta`.
+Antes un solo fallo dejaba la semana entera en error y se perdían los otros
+cuatro días, que sí se habían podido consultar.
+
+Solo se responde `502` cuando **ningún** día pudo consultarse. Es el único caso
+en que la pantalla no tiene nada que enseñar y no sería honesto devolver una
+lista vacía.
 
 `/api/...` devuelve **404 en JSON** para rutas desconocidas, antes del
 `MapFallbackToFile`, o la API devolvería el `index.html` de la SPA.
@@ -661,6 +711,11 @@ un `429` no se cachea. Van **uno a uno, con ~800 ms de pausa**.
 Por **síntoma**, no por causa interna:
 
 | Síntoma | Qué mirar |
+|---|---|
+| Tarda más de un minuto en una sola semana | Son 5 peticiones seguidas y cada una puede insistir un minuto. Si además tardó **cuatro minutos y medio**, se estaban consultando días futuros: comprueba `diasPendientes` en la respuesta. |
+| La semana sale "incompleta" | `diasFallidos` > 0. Son días que se intentaron y no respondieron; `diasSinRespuesta` dice cuáles. Los días que **no han llegado** van aparte, en `diasPendientes`, y no son un fallo. |
+| Los desplegables salen vacíos | `/api/estado` no llegó, o no devolvió `aniosDisponibles` y `mesesDisponibles`. |
+| Al abrir la página, la cabecera y nada debajo | Estado muerto: `Semana` a null sin error ni consulta en vuelo. Hay una rama `else` que lo evita, así que si aparece, hay que mirar la consola del navegador. |
 |---|---|
 | Se queda en "Cargando" tras publicar | Falta el target `SuperponerClienteBlazor`, o el `index.html` publicado sin sustituir. |
 | Cabecera y título, y debajo un hueco vacío durante un minuto | Estado muerto en el render: el panel no se pintaba porque `Estado` aún era `null` y `Estado is { Servible: true }` no se cumplía. Ver [el aviso que no se veía](#%EF%B8%8F-asignar-un-campo-no-repinta-el-consultando-no-sal%C3%ADa-en-un-minuto). |

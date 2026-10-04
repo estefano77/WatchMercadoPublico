@@ -231,6 +231,141 @@ select option:checked {
         var(--app-marca-c) 100%);
 }
 
+/* ---------------------------------------------------------------------------
+   Animaciones de la espera.
+
+   Una consulta de una semana son hasta cinco peticiones seguidas a la API, y con
+   los reintentos del servidor puede tardar medio minuto. Un texto "cargando"
+   fijo durante ese rato se lee como una página colgada, así que hay cuatro
+   señales en movimiento: el esqueleto, un punto que late, el icono que gira y
+   el contador de segundos.
+
+   Todas respetan prefers-reduced-motion: una animación que marea es el precio
+   de las esperas largas para quien no la soporta.
+   --------------------------------------------------------------------------- */
+
+/* Barrido de luz, como el esqueleto de carga de una tabla. */
+@keyframes brillo {
+    0%   { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+
+/* Entrada suave de los resultados: un poco de verticalidad da la sensación de
+   que algo se ha montado, en vez de haber cambiado de golpe. */
+@keyframes entrar {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes latir {
+    0%, 100% { opacity: 0.35; transform: scale(0.85); }
+    50%      { opacity: 1;    transform: scale(1); }
+}
+
+@keyframes girar {
+    to { transform: rotate(360deg); }
+}
+
+.esqueleto {
+    border-radius: 0.5rem;
+    background-color: var(--app-field);
+    background-image: linear-gradient(
+        90deg,
+        transparent 0%,
+        var(--app-hover) 50%,
+        transparent 100%);
+    background-size: 200% 100%;
+    animation: brillo 1.6s ease-in-out infinite;
+}
+
+.entrada-suave {
+    animation: entrar 0.28s ease-out both;
+}
+
+.punto-pulsante {
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 9999px;
+    background-color: var(--app-marca-a);
+    animation: latir 1.2s ease-in-out infinite;
+}
+
+.icono-girando {
+    display: inline-flex;
+    animation: girar 1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .esqueleto,
+    .entrada-suave,
+    .punto-pulsante,
+    .icono-girando {
+        animation: none;
+    }
+}
+
+/* ---------------------------------------------------------------------------
+   Controles de la barra de filtros.
+
+   El color de los <option> en modo oscuro se resuelve en otro sitio de este
+   archivo: los dibuja el sistema, no la página, y con el color por defecto
+   salen en gris sobre gris. Aquí solo va la forma.
+   --------------------------------------------------------------------------- */
+
+.campo {
+    width: 100%;
+    min-height: 42px;
+    border-radius: 0.75rem;
+    border: 1px solid var(--app-line);
+    background-color: var(--app-field);
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    color: var(--app-ink);
+}
+
+.campo:hover {
+    border-color: var(--app-line-strong);
+}
+
+.campo:focus-visible {
+    outline: 2px solid var(--app-marca-a);
+    outline-offset: 1px;
+}
+
+.boton-actualizar {
+    display: inline-flex;
+    min-height: 42px;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 0.75rem;
+    background-image: linear-gradient(135deg, var(--app-marca-a), var(--app-marca-b));
+    padding: 0.5rem 1.25rem;
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: #ffffff;
+    box-shadow: 0 10px 24px -14px rgb(109 40 217 / 0.7);
+    transition: filter 0.15s ease;
+}
+
+.boton-actualizar:hover:not(:disabled) {
+    filter: brightness(1.1);
+}
+
+.boton-actualizar:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+/* Tarjeta del esqueleto de carga. */
+.tarjeta-esqueleto {
+    border-radius: 1rem;
+    border: 1px solid var(--app-line);
+    background-color: var(--app-surface);
+    padding: 1.5rem;
+}
+
 .marca-texto {
     background-image: linear-gradient(100deg,
         var(--app-marca-a) 0%,

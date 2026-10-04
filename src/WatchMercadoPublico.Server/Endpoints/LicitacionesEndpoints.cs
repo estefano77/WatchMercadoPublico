@@ -1,4 +1,5 @@
 using System.Globalization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using WatchMercadoPublico.Server.Models;
 using WatchMercadoPublico.Server.Services;
@@ -42,7 +43,7 @@ public static class LicitacionesEndpoints
         var grupo = rutas.MapGroup("/api").WithTags("Mercado Público");
 
         grupo.MapGet("/estado", ObtenerEstado);
-        grupo.MapGet("/hoy", ObtenerHoy);
+        grupo.MapGet("/semana", ObtenerSemana);
         grupo.MapGet("/licitaciones/{codigo}", ObtenerDetalle);
         grupo.MapPost("/refrescar", Refrescar);
 
@@ -80,11 +81,22 @@ public static class LicitacionesEndpoints
                 config.CodigoProveedor,
             },
 
-            // El día que se está mirando, para que la cabecera lo diga y quede
-            // claro que no hay nada más que elegir.
+            // Lo que se está mirando, para que la cabecera lo diga.
+            Anio = hoy.Year,
+            Mes = hoy.Month,
+            Semana = SemanasDelMes.SemanaDe(hoy.Year, hoy.Month, hoy),
             Fecha = $"{hoy:yyyy-MM-dd}",
             FechaLegible = EtiquetaDe(hoy),
             EsFinDeSemana = EsFinDeSemana(hoy),
+
+            // Qué se puede elegir en los desplegables. Se calculan en el servidor
+            // y no en el cliente para que los tres desplegables digan siempre lo
+            // mismo: si el cliente calculara el número de semanas por su cuenta,
+            // un cambio de formato en un sitio y no en el otro mostraría
+            // semanas que no existen.
+            AniosDisponibles = SemanasDelMes.Anios(hoy.Year),
+            MesesDisponibles = CalendarioDelMes.TodosLosMeses(),
+            SemanasDelMesActual = SemanasDelMes.Cuantas(hoy.Year, hoy.Month),
 
             MinutosEntreRefrescos = config.MinutosRefresco,
 
@@ -94,18 +106,43 @@ public static class LicitacionesEndpoints
     }
 
     // =====================================================================
-    // Licitaciones de HOY
+    // Licitaciones de UNA SEMANA
     // =====================================================================
 
-    private static async Task<IResult> ObtenerHoy(
+    /// <summary>
+    /// Las licitaciones de una semana dentro de un mes: "semana 1 de septiembre
+    /// de 2026".
+    ///
+    /// Los tres filtros van CONCATENADOS a propósito. La alternativa —filtrar
+    /// solo por año— no es viable: la API devuelve UN día por consulta, así que
+    /// un año son 261 peticiones y casi una hora, medido. Encadenando los tres,
+    /// el rango máximo es una semana: cinco días hábiles, cinco peticiones, y
+    /// se responden en menos de un minuto.
+    ///
+    /// <paramref name="refrescar"/> solo ignora la caché del DÍA DE HOY. Los
+    /// días pasados no se vuelven a preguntar porque no cambian: repreguntarlos
+    /// gastaría cupo para devolver exactamente lo mismo.
+    /// </summary>
+    /// Los tres van como [FromQuery] explícito porque son tipos simples: sin el
+    /// atributo, el enlazador minimal API los busca en la RUTA —que no los tiene
+    /// — y responde 400 con el cuerpo vacío. Un error que no dice nada.
+    ///
+    /// Van AL FINAL a propósito: C# exige que los parámetros opcionales vayan
+    /// detrás de los obligatorios, y los servicios de DI no pueden llevar
+    /// valores por defecto —dárselos los ocultaría una falta de registro.
+    private static async Task<IResult> ObtenerSemana(
         MercadoPublicoCliente api,
         CacheMercadoPublico cache,
         IOptions<MercadoPublicoOpciones> opciones,
         ILoggerFactory registros,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromQuery] int anio,
+        [FromQuery] int mes,
+        [FromQuery] int semana,
+        [FromQuery] bool refrescar = false)
     {
         var config = opciones.Value;
-        var log = registros.CreateLogger("Hoy");
+        var log = registros.CreateLogger("Semana");
 
         if (!config.Servible)
             return Results.Problem(
@@ -115,55 +152,97 @@ public static class LicitacionesEndpoints
                 statusCode: StatusCodes.Status503ServiceUnavailable,
                 title: "API no configurada");
 
+        if (anio is < 2015 or > 2100 || mes is < 1 or > 12)
+            return Results.BadRequest(new { error = "El año o el mes no son válidos." });
+
+        var totalSemanas = SemanasDelMes.Cuantas(anio, mes);
+        if (semana < 1 || semana > totalSemanas)
+            return Results.BadRequest(new
+            {
+                error = $"El mes {mes:00}/{anio} no tiene semana {semana}. Tiene {totalSemanas}.",
+            });
+
+        var dias = SemanasDelMes.DiasHabiles(anio, mes, semana);
         var hoy = DateOnly.FromDateTime(DateTime.Today);
+
+        // Días que YA EXISTEN: los pasados y el de hoy. Los siguientes se
+        // separan aquí y no se consultan.
+        //
+        // No es una optimización, es un bug caro: la API no tiene nada que
+        // devolver de un día que aún no ha llegado, así que responde 500 y el
+        // cliente insiste seis veces con esperas de 2 a 30 s. Una semana que
+        // empieza en el día 4 del mes tiene tres días futuros, y eso son cuatro
+        // minutos y medio de espera para nada. Además, contarlos como "fallidos"
+        // sería mentira: no falló nada, es que todavía no hay día.
+        var consultables = dias.Where(d => d <= hoy).ToList();
+        var pendientes = dias.Where(d => d > hoy).ToList();
+
+        if (consultables.Count == 0)
+            return Results.Ok(ConstruirRespuesta(
+                anio, mes, semana, 0, [], [], pendientes.Count, desdeCache: true));
 
         try
         {
-            // El candado evita que dos pestañas abiertas disparen la misma
-            // consulta. Con reintentos de hasta un minuto, esperar aquí es
-            // preferible a machacar la API entre las dos.
+            // El candado evita que dos pestañas consulten lo mismo a la vez. Con
+            // reintentos de hasta un minuto, esperar aquí es preferible a
+            // machacar la API entre las dos.
             await cache.Candado.WaitAsync(ct);
             try
             {
-                var todas = cache.ObtenerDia(config.CodigoProveedor, hoy);
-                var desdeCache = todas is not null;
+                var todas = new List<Licitacion>();
+                var sinRespuesta = new List<string>();
+                var desdeCache = true;
 
-                if (todas is null)
+                foreach (var dia in consultables)
                 {
-                    todas = await ConsultarHoyAsync(config, api, cache, hoy, log, ct);
+                    var forzarConsulta = refrescar && dia == hoy;
 
-                    if (todas is null)
+                    var lote = forzarConsulta ? null : cache.ObtenerDia(config.CodigoProveedor, dia);
+
+                    if (lote is null)
                     {
-                        // No se devuelve una lista vacía: se devuelve el fallo.
-                        // Decir "0 licitaciones" cuando no se pudo preguntar es
-                        // mentir, y el usuario no tiene forma de enterarse.
-                        log.LogWarning(
-                            "No se pudo consultar el día de hoy para {Proveedor}", config.CodigoProveedor);
+                        desdeCache = false;
 
-                        return Results.Json(
-                            new
-                            {
-                                error = "Mercado Público no respondió. Se intentó varias veces durante " +
-                                        "un minuto. Puede estar con problemas en este momento; " +
-                                        "vuelve a intentarlo en unos segundos.",
-                                fecha = $"{hoy:yyyy-MM-dd}",
-                            },
-                            statusCode: StatusCodes.Status502BadGateway);
+                        lote = await ConsultarDiaAsync(config, api, cache, dia, log, ct);
+
+                        if (lote is null)
+                        {
+                            // Un día que falla NO tira el resto de la semana. Antes
+                            // sí lo hacía, y un solo fallo dejaba la semana entera
+                            // en error.
+                            sinRespuesta.Add($"{dia:yyyy-MM-dd}");
+                            log.LogWarning("El día {Dia} de la semana no se pudo consultar", dia);
+                            continue;
+                        }
                     }
+
+                    todas.AddRange(lote);
+                }
+
+                // Si NO se pudo comprobar ningún día que existiera, sí es un fallo entero: no
+                // se devuelve una lista vacía por no haber preguntado.
+                if (sinRespuesta.Count == consultables.Count)
+                {
+                    log.LogWarning(
+                        "No se pudo consultar ningún día de la semana {Anio}-{Mes:00}-{Semana}",
+                        anio, mes, semana);
+
+                    return Results.Json(
+                        new
+                        {
+                            error = "Mercado Público no respondió. Se intentó varias veces durante " +
+                                    "un minuto. Puede estar con problemas en este momento; " +
+                                    "vuelve a intentarlo en unos segundos.",
+                            anio, mes, semana,
+                        },
+                        statusCode: StatusCodes.Status502BadGateway);
                 }
 
                 var ordenadas = AplicarOrden(todas);
 
-                return Results.Ok(new
-                {
-                    items = ordenadas.Select(AñadirDetalleCache).ToList(),
-                    total = ordenadas.Count,
-                    fecha = $"{hoy:yyyy-MM-dd}",
-                    fechaLegible = EtiquetaDe(hoy),
-                    esFinDeSemana = EsFinDeSemana(hoy),
-                    desdeCache,
-                    consultado = DateTimeOffset.UtcNow,
-                });
+                return Results.Ok(ConstruirRespuesta(
+                    anio, mes, semana, consultables.Count, sinRespuesta, ordenadas,
+                    pendientes.Count, desdeCache));
             }
             finally
             {
@@ -174,6 +253,60 @@ public static class LicitacionesEndpoints
         {
             return Results.Json(new { error = ex.Message }, statusCode: ex.CodigoHttp);
         }
+    }
+
+    /// <summary>
+    /// Respuesta de una semana. Un tipo explícito en vez de un objeto anónimo
+    /// compuesto: el mensaje se armaba "con la respuesta vacía y luego se le
+    /// añadían campos", y con <c>object</c> no se pueden leer. Además obliga a
+    /// que todas las respuestas —venga vacía o no— lleven los mismos campos.
+    /// </summary>
+    private sealed record RespuestaSemana(
+        int Anio,
+        int Mes,
+        int Semana,
+        string Desde,
+        string Hasta,
+        int DiasHabiles,
+        int DiasConsultados,
+        int DiasFallidos,
+        List<string> DiasSinRespuesta,
+        int DiasPendientes,
+        int Total,
+        List<Licitacion> Items,
+        bool DesdeCache,
+        DateTimeOffset Consultado);
+
+    private static RespuestaSemana ConstruirRespuesta(
+        int anio,
+        int mes,
+        int semana,
+        int diasConsultados,
+        List<string> sinRespuesta,
+        List<Licitacion> items,
+        int diasPendientes,
+        bool desdeCache)
+    {
+        // El rango se muestra completo, fines de semana incluidos: el lunes y el
+        // domingo de la semana son los dos extremos de lo que se está mirando,
+        // aunque solo se consulten los días hábiles de en medio.
+        var primero = SemanasDelMes.PrimerDia(anio, mes, semana);
+
+        return new RespuestaSemana(
+            anio,
+            mes,
+            semana,
+            $"{primero:yyyy-MM-dd}",
+            $"{primero.AddDays(6):yyyy-MM-dd}",
+            diasConsultados + diasPendientes,
+            diasConsultados,
+            sinRespuesta.Count,
+            sinRespuesta,
+            diasPendientes,
+            items.Count,
+            items.Select(AñadirDetalleCache).ToList(),
+            desdeCache,
+            DateTimeOffset.UtcNow);
     }
 
     // =====================================================================
@@ -244,16 +377,20 @@ public static class LicitacionesEndpoints
     // =====================================================================
 
     /// <summary>
-    /// Consulta el día de HOY insistiendo hasta que la API responda.
+    /// Consulta UN día insistiendo hasta que la API responda.
     ///
-    /// Devuelve null si se agotaron los intentos; no lanza, para que el endpoint
-    /// pueda responder con un error en vez de con una lista vacía.
+    /// Devuelve null si se agotaron los intentos; no lanza, para que quien llama
+    /// pueda seguir con los demás días y marcar solo este como desconocido.
     ///
     /// La espera crece por dos motivos: un 500 puntual se recupera solo con
     /// esperar, y ante un 429 el problema es el ritmo, no un fallo concreto. El
     /// tope de 30 s evita que una espera se alargue hasta perder el sentido.
+    ///
+    /// Antes esta rutina se llamaba ConsultarHoyAsync y solo había un día. Ahora
+    /// hay hasta cinco en una semana, y por eso devuelve null en vez de Fallar:
+    /// un día sin respuesta no puede ser motivo para perder los otros cuatro.
     /// </summary>
-    private static async Task<List<Licitacion>?> ConsultarHoyAsync(
+    private static async Task<List<Licitacion>?> ConsultarDiaAsync(
         MercadoPublicoOpciones config,
         MercadoPublicoCliente api,
         CacheMercadoPublico cache,
@@ -284,14 +421,14 @@ public static class LicitacionesEndpoints
                 if (intento >= IntentosPorDia)
                 {
                     log.LogWarning(
-                        "Se agotaron {Intentos} intentos para el día de hoy: {Motivo}",
-                        IntentosPorDia, ex.Message);
+                        "Se agotaron {Intentos} intentos para el {Dia}: {Motivo}",
+                        IntentosPorDia, $"{dia:yyyy-MM-dd}", ex.Message);
                     return null;
                 }
 
                 log.LogInformation(
-                    "Intento {Intento} de {Total} fallido ({Motivo}). Reintento en {Espera:F0} s.",
-                    intento, IntentosPorDia, ex.Message, espera.TotalSeconds);
+                    "{Dia} intento {Intento} de {Total} fallido ({Motivo}). Reintento en {Espera:F0} s.",
+                    $"{dia:yyyy-MM-dd}", intento, IntentosPorDia, ex.Message, espera.TotalSeconds);
 
                 await Task.Delay(espera, ct);
 

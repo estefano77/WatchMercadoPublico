@@ -34,12 +34,25 @@ public sealed class CacheMercadoPublico
     private readonly Dictionary<string, EntradaDetalle> porDetalle = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim candado = new(1, 1);
     private readonly TimeSpan caducidad;
+    private readonly TimeSpan caducidadHistorica;
     private readonly ILogger<CacheMercadoPublico> log;
 
-    public CacheMercadoPublico(ILogger<CacheMercadoPublico> log, TimeSpan caducidad)
+    public CacheMercadoPublico(
+        ILogger<CacheMercadoPublico> log,
+        TimeSpan caducidad,
+        TimeSpan? caducidadHistorica = null)
     {
         this.log = log;
         this.caducidad = caducidad <= TimeSpan.Zero ? TimeSpan.FromMinutes(15) : caducidad;
+
+        // Un día PASADO no cambia: una licitación publicada el 14 de enero sigue
+        // siendo la misma en diciembre. Caducarla a los 4 minutos obligaría a
+        // volver a preguntar por semanas ya consultadas, que es justo lo que
+        // se cachea para no gastar el cupo del ticket. Por eso los días
+        // anteriores a hoy viven mucho más.
+        this.caducidadHistorica = caducidadHistorica is { } h && h > TimeSpan.Zero
+            ? h
+            : TimeSpan.FromDays(30);
     }
 
     private static string ClaveDia(string proveedor, DateOnly fecha) => $"{proveedor}|{fecha:yyyyMMdd}";
@@ -56,9 +69,21 @@ public sealed class CacheMercadoPublico
     public List<Licitacion>? ObtenerDia(string proveedor, DateOnly fecha) =>
         TieneDia(proveedor, fecha) ? porDia[ClaveDia(proveedor, fecha)].Datos : null;
 
-    public void GuardarDia(string proveedor, DateOnly fecha, List<Licitacion> datos) =>
+    /// <summary>
+    /// Guarda el listado de un día.
+    ///
+    /// El plazo depende de si el día ya pasó: hoy caduca en minutos para que
+    /// aparezca lo que se publica durante la jornada; un día pasado dura mucho
+    /// más porque no va a cambiar.
+    /// </summary>
+    public void GuardarDia(string proveedor, DateOnly fecha, List<Licitacion> datos)
+    {
+        var esHoy = fecha == DateOnly.FromDateTime(DateTime.Today);
+        var plazo = esHoy ? caducidad : caducidadHistorica;
+
         porDia[ClaveDia(proveedor, fecha)] =
-            new EntradaDia(DateTimeOffset.UtcNow.Add(caducidad), datos);
+            new EntradaDia(DateTimeOffset.UtcNow.Add(plazo), datos);
+    }
 
     // ------------------------------------------------------------------
     // Detalles
@@ -128,9 +153,14 @@ public static class CacheMercadoPublicoExtensions
         var minutos = configuracion.GetValue<int?>(
             $"{MercadoPublicoOpciones.Seccion}:MinutosDeCache") ?? 15;
 
+        // Días ya pasados: 30 días por defecto, o lo que diga la configuración.
+        var minutosHistoricos = configuracion.GetValue<int?>(
+            $"{MercadoPublicoOpciones.Seccion}:DiasDeCacheHistorico") ?? 30;
+
         servicios.AddSingleton(sp => new CacheMercadoPublico(
             sp.GetRequiredService<ILogger<CacheMercadoPublico>>(),
-            TimeSpan.FromMinutes(Math.Max(1, minutos))));
+            TimeSpan.FromMinutes(Math.Max(1, minutos)),
+            TimeSpan.FromDays(Math.Max(1, minutosHistoricos))));
 
         return servicios;
     }
