@@ -1,0 +1,62 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WatchMercadoPublico.Client\WatchMercadoPublico.Client.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      La configuración local contiene el TICKET de Mercado Público: es una
+      credencial personal y no debe viajar en la publicación ni en el
+      repositorio. En producción el ticket va por variable de entorno:
+        MercadoPublico__Ticket
+    -->
+    <Content Update="appsettings.Development.json" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
+  <!--
+    ===================================================================
+    Publicación del cliente Blazor WebAssembly
+
+    Al publicar el servidor, el SDK copia el index.html ORIGINAL del cliente
+    (con el token #[.{fingerprint}] sin sustituir) junto a los archivos de
+    _framework con "huella" (p. ej. blazor.webassembly.w3qd1tpl0e.js).
+    El navegador pide "_framework/blazor.webassembly" (el # corta la URL),
+    recibe un 404 y la aplicación se queda en "Cargando".
+
+    La publicación independiente del cliente genera el index.html correcto:
+      - script con src="_framework/blazor.webassembly.js"
+      - un importmap que mapea ese nombre al archivo con huella
+
+    Este target superpone esa wwwroot en la salida final del servidor, para que
+    cualquier 'dotnet publish' (manual, script de despliegue o CI) produzca un
+    sitio funcional.
+
+    NO LO QUITES: sin él, la publicación del servidor deja la app en "Cargando".
+    ===================================================================
+  -->
+  <Target Name="SuperponerClienteBlazor" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
+    <PropertyGroup>
+      <_SalidaCliente>$([MSBuild]::NormalizeDirectory('$(BaseIntermediateOutputPath)', 'client-publish'))</_SalidaCliente>
+      <_ProyectoCliente>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '..', 'WatchMercadoPublico.Client', 'WatchMercadoPublico.Client.csproj'))</_ProyectoCliente>
+    </PropertyGroup>
+
+    <Message Importance="high" Text="Superponiendo la publicacion de Blazor WebAssembly..." />
+    <Exec Command="dotnet publish &quot;$(_ProyectoCliente)&quot; -c $(Configuration) -o &quot;$(_SalidaCliente.TrimEnd('\').TrimEnd('/'))&quot; -v quiet --nologo" />
+
+    <ItemGroup>
+      <_WwwRootCliente Include="$(_SalidaCliente)wwwroot\**\*" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(_WwwRootCliente)"
+          DestinationFiles="@(_WwwRootCliente->'$(PublishDir)wwwroot\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+
+    <RemoveDir Directories="$(_SalidaCliente)" />
+  </Target>
+
+</Project>

@@ -1,0 +1,478 @@
+@*
+    Modal con el detalle de una licitación.
+
+    El detalle sale del endpoint ?codigo=… y trae mucha más información que el
+    listado: organismo comprador con su RUT, fechas de cada etapa, monto
+    estimado y adjudicación. Todo eso son datos que vienen de fuera, así que
+    van como TEXTO de Blazor (que escapa siempre), nunca como HTML.
+
+    Todas las fechas están agrupadas en "hitos" para no hacer una tabla de 15
+    filas que nadie lee: primero lo que decide si se postula (cierre), después
+    el resto.
+*@
+
+@if (Licitacion is not null)
+{
+    <div class="fixed inset-0 z-50 flex items-end justify-center sm:items-center"
+         role="dialog" aria-modal="true" aria-labelledby="titulo-detalle">
+
+        <div class="absolute inset-0 bg-scrim backdrop-blur-sm"
+             @onclick="CerrarAsync"></div>
+
+        <div class="animate-toast relative flex max-h-[90dvh] w-full max-w-3xl flex-col
+                    overflow-hidden rounded-t-3xl border border-line bg-surface shadow-card
+                    sm:max-h-[88dvh] sm:rounded-3xl">
+
+            @* Cabecera *@
+            <div class="flex items-start justify-between gap-4 border-b border-line px-5 py-4 sm:px-6">
+                <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="@ClaseEstado">@EstadoTexto</span>
+                        @if (!string.IsNullOrWhiteSpace(Detalle?.Tipo))
+                        {
+                            <span class="rounded-md border border-line bg-field px-2 py-0.5 text-[0.65rem] font-bold tracking-wide text-muted uppercase">
+                                @Detalle.Tipo
+                            </span>
+                        }
+                        <span class="font-mono text-[0.7rem] font-semibold text-muted">
+                            @Licitacion.CodigoExterno
+                        </span>
+                    </div>
+
+                    <h2 id="titulo-detalle"
+                        class="mt-1.5 line-clamp-3 text-base leading-snug font-bold text-ink">
+                        @(Detalle?.Nombre ?? Licitacion.Nombre)
+                    </h2>
+                </div>
+
+                <button type="button" @onclick="CerrarAsync"
+                        class="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-line text-muted transition hover:bg-hover hover:text-ink"
+                        aria-label="Cerrar detalle">
+                    <Icon Name="x" Size="18" />
+                </button>
+            </div>
+
+            @* Cuerpo *@
+            <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4 sm:px-6">
+                @if (Cargando)
+                {
+                    <div class="flex flex-col items-center justify-center gap-3 py-16">
+                        <Icon Name="cargando" Size="28" Class="animate-spin text-violet-500" />
+                        <p class="text-sm text-muted">Consultando el detalle en Mercado Público…</p>
+                    </div>
+                }
+                else if (MensajeError is not null)
+                {
+                    <Aviso Tipo="error" Mensaje="@MensajeError" Titulo="No se pudo cargar el detalle" Cerrable="false" />
+                }
+                else if (Detalle is null)
+                {
+                    <p class="py-12 text-center text-sm text-muted">
+                        Mercado Público no devolvió información para esta licitación.
+                    </p>
+                }
+                else
+                {
+                    <div class="space-y-5">
+
+                        @* Monto: lo primero que se mira.
+                           El adjudicado va arriba y el estimado debajo: son
+                           cosas distintas (lo que se contrató frente a lo que
+                           se presupuestó) y en una sola cifra grande se
+                           confundían. Con la licitación de prueba: 147.432.000
+                           adjudicados contra 192.000.000 estimados. *@
+                        <div class="rounded-2xl border border-line bg-field px-4 py-4">
+                            @if (Detalle.TotalAdjudicado is not null)
+                            {
+                                <p class="text-[0.65rem] font-semibold tracking-wide text-muted uppercase">
+                                    @(Detalle.UnSoloItem ? "Monto unitario adjudicado" : "Total adjudicado")
+                                </p>
+                                <p class="mt-1 text-2xl font-extrabold tracking-tight text-ink tabular-nums">
+                                    @Formato.MontoConUnidad(Detalle.TotalAdjudicado, Detalle.Moneda)
+                                </p>
+
+                                @if (Detalle.UnSoloItem && Detalle.Items[0] is { } unico)
+                                {
+                                    @* <div> y no <text class=…>: los <text> de Razor
+                                       son solo para saltos de línea y no admiten
+                                       atributos (RZ1023). *@
+                                    <div class="mt-1.5 text-xs leading-relaxed text-ink-soft">
+                                        @if (unico.CantidadEfectiva != 1)
+                                        {
+                                            <p>
+                                                @Formato.Cantidad(unico.CantidadEfectiva)
+                                                @(!string.IsNullOrWhiteSpace(unico.UnidadMedida) ? unico.UnidadMedida.ToLowerInvariant() : "unidades")
+                                                × @Formato.Monto(unico.MontoUnitario)
+                                                @(!string.IsNullOrWhiteSpace(unico.UnidadMedida) ? " por " + unico.UnidadMedida.ToLowerInvariant() : null)
+                                            </p>
+                                        }
+                                        @if (!string.IsNullOrWhiteSpace(unico.NombreProducto))
+                                        {
+                                            <p class="mt-1 text-muted">@unico.NombreProducto</p>
+                                        }
+                                        @if (!string.IsNullOrWhiteSpace(unico.NombreProveedor))
+                                        {
+                                            <p class="mt-1 text-muted">
+                                                Adjudicado a @unico.NombreProveedor
+                                                @(!string.IsNullOrWhiteSpace(unico.RutProveedor) ? " · RUT " + unico.RutProveedor : null)
+                                            </p>
+                                        }
+                                    </div>
+                                }
+                            }
+                            else
+                            {
+                                <p class="text-[0.65rem] font-semibold tracking-wide text-muted uppercase">
+                                    @(Detalle.Estimacion == 2 ? "Precio referencial" : "Monto estimado")
+                                </p>
+                                <p class="mt-1 text-2xl font-extrabold tracking-tight text-ink tabular-nums">
+                                    @Formato.MontoConUnidad(Detalle.MontoEstimado, Detalle.Moneda)
+                                </p>
+                                @if (!string.IsNullOrWhiteSpace(Detalle.Estado))
+                                {
+                                    <p class="mt-1.5 text-xs text-muted">
+                                        Todavía no adjudicada, así que aún no hay monto unitario.
+                                    </p>
+                                }
+                            }
+
+                            @* El estimado se conserva debajo como referencia, también
+                               cuando ya hay adjudicación: la diferencia entre lo
+                               presupuestado y lo adjudicado es información. *@
+                            @if (Detalle.TotalAdjudicado is not null && Detalle.MontoEstimado is not null)
+                            {
+                                <p class="mt-2.5 border-t border-line pt-2.5 text-xs text-muted">
+                                    @(Detalle.Estimacion == 2 ? "Precio referencial" : "Monto estimado"):
+                                    <span class="font-semibold text-ink-soft">
+                                        @Formato.MontoConUnidad(Detalle.MontoEstimado, Detalle.Moneda)
+                                    </span>
+                                    @if (DiferenciaAdjudicado is not null)
+                                    {
+                                        <text> · @DiferenciaAdjudicado</text>
+                                    }
+                                </p>
+                            }
+                        </div>
+
+                        @* Varios ítems: tabla con una fila por producto *@
+                        @if (Detalle.Items.Count > 1)
+                        {
+                            <section>
+                                <h3 class="mb-2 text-[0.65rem] font-bold tracking-wide text-muted uppercase">
+                                    Ítems adjudicados
+                                </h3>
+                                <div class="overflow-hidden rounded-2xl border border-line">
+                                    <table class="w-full border-collapse text-left text-xs">
+                                        <thead class="bg-field text-[0.62rem] tracking-wide text-muted uppercase">
+                                            <tr>
+                                                <th scope="col" class="px-3 py-2 font-bold">Ítem</th>
+                                                <th scope="col" class="px-3 py-2 font-bold text-right">Cant.</th>
+                                                <th scope="col" class="px-3 py-2 font-bold text-right">Unitario</th>
+                                                <th scope="col" class="px-3 py-2 font-bold text-right">Subtotal</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var item in Detalle.Items)
+                                            {
+                                                <tr class="border-t border-line">
+                                                    <td class="px-3 py-2.5">
+                                                        <p class="leading-snug font-semibold text-ink">
+                                                            @(string.IsNullOrWhiteSpace(item.NombreProducto)
+                                                                ? $"Ítem {item.Correlativo}"
+                                                                : item.NombreProducto)
+                                                        </p>
+                                                        @if (!string.IsNullOrWhiteSpace(item.NombreProveedor))
+                                                        {
+                                                            <p class="mt-0.5 text-[0.68rem] text-muted">
+                                                                @item.NombreProveedor
+                                                                @(!string.IsNullOrWhiteSpace(item.RutProveedor)
+                                                                    ? " · " + item.RutProveedor
+                                                                    : null)
+                                                            </p>
+                                                        }
+                                                    </td>
+                                                    <td class="px-3 py-2.5 text-right tabular-nums text-ink-soft">
+                                                        @Formato.Cantidad(item.CantidadEfectiva)
+                                                    </td>
+                                                    <td class="px-3 py-2.5 text-right tabular-nums text-ink-soft">
+                                                        @Formato.Monto(item.MontoUnitario)
+                                                    </td>
+                                                    <td class="px-3 py-2.5 text-right font-bold tabular-nums text-ink">
+                                                        @Formato.Monto(item.Subtotal)
+                                                    </td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                        <tfoot>
+                                            <tr class="border-t-2 border-line-strong bg-field">
+                                                <td colspan="3" class="px-3 py-2.5 text-[0.65rem] font-bold tracking-wide text-muted uppercase">
+                                                    Total adjudicado
+                                                </td>
+                                                <td class="px-3 py-2.5 text-right text-sm font-extrabold tabular-nums text-ink">
+                                                    @Formato.Monto(Detalle.TotalAdjudicado)
+                                                </td>
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(Detalle.Moneda) && Detalle.Moneda != "CLP")
+                                {
+                                    <p class="mt-1.5 text-[0.68rem] text-muted">
+                                        Importes en @Detalle.Moneda. El total no se convierte a CLP.
+                                    </p>
+                                }
+                            </section>
+                        }
+
+                        @* Organismo comprador *@
+                        @if (!string.IsNullOrWhiteSpace(Detalle.NombreOrganismo))
+                        {
+                            <section>
+                                <h3 class="mb-2 text-[0.65rem] font-bold tracking-wide text-muted uppercase">
+                                    Organismo comprador
+                                </h3>
+                                <div class="flex items-start gap-3 rounded-2xl border border-line bg-surface px-4 py-3">
+                                    <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-violet-500/15 text-violet-500">
+                                        <Icon Name="edificio" Size="18" />
+                                    </span>
+                                    <div class="min-w-0">
+                                        <p class="text-sm leading-snug font-bold text-ink">
+                                            @Detalle.NombreOrganismo
+                                        </p>
+                                        <p class="mt-0.5 text-xs text-muted">
+                                            @if (!string.IsNullOrWhiteSpace(Detalle.RutOrganismo))
+                                            {
+                                                <span class="font-mono">@Detalle.RutOrganismo</span>
+                                                <span> · </span>
+                                            }
+                                            @if (!string.IsNullOrWhiteSpace(Ubicacion))
+                                            {
+                                                <span>@Ubicacion</span>
+                                            }
+                                            @if (Detalle.CodigoOrganismo is > 0)
+                                            {
+                                                <span> · código @Detalle.CodigoOrganismo</span>
+                                            }
+                                        </p>
+                                    </div>
+                                </div>
+                            </section>
+                        }
+
+                        @* Cierre: lo que decide si se postula *@
+                        <section>
+                            <h3 class="mb-2 text-[0.65rem] font-bold tracking-wide text-muted uppercase">
+                                Cierre de recepción de ofertas
+                            </h3>
+                            <div class="rounded-2xl border border-line bg-surface px-4 py-3">
+                                <div class="flex flex-wrap items-center justify-between gap-2">
+                                    <p class="text-lg font-extrabold text-ink">
+                                        @Formato.FechaHora(Detalle.FechaCierre)
+                                    </p>
+                                    <span class="@ClaseCierre">@TextoCierre</span>
+                                </div>
+                                @if (Detalle.DiasCierreLicitacion is { } dias and > 0)
+                                {
+                                    <p class="mt-1 text-xs text-muted">
+                                        Convocatoria publicada @Formato.Fecha(Detalle.FechaPublicacion)
+                                    </p>
+                                }
+                            </div>
+                        </section>
+
+                        @* Hitos *@
+                        @if (Hitos.Count > 0)
+                        {
+                            <section>
+                                <h3 class="mb-2 text-[0.65rem] font-bold tracking-wide text-muted uppercase">
+                                    Hitos del proceso
+                                </h3>
+                                <ol class="space-y-0">
+                                    @foreach (var hito in Hitos)
+                                    {
+                                        <li class="flex gap-3 pb-3 last:pb-0">
+                                            <span class="mt-1 h-2 w-2 shrink-0 rounded-full bg-violet-500"></span>
+                                            <div class="min-w-0 flex-1">
+                                                <p class="text-xs text-muted">@hito.Etiqueta</p>
+                                                <p class="text-sm font-semibold text-ink-soft">
+                                                    @Formato.FechaHora(hito.Fecha)
+                                                </p>
+                                            </div>
+                                        </li>
+                                    }
+                                </ol>
+                            </section>
+                        }
+
+                        @* Adjudicación *@
+                        @if (Detalle.NumeroOferentes is > 0 || !string.IsNullOrWhiteSpace(Detalle.UrlActa))
+                        {
+                            <section>
+                                <h3 class="mb-2 text-[0.65rem] font-bold tracking-wide text-muted uppercase">
+                                    Adjudicación
+                                </h3>
+                                <div class="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-surface px-4 py-3">
+                                    <div class="flex flex-wrap gap-x-6 gap-y-1">
+                                        @if (Detalle.NumeroOferentes is > 0)
+                                        {
+                                            <span class="text-xs text-muted">
+                                                Oferentes
+                                                <span class="ml-1 text-sm font-bold text-ink">@Detalle.NumeroOferentes</span>
+                                            </span>
+                                        }
+                                        @if (!string.IsNullOrWhiteSpace(Detalle.NumeroAdjudicacion))
+                                        {
+                                            <span class="text-xs text-muted">
+                                                Acta N°
+                                                <span class="ml-1 text-sm font-bold text-ink">@Detalle.NumeroAdjudicacion</span>
+                                            </span>
+                                        }
+                                    </div>
+                                    @if (!string.IsNullOrWhiteSpace(Detalle.UrlActa))
+                                    {
+                                        <a href="@Detalle.UrlActa" target="_blank" rel="noopener noreferrer"
+                                           class="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border border-line px-3 text-xs font-bold text-ink-soft transition hover:border-violet-400/50 hover:text-violet-500">
+                                            Ver acta
+                                            <Icon Name="externo" Size="13" />
+                                        </a>
+                                    }
+                                </div>
+                            </section>
+                        }
+
+                        @* Descripción *@
+                        @if (!string.IsNullOrWhiteSpace(Detalle.Descripcion))
+                        {
+                            <section>
+                                <h3 class="mb-2 text-[0.65rem] font-bold tracking-wide text-muted uppercase">
+                                    Descripción
+                                </h3>
+                                <p class="rounded-2xl border border-line bg-surface px-4 py-3 text-sm leading-relaxed whitespace-pre-line text-ink-soft">
+                                    @Detalle.Descripcion
+                                </p>
+                            </section>
+                        }
+
+                        <p class="text-center text-[0.7rem] text-muted">
+                            @(DesdeCache
+                                ? "Detalle servido desde la caché del servidor (no gastó consulta)."
+                                : "Detalle consultado a Mercado Público.")
+                        </p>
+                    </div>
+                }
+            </div>
+
+            @* Pie *@
+            <div class="flex items-center justify-between gap-3 border-t border-line px-5 py-3 sm:px-6">
+                <a href="@UrlMercadoPublico" target="_blank" rel="noopener noreferrer"
+                   class="inline-flex min-h-[40px] items-center gap-1.5 text-xs font-bold text-violet-500 transition hover:brightness-110">
+                    Ver en mercadopublico.cl
+                    <Icon Name="externo" Size="13" />
+                </a>
+                <button type="button" @onclick="CerrarAsync"
+                        class="inline-flex min-h-[40px] items-center rounded-xl border border-line px-4 text-xs font-bold text-ink-soft transition hover:bg-hover">
+                    Cerrar
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>Licitación abierta. Puede ser null si aún no hay nada.</summary>
+    [Parameter] public Licitacion? Licitacion { get; set; }
+
+    /// <summary>Detalle ya cargado (null mientras se pide).</summary>
+    [Parameter] public DetalleLicitacion? Detalle { get; set; }
+
+    [Parameter] public bool Cargando { get; set; }
+    [Parameter] public bool DesdeCache { get; set; }
+
+    /// <summary>
+    /// Mensaje de error a mostrar. OJO con el nombre: un parámetro de tipo
+    /// string recibe LITERAL lo que se escriba, así que hay que pasarlo como
+    /// <c>Error="@errorDetalle"</c> y no <c>Error="errorDetalle"</c>. Con lo
+    /// segundo el modal pintaba la palabra "errorDetalle" como si fuera el
+    /// mensaje. Los parámetros de tipo objeto (Licitacion, Detalle) sí exigen
+    /// expresión, y por eso funcionan sin '@'.
+    /// </summary>
+    [Parameter] public string? MensajeError { get; set; }
+
+    [Parameter] public EventCallback OnCerrar { get; set; }
+
+    private string EstadoTexto => Detalle?.Estado ?? Licitacion?.EstadoLegible ?? "";
+
+    private string ClaseEstado => (Detalle?.CodigoEstado ?? Licitacion?.CodigoEstado) is null or 5
+        ? "rounded-md bg-emerald-500/15 px-2 py-0.5 text-[0.65rem] font-bold tracking-wide text-emerald-600 uppercase dark:text-emerald-400"
+        : "rounded-md bg-line px-2 py-0.5 text-[0.65rem] font-bold tracking-wide text-muted uppercase";
+
+    private string Ubicacion => string.Join(", ",
+        new[] { Detalle?.RegionOrganismo, Detalle?.ComunaOrganismo }
+            .Where(s => !string.IsNullOrWhiteSpace(s)));
+
+    private (string Texto, string Tono) Cierre =>
+        Formato.CierraEn(Detalle?.FechaCierre ?? Licitacion?.FechaCierre);
+
+    /// <summary>
+    /// Cuánto se adjudicó frente a lo presupuestado, en una frase corta.
+    ///
+    /// Solo si las dos cifras están: sin el estimado no hay contra qué
+    /// comparar, y con la misma cifra no hay nada que decir.
+    /// </summary>
+    private string? DiferenciaAdjudicado
+    {
+        get
+        {
+            if (Detalle?.TotalAdjudicado is not { } adjudicado) return null;
+            if (Detalle.MontoEstimado is not { } estimado || estimado <= 0) return null;
+
+            var porcentaje = (adjudicado - estimado) / estimado * 100m;
+
+            // Menos de 1% es ruido de redondeo, no una diferencia real.
+            if (Math.Abs(porcentaje) < 1m) return null;
+
+            return porcentaje < 0
+                ? $"un {Formato.Porcentaje(Math.Abs(porcentaje))} por debajo"
+                : $"un {Formato.Porcentaje(porcentaje)} por encima";
+        }
+    }
+
+    private string TextoCierre => Cierre.Texto;
+    private string ClaseCierre => Licitacion?.Activa == false
+        ? "text-xs font-semibold text-muted"
+        : "rounded-md bg-amber-500/15 px-2 py-1 text-xs font-bold " + Cierre.Tono;
+
+    /// <summary>
+    /// Fechas del proceso en orden, quitando las vacías. El servidor ya las
+    /// devuelve anidadas en "Fechas"; aquí solo se ordenan y se limpian.
+    /// </summary>
+    private List<(string Etiqueta, DateTimeOffset Fecha)> Hitos
+    {
+        get
+        {
+            if (Detalle is null) return [];
+
+            var lista = new List<(string, DateTimeOffset)>();
+            void Añadir(string etiqueta, DateTimeOffset? fecha)
+            {
+                if (fecha is { } f) lista.Add((etiqueta, f));
+            }
+
+            Añadir("Creación", Detalle.FechaCreacion);
+            Añadir("Publicación", Detalle.FechaPublicacion);
+            Añadir("Inicio de vigencia", Detalle.FechaFinal);
+            Añadir("Apertura técnica", Detalle.FechaAperturaTecnica);
+            Añadir("Apertura económica", Detalle.FechaAperturaEconomica);
+            Añadir("Adjudicación", Detalle.FechaAdjudicacion);
+
+            return lista.OrderBy(x => x.Item2).ToList();
+        }
+    }
+
+    private string UrlMercadoPublico =>
+        string.IsNullOrWhiteSpace(Licitacion?.CodigoExterno)
+            ? "https://www.mercadopublico.cl/"
+            : $"https://www.mercadopublico.cl/licitacion/{Licitacion.CodigoExterno}";
+
+    private async Task CerrarAsync() => await OnCerrar.InvokeAsync();
+}

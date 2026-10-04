@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description"
+          content="WatchMercadoPublico: consulta las licitaciones activas de una empresa en Mercado Público a partir de su RUT." />
+    <meta name="theme-color" content="#050a1a" />
+    <title>WatchMercadoPublico · Licitaciones por empresa</title>
+    <base href="/" />
+    <!-- Icono propio: la "M" en zigzag sobre el degradado azul-violeta-rojo.
+         Es una marca ORIGINAL, no una mezcla de los logotipos de Mercado
+         Público ni de SMC (que son marcas registradas de terceros). SVG
+         únicamente: escala sin pérdida y pesa 600 bytes.
+         OJO: este fichero es HTML estático, no Razor. Los comentarios van con
+         delimitadores HTML; la sintaxis @* *@ de Razor saldría en pantalla. -->
+    <link rel="icon" type="image/svg+xml" href="icono.svg" />
+    <link rel="preload" id="webassembly" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+          rel="stylesheet" />
+    <link rel="stylesheet" href="css/app.css" />
+    <script type="importmap"></script>
+
+    <script>
+        /* Tema claro/oscuro: se aplica ANTES de pintar, para que la página no
+           parpadee al cargar. */
+        window.watchMercadoPublico = {
+            key: 'watch_mercadopublico_tema',
+
+            applyTheme: function (isDark) {
+                document.documentElement.classList.toggle('dark', isDark);
+                document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
+
+                try {
+                    localStorage.setItem(this.key, isDark ? 'dark' : 'light');
+                } catch (e) { /* almacenamiento no disponible */ }
+
+                var meta = document.querySelector('meta[name="theme-color"]');
+                if (meta) {
+                    meta.setAttribute('content', isDark ? '#050a1a' : '#f4f6fb');
+                }
+            },
+
+            isDarkTheme: function () {
+                return document.documentElement.classList.contains('dark');
+            }
+        };
+
+        (function () {
+            try {
+                var saved = localStorage.getItem('watch_mercadopublico_tema');
+                var dark = saved
+                    ? saved === 'dark'
+                    : window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+                document.documentElement.classList.toggle('dark', dark);
+                document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+
+                var meta = document.querySelector('meta[name="theme-color"]');
+                if (meta) {
+                    meta.setAttribute('content', dark ? '#050a1a' : '#f4f6fb');
+                }
+            } catch (e) { /* sin localStorage: se usa el tema del sistema */ }
+        })();
+    </script>
+</head>
+
+<body>
+    <div id="app">
+        <div class="boot-splash">
+            <div class="boot-logo marca" aria-hidden="true">
+                <svg width="38" height="38" viewBox="0 0 48 48">
+                    <path d="M13 33 L20 17 L24 25 L28 17 L35 33" fill="none" stroke="#fff"
+                          stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+            </div>
+            <svg class="loading-progress" aria-hidden="true">
+                <circle r="40%" cx="50%" cy="50%" />
+                <circle r="40%" cx="50%" cy="50%" />
+            </svg>
+            <div class="loading-progress-text"></div>
+        </div>
+    </div>
+
+    <div id="blazor-error-ui">
+        Se ha producido un error inesperado.
+        <a href="." class="reload">Recargar</a>
+        <span class="dismiss">🗙</span>
+    </div>
+    <script src="_framework/blazor.webassembly#[.{fingerprint}].js"></script>
+</body>
+
+</html>

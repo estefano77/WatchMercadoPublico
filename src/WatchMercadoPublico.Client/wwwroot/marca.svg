@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 64" width="340" height="64" role="img"
+     aria-label="Watch Mercado Público, para SMC">
+  <!--
+    Logotipo completo (símbolo + rótulo) de WatchMercadoPublico.
+
+    MARCA PROPIA: el dibujo es original y no reproduce los logotipos de
+    Mercado Público / ChileCompra ni los de SMC (marcas registradas de
+    terceros). Se mezclan solo sus identidades de color, y los nombres se
+    escriben como TEXTO PLANO, que es uso nominativo legítimo al describir la
+    integración con ambas plataformas.
+  -->
+  <defs>
+    <linearGradient id="mp-simbolo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1d4ed8" />
+      <stop offset="0.52" stop-color="#6d28d9" />
+      <stop offset="1" stop-color="#dc2626" />
+    </linearGradient>
+    <linearGradient id="mp-texto" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#1d4ed8" />
+      <stop offset="0.5" stop-color="#6d28d9" />
+      <stop offset="1" stop-color="#dc2626" />
+    </linearGradient>
+  </defs>
+
+  <!-- Símbolo -->
+  <rect x="2" y="8" width="48" height="48" rx="12" fill="url(#mp-simbolo)" />
+  <path d="M13 41 L20 25 L24 33 L28 25 L35 41"
+        fill="none" stroke="#ffffff" stroke-width="3.4"
+        stroke-linecap="round" stroke-linejoin="round" />
+
+  <!-- Rótulo -->
+  <text x="64" y="31"
+        font-family="'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+        font-size="19" font-weight="800" letter-spacing="-0.4"
+        fill="#0f172a">Watch<tspan fill="url(#mp-texto)">MercadoPúblico</tspan></text>
+  <text x="64" y="48"
+        font-family="'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+        font-size="10.5" font-weight="600" letter-spacing="1.6"
+        fill="#64748a">MERCADO PÚBLICO · SMC</text>
+</svg>

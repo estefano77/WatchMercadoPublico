@@ -1,0 +1,159 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+using WatchMercadoPublico.Client.Models;
+
+namespace WatchMercadoPublico.Client.Services;
+
+/// <summary>
+/// Cliente de los endpoints de la aplicación.
+///
+/// Regla de la casa: un cliente que se come el error y devuelve una lista vacía
+/// hace que la interfaz degrade en silencio y parezca que el usuario no tiene
+/// datos. Por eso TODOS los métodos devuelven la tupla (datos, error): el error
+/// se propaga siempre a la pantalla.
+///
+/// No usa CancellationToken en las consultas al día: si la pantalla se cancela
+/// mientras el servidor insiste, la petición queda huérfana consumiendo cupo
+/// del ticket. Mejor que el servidor termine y su resultado seignore.
+/// </summary>
+public sealed class MercadoPublicoApi(HttpClient http)
+{
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
+    /// <summary>
+    /// Configuración del servidor: qué empresa se mira, si hay ticket y cada
+    /// cuánto se refresca.
+    /// </summary>
+    public async Task<(EstadoApi? Data, string? Error)> GetEstadoAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            var estado = await http.GetFromJsonAsync<EstadoApi>("api/estado", Json, ct);
+            return estado is null ? (null, "El servidor no devolvió el estado.") : (estado, null);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or NotSupportedException)
+        {
+            return (null, "No se pudo conectar con el servidor.");
+        }
+    }
+
+    /// <summary>
+    /// Licitaciones de HOY para la empresa configurada.
+    ///
+    /// El día, el RUT y el código los pone el servidor: el cliente no elige
+    /// nada. El servidor insiste hasta un minuto antes de rendirse, así que
+    /// esta llamada puede tardar; la pantalla muestra "Consultando…" mientras.
+    /// </summary>
+    public async Task<(PaginaLicitaciones? Data, string? Error)> GetHoyAsync()
+    {
+        try
+        {
+            using var respuesta = await http.GetAsync("api/hoy");
+            var cuerpo = await respuesta.Content.ReadAsStringAsync();
+
+            if (respuesta.IsSuccessStatusCode)
+            {
+                var pagina = Deserializar<PaginaLicitaciones>(cuerpo);
+                return pagina is null
+                    ? (null, "El servidor devolvió una respuesta inesperada.")
+                    : (pagina, null);
+            }
+
+            return (null, ExtraerError(cuerpo) ?? "No se pudieron cargar las licitaciones de hoy.");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or NotSupportedException)
+        {
+            return (null, "No se pudo conectar con el servidor.");
+        }
+    }
+
+    /// <summary>
+    /// Detalle de una licitación. Se pide al abrir la ficha y queda cacheado en
+    /// el servidor, así que abrirla otra vez no gasta consulta.
+    /// </summary>
+    public async Task<(DetalleLicitacion? Data, bool DesdeCache, string? Error)> GetDetalleAsync(
+        string codigo)
+    {
+        try
+        {
+            using var respuesta = await http.GetAsync($"api/licitaciones/{Uri.EscapeDataString(codigo)}");
+            var cuerpo = await respuesta.Content.ReadAsStringAsync();
+
+            if (!respuesta.IsSuccessStatusCode)
+                return (null, false, ExtraerError(cuerpo) ?? "No se pudo cargar el detalle.");
+
+            var envoltura = Deserializar<RespuestaDetalle>(cuerpo);
+            if (envoltura?.Detalle is null)
+                return (null, false, "Mercado Público no devolvió el detalle de esta licitación.");
+
+            return (envoltura.Detalle, envoltura.DesdeCache, null);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or NotSupportedException)
+        {
+            return (null, false, "No se pudo conectar con el servidor.");
+        }
+    }
+
+    /// <summary>Vacía la caché del servidor para forzar consulta nueva.</summary>
+    public async Task<string?> RefrescarAsync()
+    {
+        try
+        {
+            using var respuesta = await http.PostAsync("api/refrescar", content: null);
+            if (respuesta.IsSuccessStatusCode) return null;
+
+            return ExtraerError(await respuesta.Content.ReadAsStringAsync())
+                   ?? "No se pudo vaciar la caché del servidor.";
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or NotSupportedException)
+        {
+            return "No se pudo conectar con el servidor.";
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Utilidades
+    // ------------------------------------------------------------------
+
+    private static T? Deserializar<T>(string cuerpo) =>
+        JsonSerializer.Deserialize<T>(cuerpo, Json);
+
+    /// <summary>
+    /// Saca el mensaje de error del cuerpo de la respuesta.
+    ///
+    /// Se prueban varias formas porque el servidor no siempre responde igual:
+    /// <c>{ "error": "…" }</c> en los endpoints propios y el texto del
+    /// ProblemDetails de <c>Results.Problem</c> en los de configuración.
+    /// </summary>
+    private static string? ExtraerError(string cuerpo)
+    {
+        if (string.IsNullOrWhiteSpace(cuerpo)) return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(cuerpo);
+            var raiz = doc.RootElement;
+
+            if (raiz.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var clave in new[] { "error", "detail", "title", "mensaje" })
+                {
+                    if (raiz.TryGetProperty(clave, out var valor) &&
+                        valor.ValueKind == JsonValueKind.String)
+                    {
+                        var texto = valor.GetString();
+                        if (!string.IsNullOrWhiteSpace(texto)) return texto;
+                    }
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // No es JSON: se devuelve el texto plano, recortado.
+        }
+
+        var plano = System.Net.WebUtility.HtmlDecode(cuerpo.Trim());
+        return plano.Length > 300 ? plano[..300] + "…" : plano;
+    }
+}

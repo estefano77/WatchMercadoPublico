@@ -1,0 +1,327 @@
+@page "/"
+@implements IDisposable
+@inject MercadoPublicoApi Api
+
+<PageTitle>WatchMercadoPublico · Novedades de hoy</PageTitle>
+
+<div class="space-y-6">
+
+    @* ------------------------------------------------------------------ *@
+    @* Encabezado: qué empresa y qué día. Ya no hay nada que elegir.        *@
+    @* ------------------------------------------------------------------ *@
+    <section>
+        <h1 class="text-2xl font-extrabold tracking-tight sm:text-3xl">
+            Novedades de hoy en
+            <span class="marca-texto">Mercado Público</span>
+        </h1>
+
+        @* Sin mencionar el refresco automático: es un detalle de funcionamiento
+           que en la pantalla solo resta, y el usuario no puede cambiarlo. Va
+           documentado en el README, que es lo que serves para el manual. *@
+        <p class="mt-2 max-w-2xl text-sm leading-relaxed text-ink-soft">
+            Licitaciones publicadas hoy para
+            <strong class="text-ink">@NombreEmpresa</strong>.
+        </p>
+    </section>
+
+    @* ------------------------------------------------------------------ *@
+    @* Avisos                                                              *@
+    @* ------------------------------------------------------------------ *@
+    @* El aviso de demo va APARTE de la cadena de errores: en un 'else if' se
+       comía todos los errores y en modo demo nunca se veía un fallo real. *@
+    @if (Estado is { EsDemo: true })
+    {
+        <Aviso Tipo="aviso" Titulo="Modo demo: los datos son inventados" Cerrable="false">
+            <p class="mt-2 text-sm leading-relaxed text-ink-soft">
+                No se está llamando a Mercado Público. Sirve para probar la pantalla sin gastar el
+                cupo del ticket. Ninguna empresa, organismo, monto ni código que ves aquí existe de
+                verdad.
+            </p>
+        </Aviso>
+    }
+
+    @if (Estado is { Servible: false })
+    {
+        <Aviso Tipo="error" Titulo="La aplicación no está configurada" Cerrable="false">
+            <p class="mt-2 text-sm leading-relaxed text-ink-soft">
+                En esta pantalla <strong>@Estado.FaltaConfiguracion</strong>, así que no se puede
+                consultar nada. Se pone en el servidor, en la sección
+                <span class="font-mono">MercadoPublico</span> del
+                <span class="font-mono">appsettings</span>:
+            </p>
+            <pre class="mt-3 overflow-x-auto rounded-lg border border-line bg-field px-3 py-2.5 font-mono text-[0.72rem] text-ink-soft">Copy-Item secrets\appsettings.Development.json.ejemplo `
+        src\WatchMercadoPublico.Server\appsettings.Development.json</pre>
+            <p class="mt-2 text-xs leading-relaxed text-muted">
+                El <span class="font-mono">CodigoProveedor</span> es el único imprescindible: sin él
+                no hay a quién consultar. El ticket se pide gratis en mercadopublico.cl y llega al
+                correo. Para probar la pantalla sin nada de eso,
+                <span class="font-mono">"ModoConsulta": "demo"</span>.
+            </p>
+        </Aviso>
+    }
+
+    @* ------------------------------------------------------------------ *@
+    @* Estado de la consulta                                                *@
+    @* ------------------------------------------------------------------ *@
+    @if (Estado is { Servible: true })
+    {
+        @if (Cargando)
+        {
+            <Aviso Tipo="info" Titulo="Consultando a Mercado Público…" Cerrable="false">
+                <p class="mt-1.5 text-sm leading-relaxed text-ink-soft">
+                    Mercado Público suele rechazar las primeras peticiones de cada sesión, así que se
+                    insiste hasta un minuto antes de rendirse. No hace falta hacer nada: la pantalla se
+                    actualiza sola.
+                </p>
+            </Aviso>
+        }
+        else if (ErrorConsulta is not null)
+        {
+            <div class="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-6 py-10 text-center">
+                <span class="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-rose-500/15 text-rose-500">
+                    <Icon Name="alerta" Size="26" />
+                </span>
+                <p class="mt-4 text-base font-bold text-ink">No se pudo consultar</p>
+                <p class="mx-auto mt-1.5 max-w-lg text-sm leading-relaxed text-ink-soft">
+                    @ErrorConsulta
+                </p>
+                @* No se puede decir "no hay licitaciones": lo que no se pudo fue
+                   preguntar. Afirmar lo contrario sería mentir. *@
+                <p class="mx-auto mt-1.5 max-w-lg text-sm text-muted">
+                    Esto <strong>no</strong> significa que no haya nada publicado hoy: significa que no
+                    se pudo comprobar. La pantalla lo reintenta sola cada
+                    @MinutosRefresco @(MinutosRefresco == 1 ? "minuto" : "minutos").
+                </p>
+                <button type="button" @onclick="CargarAsync" disabled="@Cargando"
+                        class="mt-5 inline-flex min-h-[46px] items-center gap-2 rounded-xl bg-gradient-to-r from-marca-a to-marca-b px-6 text-sm font-bold text-white shadow-lg shadow-violet-500/25 transition hover:brightness-110 disabled:opacity-60">
+                    <Icon Name="recargar" Size="17" />
+                    Intentar ahora
+                </button>
+            </div>
+        }
+        else if (Pagina is { Total: 0 })
+        {
+            @* Sin resultados: NO es un error. Y si hoy es fin de semana, se
+               dice, porque es lo más probable y evita que parezca un fallo. *@
+            <div class="rounded-2xl border border-dashed border-line bg-surface px-6 py-14 text-center">
+                <span class="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-field text-muted">
+                    <Icon Name="calendario" Size="26" />
+                </span>
+                <p class="mt-4 text-base font-bold text-ink">
+                    @(Pagina.EsFinDeSemana
+                        ? $"{Pagina.FechaLegible} es fin de semana"
+                        : "Nada nuevo hoy")
+                </p>
+                <p class="mx-auto mt-1.5 max-w-lg text-sm leading-relaxed text-muted">
+                    @(Pagina.EsFinDeSemana
+                        ? "Se consultó el día y no salió ninguna licitación. Es lo normal en fin de semana: lo habitual es que se publiquen de lunes a viernes. La página lo reintenta sola y aparecerá solo si se publica algo."
+                        : "Se consultó el día completo y esta empresa no tiene ninguna licitación publicada. Es una respuesta real, no un fallo: significa que hoy no hay novedad.")
+                </p>
+            </div>
+        }
+        else if (Pagina is not null)
+        {
+            @* --- Cabecera de resultados --- *@
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                    <h2 class="text-base font-bold text-ink">
+                        @(Pagina.Total == 1 ? "1 novedad" : $"{Pagina.Total} novedades")
+                    </h2>
+                    <span class="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[0.68rem] font-bold text-emerald-600 uppercase dark:text-emerald-400">
+                        Hoy
+                    </span>
+                </div>
+                <p class="text-xs text-muted">
+                    @(Pagina.DesdeCache
+                        ? $"consultado a las {Formato.Hora(Pagina.Consultado)}"
+                        : $"consultado a la API a las {Formato.Hora(Pagina.Consultado)}")
+                </p>
+            </div>
+
+            <div class="space-y-3">
+                @foreach (var licitacion in Pagina.Items)
+                {
+                    <FichaLicitacion Licitacion="licitacion" Palabras="@([])"
+                                     AbrirAsync="AbrirDetalleAsync" />
+                }
+            </div>
+        }
+    }
+</div>
+
+@* --- Modal de detalle --- *@
+@* Todos los valores van con '@': un parámetro de tipo string recibe LITERAL lo
+   que se escriba, y sin '@' el modal pintaba el texto "errorDetalle" como si
+   fuera el mensaje de error. *@
+<ModalDetalle Licitacion="@abierta"
+             Detalle="@detalleAbierto"
+             Cargando="@cargandoDetalle"
+             DesdeCache="@detalleDesdeCache"
+             MensajeError="@errorDetalle"
+             OnCerrar="CerrarDetalleAsync" />
+
+@code {
+    private EstadoApi? Estado { get; set; }
+    private PaginaLicitaciones? Pagina { get; set; }
+
+    private bool Cargando { get; set; }
+    private string? ErrorConsulta { get; set; }
+
+    /// <summary>
+    /// Refresco automático mientras la pantalla está abierta.
+    ///
+    /// Es un System.Timers.Timer y no un bucle con await Task.Delay porque al
+    /// cortar Blazor hay que PARARLO. Un bucle seguiría consultando en el
+    /// servidor del navegador, gastando el cupo del ticket sin que nadie mire la
+    /// pantalla. Un temporizador sin desuscribir es exactamente ese bug.
+    /// </summary>
+    private System.Timers.Timer? temporizador;
+
+    // Detalle abierto
+    private Licitacion? abierta { get; set; }
+    private DetalleLicitacion? detalleAbierto { get; set; }
+    private bool cargandoDetalle { get; set; }
+    private bool detalleDesdeCache { get; set; }
+    private string? errorDetalle { get; set; }
+
+    private string NombreEmpresa => Estado?.Empresa?.Nombre ?? "…";
+    private int MinutosRefresco => Estado?.MinutosEntreRefrescos is > 0 ? Estado.MinutosEntreRefrescos : 5;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var (estado, error) = await Api.GetEstadoAsync();
+        Estado = estado;
+
+        if (estado is null)
+        {
+            ErrorConsulta = error ?? "No se pudo conectar con el servidor.";
+            return;
+        }
+
+        await CargarAsync();
+        ProgramarRefresco();
+    }
+
+    /// <summary>
+    /// Consulta las novedades de hoy.
+    ///
+    /// No lleva CancellationToken a propósito: si la cancelamos a mitad, el
+    /// servidor sigue insistiendo con sus reintentos y el trabajo se tira
+    /// (junto con el cupo). El botón queda bloqueado mientras tanto, así que no
+    /// se solapan peticiones.
+    /// </summary>
+    private async Task CargarAsync()
+    {
+        if (Cargando) return;
+
+        Cargando = true;
+        ErrorConsulta = null;
+
+        try
+        {
+            var (resultado, error) = await Api.GetHoyAsync();
+
+            if (error is not null)
+            {
+                ErrorConsulta = error;
+                return;
+            }
+
+            Pagina = resultado;
+        }
+        finally
+        {
+            Cargando = false;
+        }
+    }
+
+    /// <summary>
+    /// Refresco periódico. Se para en Dispose.
+    ///
+    /// Con 5 minutos son 12 peticiones por hora: una fracción del cupo diario de
+    /// 10.000, y como el servidor insiste hasta un minuto cuando falla, la caché
+    /// de 4 minutos hace que la mayoría de estos refrescos pregunten de verdad.
+    /// </summary>
+    private void ProgramarRefresco()
+    {
+        if (MinutosRefresco <= 0) return;
+
+        temporizador = new System.Timers.Timer
+        {
+            Interval = TimeSpan.FromMinutes(MinutosRefresco).TotalMilliseconds,
+            AutoReset = false,
+        };
+
+        // AutoReset = false y se rearma al final: si el servidor tardó un minuto
+        // con sus reintentos, el siguiente disparo se cuenta desde que terminó y
+        // no se solapan. Con AutoReset = true se acumularían peticiones.
+        temporizador.Elapsed += async (_, _) =>
+        {
+            await InvokeAsync(async () =>
+            {
+                await CargarAsync();
+                ProgramarRefresco();
+            });
+        };
+
+        temporizador.Start();
+    }
+
+    // ------------------------------------------------------------------
+    // Detalle
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Abre la ficha y pide su detalle. Es una petición por licitación, así que
+    /// solo se hace al abrir: pedirlas todas al cargar gastaría cupo sin
+    /// necesidad.
+    /// </summary>
+    private async Task AbrirDetalleAsync(Licitacion licitacion)
+    {
+        abierta = licitacion;
+        detalleAbierto = null;
+        errorDetalle = null;
+        cargandoDetalle = true;
+        detalleDesdeCache = false;
+
+        if (string.IsNullOrWhiteSpace(licitacion.CodigoExterno))
+        {
+            errorDetalle = "Esta licitación no trae código, así que no se puede consultar su detalle.";
+            cargandoDetalle = false;
+            return;
+        }
+
+        var (detalle, desdeCache, error) = await Api.GetDetalleAsync(licitacion.CodigoExterno);
+
+        // Si el modal se cerró mientras esperaba, el resultado se descarta.
+        if (abierta?.CodigoExterno != licitacion.CodigoExterno) return;
+
+        detalleAbierto = detalle;
+        detalleDesdeCache = desdeCache;
+        errorDetalle = error;
+        cargandoDetalle = false;
+    }
+
+    private Task CerrarDetalleAsync()
+    {
+        CerrarDetalle();
+        return Task.CompletedTask;
+    }
+
+    private void CerrarDetalle()
+    {
+        abierta = null;
+        detalleAbierto = null;
+        cargandoDetalle = false;
+        detalleDesdeCache = false;
+        errorDetalle = null;
+    }
+
+    public void Dispose()
+    {
+        // Sin esto el temporizador seguiría consultando en segundo plano con la
+        // pantalla cerrada.
+        temporizador?.Stop();
+        temporizador?.Dispose();
+    }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "watch-mercado-publico",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Herramientas de front-end (Tailwind CSS) para WatchMercadoPublico",
+  "scripts": {
+    "css": "tailwindcss -i src/WatchMercadoPublico.Client/Styles/tailwind.css -o src/WatchMercadoPublico.Client/wwwroot/css/app.css --minify",
+    "css:watch": "tailwindcss -i src/WatchMercadoPublico.Client/Styles/tailwind.css -o src/WatchMercadoPublico.Client/wwwroot/css/app.css --watch"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.0.0",
+    "tailwindcss": "^4.0.0"
+  }
+}

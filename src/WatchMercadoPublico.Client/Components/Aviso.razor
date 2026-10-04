@@ -1,0 +1,97 @@
+@*
+    Aviso de estado: error, aviso o información.
+
+    Un solo componente para los tres casos: si hay tres componentes para tres
+    colores, acaba habiendo cuatro estilos distintos para el mismo error.
+
+    Se pinta si hay Mensaje O si hay contenido hijo. La guarda solo con
+    'Mensaje is not null' es un fallo silencioso muy cómodo: un aviso usado
+    como contenedor, con <ChildContent> y sin Mensaje, no pinta nada y parece
+    que la condición que lo rodea esté mal.
+*@
+
+@if (!Cerrado && (Mensaje is not null || ChildContent is not null))
+{
+    <div role="@Rol" class="@ClaseContenedor">
+        <span class="@ClaseIcono">
+            <Icon Name="@NombreIcono" Size="18" />
+        </span>
+        <div class="min-w-0 flex-1">
+            @if (Titulo is not null)
+            {
+                <p class="@ClaseTitulo">@Titulo</p>
+            }
+            @if (Mensaje is not null)
+            {
+                <p class="@ClaseMensaje">@Mensaje</p>
+            }
+            @ChildContent
+        </div>
+        @if (Cerrable)
+        {
+            <button type="button" @onclick="Cerrar"
+                    class="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-muted transition hover:bg-hover hover:text-ink"
+                    aria-label="Cerrar aviso">
+                <Icon Name="x" Size="16" />
+            </button>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public string? Mensaje { get; set; }
+    [Parameter] public string? Titulo { get; set; }
+    [Parameter] public string Tipo { get; set; } = "info";
+    [Parameter] public bool Cerrable { get; set; } = true;
+    [Parameter] public EventCallback OnCerrado { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private string Rol => Tipo == "error" ? "alert" : "status";
+
+    private string NombreIcono => Tipo switch
+    {
+        "error" => "alerta",
+        "exito" => "check",
+        _ => "info",
+    };
+
+    // La clase entera se calcula en @code y se mete en el atributo: partida en
+    // varias líneas dentro de un atributo Razor no compila (RZ1006) y con
+    // contenido complejo tampoco (RZ9986).
+    private string ClaseContenedor => string.Join(' ',
+        "flex items-start gap-3 rounded-2xl border px-4 py-3.5",
+        Tipo switch
+        {
+            "error" => "border-rose-500/30 bg-rose-500/10",
+            "exito" => "border-emerald-500/30 bg-emerald-500/10",
+            "aviso" => "border-amber-500/30 bg-amber-500/10",
+            _ => "border-violet-500/30 bg-violet-500/10",
+        });
+
+    private string ClaseIcono => string.Join(' ',
+        "mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg",
+        Tipo switch
+        {
+            "error" => "bg-rose-500/20 text-rose-400",
+            "exito" => "bg-emerald-500/20 text-emerald-400",
+            "aviso" => "bg-amber-500/20 text-amber-400",
+            _ => "bg-violet-500/20 text-violet-400",
+        });
+
+    private string ClaseTitulo => "text-sm font-bold text-ink";
+
+    private string ClaseMensaje => "mt-0.5 text-sm leading-relaxed text-ink-soft";
+
+    private async Task Cerrar()
+    {
+        Mensaje = null;
+        await OnCerrado.InvokeAsync();
+        Cerrado = true;
+    }
+
+    /// <summary>
+    /// Evita que el aviso reaparezca solo tras cerrarlo: sin esto, el siguiente
+    /// cambio de estado lo vuelve a pintar y el usuario no puede descartarlo.
+    /// </summary>
+    private bool Cerrado { get; set; }
+}

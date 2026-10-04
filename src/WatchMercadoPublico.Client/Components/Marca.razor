@@ -1,0 +1,63 @@
+@*
+    Símbolo + rótulo de la aplicación.
+
+    El símbolo (la "M" en zigzag sobre el degradado azul-violeta-rojo) es una
+    marca PROPIA dibujada para este proyecto. No reproduce ni fusiona los
+    logotipos de Mercado Público / ChileCompra ni los de SMC, que son marcas
+    registradas de terceros: copiar su arte en una marca nueva es infracción de
+    marca, no solo de copyright.
+
+    "Mercado Público" y "SMC" NO aparecen en la marca: son marcas registradas de
+    terceros y este rótulo es identidad propia de la herramienta. Siguen
+    apareciendo como TEXTO PLANO en el pie de página, que es uso nominativo
+    legítimo al describir con qué se integra.
+*@
+
+<span class="@Contenedor">
+    <span class="@ClaseIcono">
+        <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg"
+             class="h-full w-full" role="img" aria-hidden="true">
+            <defs>
+                <linearGradient id="wmp-gradiente" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0" stop-color="var(--app-marca-a)" />
+                    <stop offset="0.52" stop-color="var(--app-marca-b)" />
+                    <stop offset="1" stop-color="var(--app-marca-c)" />
+                </linearGradient>
+                <linearGradient id="wmp-brillo" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stop-color="#fff" stop-opacity="0.22" />
+                    <stop offset="0.55" stop-color="#fff" stop-opacity="0" />
+                </linearGradient>
+            </defs>
+            <rect width="48" height="48" rx="12" fill="url(#wmp-gradiente)" />
+            <rect width="48" height="48" rx="12" fill="url(#wmp-brillo)" />
+            <path d="M13 33 L20 17 L24 25 L28 17 L35 33"
+                  fill="none" stroke="#fff" stroke-width="3.4"
+                  stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+    </span>
+
+    @if (ConTexto)
+    {
+        @* Sin subtítulo: solo el nombre, más grande. En pantallas estrechas
+           (320-380 px) el rótulo + el botón de tema no caben y la cabecera se
+           desborda hacia la derecha, así que por debajo de 380 px se oculta el
+           nombre; el icono ya identifica la aplicación. *@
+        <span class="hidden text-[1.15rem] leading-none font-extrabold tracking-tight min-[380px]:inline sm:text-[1.3rem]">
+            Watch<span class="marca-texto">MercadoPúblico</span>
+        </span>
+    }
+</span>
+
+@code {
+    /// <summary>Muestra el símbolo con el rótulo al lado.</summary>
+    [Parameter] public bool ConTexto { get; set; } = true;
+
+    [Parameter] public string TamañoIcono { get; set; } = "h-9 w-9";
+
+    [Parameter] public string? Class { get; set; }
+
+    private string Contenedor => Class ?? "inline-flex items-center gap-2.5";
+
+    private string ClaseIcono =>
+        $"{TamañoIcono} shrink-0 rounded-xl shadow-lg shadow-violet-500/25 transition group-hover:scale-105";
+}

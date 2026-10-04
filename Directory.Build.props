@@ -1,0 +1,48 @@
+<Project>
+
+  <!--
+    ===========================================================================
+    Sin assets precomprimidos (.br / .gz) en _framework.
+
+    Motivo (medido en un proyecto real de hosting Windows): la publicación
+    generaba 186 ficheros en _framework, 124 de ellos variantes comprimidas.
+    Al subir el ZIP, alguna de esas copias llegaba vacía o truncada y el
+    navegador recibía cuerpos de 0 bytes:
+
+        "Failed to find a valid digest in the 'integrity' attribute ...
+         47DEQpj8HBSa+"      (esa huella es el SHA-256 de una cadena vacía)
+
+    y Blazor se quedaba en "Cargando".
+
+    OJO: 'BlazorEnableCompression=false' SOLO no basta en .NET 10. Con esa única
+    propiedad seguían apareciendo 61 .br y 61 .gz, porque el SDK de assets
+    estáticos comprime DURANTE LA COMPILACIÓN y esos ficheros se copian
+    igualmente a la publicación. Hay que desactivar el grupo entero.
+
+    Y va aquí, no en un .csproj: los dos proyectos participan en la publicación.
+    Si solo se desactiva en el cliente, la publicación del servidor falla con
+    "error MSB4018: Endpoints not found for compressed asset".
+
+    La quinta propiedad es la que de verdad decide: con el valor por defecto
+    (true) el SDK rellena BuildCompressionFormats=gzip y
+    PublishCompressionFormats=gzip;brotli y comprime igualmente. Sin vaciarla,
+    las cuatro anteriores no cambian nada.
+    ===========================================================================
+  -->
+  <PropertyGroup>
+    <BlazorEnableCompression>false</BlazorEnableCompression>
+    <EnableDefaultCompressedItems>false</EnableDefaultCompressedItems>
+    <CompressDiscoveredAssetsDuringBuild>false</CompressDiscoveredAssetsDuringBuild>
+    <DisableBuildCompression>true</DisableBuildCompression>
+    <EnableDefaultCompressionFormats>false</EnableDefaultCompressionFormats>
+    <BuildCompressionFormats />
+    <PublishCompressionFormats />
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img"
+     aria-label="Watch Mercado Público">
+  <!--
+    MARCA PROPIA. No reproduce ni combina los logotipos de Mercado Público /
+    ChileCompra ni los de SMC: son marcas registradas de terceros y fusionar su
+    arte en una marca nueva es infracción de marca, no solo de copyright.
+    Lo que se mezcla es la IDENTIDAD VISUAL (el azul institucional de la
+    plataforma pública y el rojo de la empresa), con un dibujo original.
+
+    La "M" es a la vez una M y una serie temporal ascendente: los dos peakeds
+    son picos de precio y el valle central, la oportunidad entre ellos.
+  -->
+  <defs>
+    <linearGradient id="marca" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1d4ed8" />
+      <stop offset="0.52" stop-color="#6d28d9" />
+      <stop offset="1" stop-color="#dc2626" />
+    </linearGradient>
+    <linearGradient id="brillo" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22" />
+      <stop offset="0.55" stop-color="#ffffff" stop-opacity="0" />
+    </linearGradient>
+  </defs>
+
+  <rect width="48" height="48" rx="12" fill="url(#marca)" />
+  <rect width="48" height="48" rx="12" fill="url(#brillo)" />
+
+  <!-- La M / serie -->
+  <path d="M13 33 L20 17 L24 25 L28 17 L35 33"
+        fill="none" stroke="#ffffff" stroke-width="3.4"
+        stroke-linecap="round" stroke-linejoin="round" />
+</svg>

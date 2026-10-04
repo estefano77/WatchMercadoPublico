@@ -1,0 +1,433 @@
+@import "tailwindcss" source(none);
+
+/* Sólo estos archivos aportan clases utilitarias */
+@source "../**/*.razor";
+@source "../**/*.cs";
+@source "../wwwroot/index.html";
+
+/* Modo oscuro controlado por la clase .dark en <html> (no solo por el SO) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+    --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* ---------------------------------------------------------------------------
+   Colores del tema.
+
+   Se redefinen bajo .dark, por lo que los componentes usan clases semánticas
+   (bg-canvas, text-ink...) y funcionan en ambos modos sin una sola clase dark:.
+
+   La paleta mezcla los dos colores de referencia de la marca —el azul
+   institucional de Mercado Público y el rojo de SMC— en un degradado que va
+   de azul a violeta a rojo. El verde se reserva para los estados "activa".
+   --------------------------------------------------------------------------- */
+
+:root {
+    --app-canvas: #f4f6fb;
+    --app-surface: #ffffff;
+    --app-glass: rgb(255 255 255 / 0.80);
+    --app-field: #ffffff;
+    --app-hover: rgb(15 23 42 / 0.05);
+    --app-line: #e2e8f0;
+    --app-line-strong: #cbd5e1;
+    --app-ink: #0f172a;
+    --app-ink-soft: #334155;
+    --app-muted: #64748b;
+    --app-scrim: rgb(2 6 23 / 0.50);
+    --app-shadow: 0 24px 60px -30px rgb(15 23 42 / 0.45);
+
+    /* Degradado de marca: azul (Mercado Público) -> violeta -> rojo (SMC) */
+    --app-marca-a: #1d4ed8;
+    --app-marca-b: #6d28d9;
+    --app-marca-c: #dc2626;
+    --app-marca-ink: #ffffff;
+
+    --app-blob-1: rgb(29 78 216 / 0.22);
+    --app-blob-2: rgb(220 38 38 / 0.16);
+    --app-blob-3: rgb(109 40 217 / 0.14);
+    color-scheme: light;
+}
+
+.dark {
+    --app-canvas: #050a1a;
+    --app-surface: #0b1120;
+    --app-glass: rgb(255 255 255 / 0.05);
+    --app-field: rgb(255 255 255 / 0.05);
+    --app-hover: rgb(255 255 255 / 0.07);
+    --app-line: rgb(255 255 255 / 0.10);
+    --app-line-strong: rgb(255 255 255 / 0.18);
+    --app-ink: #f1f5f9;
+    --app-ink-soft: #e2e8f0;
+    --app-muted: #94a3b8;
+    --app-scrim: rgb(2 6 23 / 0.85);
+    --app-shadow: 0 24px 60px -30px rgb(0 0 0 / 0.95);
+
+    --app-marca-a: #3b82f6;
+    --app-marca-b: #8b5cf6;
+    --app-marca-c: #ef4444;
+    --app-marca-ink: #ffffff;
+
+    --app-blob-1: rgb(59 130 246 / 0.18);
+    --app-blob-2: rgb(239 68 68 / 0.12);
+    --app-blob-3: rgb(139 92 246 / 0.12);
+    color-scheme: dark;
+}
+
+@theme inline {
+    --color-canvas: var(--app-canvas);
+    --color-surface: var(--app-surface);
+    --color-glass: var(--app-glass);
+    --color-field: var(--app-field);
+    --color-hover: var(--app-hover);
+    --color-line: var(--app-line);
+    --color-line-strong: var(--app-line-strong);
+    --color-ink: var(--app-ink);
+    --color-ink-soft: var(--app-ink-soft);
+    --color-muted: var(--app-muted);
+    --color-scrim: var(--app-scrim);
+
+    --color-marca-a: var(--app-marca-a);
+    --color-marca-b: var(--app-marca-b);
+    --color-marca-c: var(--app-marca-c);
+    --color-marca-ink: var(--app-marca-ink);
+
+    --color-blob-1: var(--app-blob-1);
+    --color-blob-2: var(--app-blob-2);
+    --color-blob-3: var(--app-blob-3);
+    --shadow-card: var(--app-shadow);
+}
+
+/* ---------------- Base ---------------- */
+
+html {
+    -webkit-tap-highlight-color: transparent;
+    scroll-behavior: smooth;
+}
+
+body {
+    margin: 0;
+    font-family: var(--font-sans);
+    background-color: var(--app-canvas);
+    color: var(--app-ink);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+::selection {
+    background: rgb(109 40 217 / 0.45);
+    color: #fff;
+}
+
+* {
+    scrollbar-width: thin;
+    scrollbar-color: #94a3b8 transparent;
+}
+
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background-color: #94a3b8;
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background-color: #64748b;
+}
+
+input[type="search"]::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+}
+
+:focus-visible {
+    outline: 2px solid rgb(139 92 246 / 0.7);
+    outline-offset: 2px;
+}
+
+/*
+Los títulos de página (<h1>) no son interactivos: no se pulsan, no aparecen en
+la lista de tabulación y Blazor les da el foco al cargar cada ruta. Con el
+outline-offset de arriba, el indicador se dibuja como una caja suelta alrededor
+del texto, que parece un elemento seleccionado en lugar de un título.
+Se quita SOLO en los <h1>: botones, enlaces y campos lo conservan, que ahí sí
+hace falta para saber dónde se está escribiendo.
+*/
+h1:focus-visible {
+    outline: none;
+}
+
+/* ---------------- <select> y sus <option> ----------------
+   El desplegable de un <select> no lo dibuja la página: lo dibuja el sistema.
+   Por eso los <option> ignoran bg-field/text-ink y Safari les pinta un fondo
+   gris del navegador, con el texto del tema encima: en oscuro el texto
+   desaparece. Hay que ponerles fondo y color explícitos, o el popup sale claro
+   con la letra blanca encima.
+
+   Se usa --app-surface y no --app-field a propósito: --app-field es
+   translúcido (rgb(255 255 255 / 0.05) en oscuro) y, sobre el fondo del popup
+   —que es del sistema y no se controla—, el resultado sería impredecible.
+   --app-surface es opaco en los dos modos. */
+select option {
+    background-color: var(--app-surface);
+    color: var(--app-ink);
+}
+
+/* La opción elegida se marca con un color de marca opaco, para que se distinga
+   de un vistazo sin depender de cómo la resalte el sistema. */
+select option:checked {
+    background-color: var(--app-marca-b);
+    color: var(--app-marca-ink);
+}
+
+/* ---------------- Degradado de la marca ---------------- */
+
+.marca {
+    background-image: linear-gradient(135deg,
+        var(--app-marca-a) 0%,
+        var(--app-marca-b) 52%,
+        var(--app-marca-c) 100%);
+}
+
+.marca-texto {
+    background-image: linear-gradient(100deg,
+        var(--app-marca-a) 0%,
+        var(--app-marca-b) 50%,
+        var(--app-marca-c) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+/* ---------------- Transición del tema ---------------- */
+
+.theme-transition,
+.theme-transition * {
+    transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    .theme-transition,
+    .theme-transition * {
+        transition: none;
+    }
+}
+
+/* ---------------- Móvil: áreas seguras y carriles ----------------
+   env(safe-area-inset-*) vale 0 en pantallas sin notch, así que estas clases
+   son inocuas en escritorio. */
+
+.pt-safe {
+    padding-top: env(safe-area-inset-top);
+}
+
+.pb-safe {
+    padding-bottom: calc(1.5rem + env(safe-area-inset-bottom));
+}
+
+.bottom-safe {
+    bottom: calc(0.75rem + env(safe-area-inset-bottom));
+}
+
+@media (min-width: 640px) {
+    .bottom-safe {
+        bottom: 1.25rem;
+    }
+}
+
+.carril-chips {
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+}
+
+.carril-chips::-webkit-scrollbar {
+    display: none;
+}
+
+.carril-chips > * {
+    scroll-snap-align: center;
+}
+
+/* ---------------- Resaltado de la búsqueda ----------------
+   Las coincidencias se marcan en la tarjeta. <mark> con estilos propios
+   porque el color por defecto del navegador (amarillo) se lee fatal sobre
+   una superficie oscura. */
+
+.resaltado {
+    background-color: rgb(250 204 21 / 0.35);
+    color: inherit;
+    border-radius: 0.2rem;
+    padding: 0 0.1rem;
+    font-weight: 700;
+}
+
+.dark .resaltado {
+    background-color: rgb(250 204 21 / 0.28);
+    color: #fde68a;
+}
+
+/* ---------------- Animaciones ---------------- */
+
+@keyframes toast-in {
+    from {
+        opacity: 0;
+        transform: translateY(0.75rem) scale(0.97);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+.animate-toast {
+    animation: toast-in 0.18s ease-out both;
+}
+
+@keyframes ficha-entra {
+    from {
+        opacity: 0;
+        transform: translateY(0.4rem);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+.ficha-entra {
+    animation: ficha-entra 0.2s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    .animate-toast,
+    .ficha-entra {
+        animation: none;
+    }
+}
+
+/* ---------------- Validación de formularios ---------------- */
+
+.valid.modified:not([type="checkbox"]) {
+    outline: 1px solid #10b981;
+}
+
+.invalid {
+    outline: 1px solid #f43f5e;
+}
+
+.validation-message {
+    color: #f43f5e;
+}
+
+/* ---------------- Splash de arranque de Blazor ---------------- */
+
+.boot-splash {
+    position: relative;
+    min-height: 100vh; /* respaldo para navegadores sin dvh */
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.5rem;
+}
+
+.boot-logo {
+    display: grid;
+    place-items: center;
+    width: 4.5rem;
+    height: 4.5rem;
+    border-radius: 1.4rem;
+    color: #fff;
+    box-shadow: 0 20px 45px -15px rgb(109 40 217 / 0.6);
+}
+
+.loading-progress {
+    position: relative;
+    display: block;
+    width: 7rem;
+    height: 7rem;
+    margin: 0 auto;
+}
+
+.loading-progress circle {
+    fill: none;
+    stroke: var(--app-line-strong);
+    stroke-width: 0.55rem;
+    transform-origin: 50% 50%;
+    transform: rotate(-90deg);
+}
+
+.loading-progress circle:last-child {
+    stroke: #8b5cf6;
+    stroke-dasharray: calc(3.141 * var(--blazor-load-percentage, 0%) * 0.8), 500%;
+    transition: stroke-dashoffset 0.05s ease-in-out;
+}
+
+.loading-progress-text {
+    text-align: center;
+    font-weight: 700;
+    font-size: 0.85rem;
+    letter-spacing: 0.04em;
+    color: var(--app-muted);
+}
+
+.loading-progress-text::after {
+    content: var(--blazor-load-percentage-text, "Cargando");
+}
+
+/* ---------------- Barra de errores de Blazor ---------------- */
+
+#blazor-error-ui {
+    color-scheme: light dark;
+    background: var(--app-surface);
+    color: var(--app-ink);
+    border-top: 1px solid var(--app-line);
+    bottom: 0;
+    box-shadow: var(--app-shadow);
+    box-sizing: border-box;
+    display: none;
+    left: 0;
+    padding: 0.75rem 1.5rem 0.8rem 1.5rem;
+    position: fixed;
+    width: 100%;
+    z-index: 1000;
+    font-size: 0.9rem;
+}
+
+#blazor-error-ui .reload {
+    color: #8b5cf6;
+    font-weight: 700;
+    margin-left: 0.75rem;
+}
+
+#blazor-error-ui .dismiss {
+    cursor: pointer;
+    position: absolute;
+    right: 0.9rem;
+    top: 0.5rem;
+}
+
+.blazor-error-boundary {
+    background: #7f1d1d;
+    padding: 1rem;
+    color: white;
+}
+
+.blazor-error-boundary::after {
+    content: "Se ha producido un error.";
+}

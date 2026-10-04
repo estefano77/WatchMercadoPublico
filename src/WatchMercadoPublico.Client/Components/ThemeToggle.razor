@@ -1,0 +1,22 @@
+@inject ThemeService Tema
+
+<button type="button" @onclick="AlternarAsync"
+        class="grid h-11 w-11 place-items-center rounded-xl border border-line bg-glass text-ink-soft transition hover:bg-hover hover:text-ink"
+        title="@(Oscuro ? "Cambiar a modo claro" : "Cambiar a modo oscuro")"
+        aria-label="@(Oscuro ? "Cambiar a modo claro" : "Cambiar a modo oscuro")">
+
+    @if (Oscuro)
+    {
+        <Icon Name="sol" Size="18" />
+    }
+    else
+    {
+        <Icon Name="luna" Size="18" />
+    }
+</button>
+
+@code {
+    private bool Oscuro => Tema.EsOscuro;
+
+    private async Task AlternarAsync() => await Tema.AlternarAsync();
+}

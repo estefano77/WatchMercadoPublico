@@ -1,0 +1,91 @@
+namespace WatchMercadoPublico.Server.Models;
+
+/// <summary>
+/// Configuración de la API de Mercado Público (sección "MercadoPublico").
+///
+/// La empresa vigilada es FIJA y viene de aquí: nombre, RUT y código de
+/// proveedor. La aplicación dejó de preguntar el RUT porque casi siempre era la
+/// misma, y pedirlo cada vez solo añadía un paso donde se podían equivocar.
+/// </summary>
+public sealed class MercadoPublicoOpciones
+{
+    public const string Seccion = "MercadoPublico";
+
+    /// <summary>Ticket personal que envía ChileCompra por correo.</summary>
+    public string Ticket { get; set; } = "";
+
+    /// <summary>
+    /// Código de proveedor en Mercado Público. Es lo único que hace falta para
+    /// consultar; el nombre y el RUT son solo para que la pantalla diga a quién
+    /// está mirando.
+    ///
+    /// Con "demo" se puede dejar vacío y la app funciona con datos inventados.
+    /// </summary>
+    public string CodigoProveedor { get; set; } = "";
+
+    /// <summary>Nombre de la empresa, para la cabecera.</summary>
+    public string NombreEmpresa { get; set; } = "";
+
+    /// <summary>RUT de la empresa, para la cabecera.</summary>
+    public string RutEmpresa { get; set; } = "";
+
+    /// <summary>"v1" (diario) o "c2" (Compra Ágil).</summary>
+    public string ModoConsulta { get; set; } = "v1";
+
+    /// <summary>
+    /// Minutos de vida de la caché en memoria.
+    ///
+    /// Va por debajo del refresco automático (5 min) a propósito: si la caché
+    /// durara más, dos de cada tres refrescos no preguntarían nada a la API y
+    /// no aparecería ninguna novedad. El detalle de una licitación cambia muy
+    /// poco, así que tampoco pierde nada por expires antes.
+    /// </summary>
+    public int MinutosDeCache { get; set; } = 4;
+
+    /// <summary>Espera máxima a Mercado Público por petición.</summary>
+    public int SegundosTimeout { get; set; } = 30;
+
+    /// <summary>
+    /// Cada cuánto refresca la pantalla sola mientras está abierta.
+    ///
+    /// Con la API caída casi siempre, un refresco cada 5 minutos son 12
+    /// peticiones por hora: una fracción del cupo diario de 10.000.
+    /// </summary>
+    public int MinutosEntreRefrescos { get; set; } = 5;
+
+    /// <summary>¿Hay un ticket utilizable?</summary>
+    public bool TieneTicket =>
+        !string.IsNullOrWhiteSpace(Ticket)
+        && !Ticket.StartsWith("CAMBIAR-ESTE-VALOR", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Modo de consulta normalizado: "v1", "c2" o "demo".
+    ///
+    /// "demo" NO llama a Mercado Público: devuelve datos inventados y sirve para
+    /// probar la pantalla sin gastar el cupo del ticket. Con él cargado en
+    /// producción se estaría mostrando información falsa como si fuera real,
+    /// así que el arranque avisa.
+    /// </summary>
+    public string Modo => ModoConsulta.ToLowerInvariant() switch
+    {
+        "c2" => "c2",
+        "demo" => "demo",
+        _ => "v1",
+    };
+
+    /// <summary>
+    /// ¿Se puede atender una consulta?
+    ///
+    /// En modo real hacen falta las dos cosas: ticket y código de proveedor. Sin
+    /// ticket la API responde 401; sin código no hay a quién preguntar.
+    /// </summary>
+    public bool Servible =>
+        Modo == "demo" || (TieneTicket && TieneCodigoProveedor);
+
+    /// <summary>¿Hay un código de proveedor configurado?</summary>
+    public bool TieneCodigoProveedor => !string.IsNullOrWhiteSpace(CodigoProveedor);
+
+    /// <summary>Refresco automático acotado a un valor sensato.</summary>
+    public int MinutosRefresco =>
+        Math.Clamp(MinutosEntreRefrescos, 1, 60);
+}

@@ -1,0 +1,18 @@
+# Compilación
+[Bb]in/
+[Oo]bj/
+publish/
+*.user
+*.suo
+.vs/
+node_modules/
+
+# Configuración local: aquí va el ticket de Mercado Público. NO se versiona.
+# Copia secrets\appsettings.Development.json.ejemplo y pon tu ticket ahí.
+secrets/
+appsettings.Development.json
+appsettings.Local.json
+*.env
+
+# Publicación
+publicacion/
