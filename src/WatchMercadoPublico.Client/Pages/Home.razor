@@ -363,8 +363,18 @@
     private bool detalleDesdeCache { get; set; }
     private string? errorDetalle { get; set; }
 
+    /// <summary>
+    /// Nombres de los días, indexados por <c>DayOfWeek</c>.
+    ///
+    /// OJO: el array empieza por DOMINGO porque en .NET
+    /// <c>DayOfWeek.Sunday = 0</c>, no el lunes. Ordenarlo por lunes
+    /// desplazaba todos los nombres un día: el 27 de febrero de 2026, que fue
+    /// viernes, salía como "sábado 27 de febrero". Es el mismo error que ya
+    /// había aparecido en el cálculo de semanas, y por eso el comentario está
+    /// aquí y no solo arriba.
+    /// </summary>
     private static readonly string[] DiasSemana =
-        ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"];
+        ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
 
     private string NombreEmpresa => Estado?.Empresa?.Nombre ?? "…";
     private int MinutosRefresco => Estado?.MinutosEntreRefrescos is > 0 ? Estado.MinutosEntreRefrescos : 5;
