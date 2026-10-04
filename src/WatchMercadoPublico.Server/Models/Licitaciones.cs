@@ -25,6 +25,15 @@ public sealed class Licitacion
     public DateOnly? FechaPublicacion { get; set; }
 
     /// <summary>
+    /// El día de la publicación ya escrito: "viernes 27 de febrero".
+    ///
+    /// Viaja desde el servidor porque el cliente era quien lo compunía, con su
+    /// propio array de días, y por eso una vez un viernes salió como "sábado".
+    /// El cliente lo pinta tal cual.
+    /// </summary>
+    public string PublicadoTexto { get; set; } = "";
+
+    /// <summary>
     /// El detalle ya se pidió: la ficha lo muestra aunque se vuelva a abrir,
     /// sin gastar otra consulta.
     /// </summary>

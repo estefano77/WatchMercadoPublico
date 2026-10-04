@@ -66,7 +66,7 @@
                     <select id="f-semana" class="campo" value="@NumeroSemana" @onchange="CambiarSemana">
                         @foreach (var s in Estado?.Semanas ?? [])
                         {
-                            <option value="@s.Numero" selected="@(s.Numero == NumeroSemana)">Semana @s.Numero - @RangoDe(s)</option>
+                            <option value="@s.Numero" selected="@(s.Numero == NumeroSemana)">Semana @s.Numero - @s.Texto</option>
                         }
                     </select>
                 </div>
@@ -246,7 +246,7 @@
                        rango. Con solo la insignia, cambiar de semana no se
                        notaba y parecía que la pantalla no se hubiera movido. *@
                     <span class="text-sm text-muted">
-                        Del @DiaCorto(Desde) al @DiaCorto(Hasta)
+                        @Periodo
                     </span>
                 </div>
                 <p class="text-xs text-muted">
@@ -281,7 +281,7 @@
                     <section class="entrada-suave">
                         <h3 class="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-muted">
                             <Icon Name="calendario" Size="13" />
-                            @DiaEnPalabras(grupo.Key)
+                            @EncabezadoDelGrupo(grupo)
                             <span class="font-normal normal-case tracking-normal text-muted opacity-70">
                                 (@grupo.Count() @(grupo.Count() == 1 ? "novedad" : "novedades"))
                             </span>
@@ -363,18 +363,51 @@
     private bool detalleDesdeCache { get; set; }
     private string? errorDetalle { get; set; }
 
+    // --- Textos de fecha que llegan hechos desde el servidor ---
+    //
+    // Aquí ya no se compone ninguna fecha. Antes este archivo tenía su propio
+    // array de días de la semana, ordenado por lunes pero indexado por
+    // DayOfWeek, que en .NET empieza por domingo: todas las fechas salían
+    // corridas un día y un viernes se pintaba como "sábado". No lo detectaba
+    // ningún test porque el cliente no tiene proyecto de pruebas.
+    //
+    // Los textos se escriben en TextosDeFecha, en el servidor, donde sí se
+    // prueban. Aquí solo se pintan.
+
+    /// Lo que se pinta junto al contador: "Del 23 de febrero al 28 de febrero".
+    private string Periodo => Semana?.Periodo ?? "";
+
     /// <summary>
-    /// Nombres de los días, indexados por <c>DayOfWeek</c>.
-    ///
-    /// OJO: el array empieza por DOMINGO porque en .NET
-    /// <c>DayOfWeek.Sunday = 0</c>, no el lunes. Ordenarlo por lunes
-    /// desplazaba todos los nombres un día: el 27 de febrero de 2026, que fue
-    /// viernes, salía como "sábado 27 de febrero". Es el mismo error que ya
-    /// había aparecido en el cálculo de semanas, y por eso el comentario está
-    /// aquí y no solo arriba.
+    /// Cuántos días se CONSULTARON de verdad. Distinto del total de la semana:
+    /// si la semana aún no termina, no se han preguntado los días futuros, y
+    /// decir "se consultaron 5" cuando se preguntaron 2 es mentir.
     /// </summary>
-    private static readonly string[] DiasSemana =
-        ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+    private string TextoDiasConsultados =>
+        Semana is null
+            ? "los días hábiles de la semana"
+            : Semana.DiasConsultados == 1 ? "1 día hábil" : $"{Semana.DiasConsultados} días hábiles";
+
+    /// <summary>Los días que fallaron, en palabras: "el martes y el jueves".</summary>
+    private string DiasFallidosEnPalabras
+    {
+        get
+        {
+            var dias = Semana?.DiasSinRespuesta ?? [];
+
+            if (dias.Count == 0) return "Ningún día sin respuesta";
+
+            if (dias.Count == 1) return $"Sin respuesta: {dias[0]}";
+
+            var ultimos = dias.Count > 3 ? dias.GetRange(dias.Count - 3, 3) : dias;
+            var todos = $"{string.Join(", ", ultimos)} y {dias.Count - ultimos.Count} más";
+
+            return $"Sin respuesta: {todos}";
+        }
+    }
+
+    /// El encabezado de cada grupo: "viernes 27 de febrero".
+    private static string EncabezadoDelGrupo(IGrouping<DateOnly, Licitacion> grupo) =>
+        grupo.First().PublicadoTexto;
 
     private string NombreEmpresa => Estado?.Empresa?.Nombre ?? "…";
     private int MinutosRefresco => Estado?.MinutosEntreRefrescos is > 0 ? Estado.MinutosEntreRefrescos : 5;
@@ -402,13 +435,6 @@
     }
 
     /// <summary>
-    /// Cuántas semanas tiene el mes elegido. Se calcula igual que en el servidor:
-    /// la última puede ser más corta y una puede caer entera en fin de semana.
-    ///
-    /// Con un año o un mes imposibles devuelve una sola semana en vez de lanzar:
-    /// <c>DateTime.DaysInMonth(0, 0)</c> revienta, y este valor se calcula en
-    /// cada render, también el primero.
-    /// </summary>
     /// <summary>
     /// Rango de la semana tal como se muestra en el desplegable: "5 al 11 de
     /// Octubre". Incluye sábado y domingo porque la semana va de lunes a
@@ -419,18 +445,7 @@
     /// cliente, y dos copias de una regla se desincronizan solas en cuanto una
     /// se toca y la otra no.
     /// </summary>
-    private string RangoDe(SemanaInfo semana)
-    {
-        if (semana.Desde is null || semana.Hasta is null) return "";
-
-        var desde = DateOnly.Parse(semana.Desde);
-        var hasta = DateOnly.Parse(semana.Hasta);
-
-        return desde.Month == hasta.Month
-            ? $"{desde.Day} al {hasta.Day} de {NombreDeMes(desde.Month).ToLowerInvariant()}"
-            : $"{desde.Day} de {NombreDeMes(desde.Month).ToLowerInvariant()} " +
-              $"al {hasta.Day} de {NombreDeMes(hasta.Month).ToLowerInvariant()}";
-    }
+    private string TextoDe(SemanaInfo semana) => semana.Texto;
 
     /// <summary>
     /// ¿Lo que se está mirando es la semana en que estamos?
@@ -479,29 +494,6 @@
         Semana is not null && NumeroSemana != Semana.Semana;
 
     /// <summary>
-    /// Cuántos días se CONSULTARON de verdad. Distinto del total de la semana:
-    /// si la semana aún no termina, no se han preguntado los días futuros, y
-    /// decir "se consultaron 5" cuando se preguntaron 2 es mentir.
-    /// </summary>
-    private string TextoDiasConsultados =>
-        Semana is null
-            ? "los días hábiles de la semana"
-            : Semana.DiasConsultados == 1 ? "1 día hábil" : $"{Semana.DiasConsultados} días hábiles";
-
-    private string DiaCorto(DateOnly? d) =>
-        d is null ? "—" : $"{d.Value.Day} de {NombreDeMes(d.Value.Month).ToLowerInvariant()}";
-
-    private string DiaEnPalabras(DateOnly d) =>
-        $"{DiasSemana[(int)d.DayOfWeek]} {d.Day} de {NombreDeMes(d.Month).ToLowerInvariant()}";
-
-    private string DiasFallidosEnPalabras
-    {
-        get
-        {
-            var n = Semana?.DiasFallidos ?? 0;
-            return n == 1 ? "1 día" : $"{n} días";
-        }
-    }
 
     protected override async Task OnInitializedAsync()
     {

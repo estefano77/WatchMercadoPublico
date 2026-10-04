@@ -146,6 +146,13 @@ public static class LicitacionesEndpoints
                 Numero = s,
                 Desde = $"{desde:yyyy-MM-dd}",
                 Hasta = $"{hasta:yyyy-MM-dd}",
+
+                // El texto YA escrito de cara al desplegable: "23 al 28 de
+                // febrero". Viaja desde aquí para que el cliente no tenga que
+                // nombrar meses: el cliente ya tuvo un array de días ordenado
+                // al revés y por eso salió un día corrido en todas las fechas.
+                Texto = TextosDeFecha.Rango(desde, hasta),
+
                 DiasHabiles = SemanasDelMes.DiasHabiles(anio, mes, s).Count,
             });
         }
@@ -323,6 +330,15 @@ public static class LicitacionesEndpoints
         int Total,
         List<Licitacion> Items,
         bool DesdeCache,
+
+        /// <summary>
+        /// El periodo ya escrito: "Del 23 de febrero al 28 de febrero".
+        ///
+        /// Viaja escrito para que el cliente no componga fechas. Es lo que se
+        /// pinta junto al contador de novedades.
+        /// </summary>
+        string Periodo,
+
         DateTimeOffset Consultado);
 
     private static RespuestaSemana ConstruirRespuesta(
@@ -352,9 +368,33 @@ public static class LicitacionesEndpoints
             sinRespuesta,
             diasPendientes,
             items.Count,
-            items.Select(AñadirDetalleCache).ToList(),
+            items.Select(AñadirDetalleCache).Select(ConTextoDePublicacion).ToList(),
             desdeCache,
+            $"Del {TextosDeFecha.DiaCorto(desde)} al {TextosDeFecha.DiaCorto(hasta)}",
             DateTimeOffset.UtcNow);
+    }
+
+    /// <summary>
+    /// Le pone a cada licitación el texto de su día de publicación: "viernes 27
+    /// de febrero".
+    ///
+    /// Se hace aquí, en un solo punto, y no en los tres sitios donde se arma la
+    /// licitación: el cliente lo compunía por su cuenta con su propio array de
+    /// días, y por eso una vez un viernes salió pintado como "sábado".
+    ///
+    /// Va DESPUÉS de <see cref="AñadirDetalleCache"/> porque esta copia la
+    /// licitación: si se invirtiera el orden, el texto se perdería.
+    /// </summary>
+    private static Licitacion ConTextoDePublicacion(Licitacion l)
+    {
+        // OJO: en la clase de la LISTA, FechaPublicacion es DateOnly?, no
+        // DateTimeOffset? como en el detalle. Por eso aquí no hay ninguna
+        // conversión: si algún día cambian los tipos, esto deja de compilar en
+        // vez de fallar en pantalla.
+        if (l.FechaPublicacion is not { } fecha) return l;
+
+        l.PublicadoTexto = TextosDeFecha.DiaEnPalabras(fecha);
+        return l;
     }
 
     // =====================================================================

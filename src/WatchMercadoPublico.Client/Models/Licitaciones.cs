@@ -20,6 +20,13 @@ public sealed class Licitacion
     /// <summary>Día del barrido en el que apareció esta licitación.</summary>
     public DateTimeOffset? FechaPublicacion { get; set; }
 
+    /// <summary>
+    /// El dia de la publicacion ya escrito: "viernes 27 de febrero". Lo compone
+    /// el servidor. El cliente lo pintaba con su propio array de dias, y por eso
+    /// una vez un viernes aparecia como "sabado".
+    /// </summary>
+    public string PublicadoTexto { get; set; } = "";
+
     /// <summary>Detalle ya en caché, si se pidió antes.</summary>
     public DetalleLicitacion? Detalle { get; set; }
 
@@ -206,6 +213,12 @@ public sealed class SemanaLicitaciones
     /// <summary>Sale de la caché del servidor sin gastar consulta.</summary>
     public bool DesdeCache { get; set; }
 
+
+    /// <summary>
+    /// El periodo ya escrito: "Del 23 de febrero al 28 de febrero". Lo compone
+    /// el servidor, por lo mismo que <see cref="SemanaInfo.Texto"/>.
+    /// </summary>
+    public string Periodo { get; set; } = "";
     public DateTimeOffset Consultado { get; set; }
 
     /// <summary>¿Se pudo comprobar la semana entera?</summary>
@@ -327,4 +340,14 @@ public sealed class SemanaInfo
 
     /// <summary>Cuántos de esos días se consultan: los de lunes a viernes.</summary>
     public int DiasHabiles { get; set; }
+
+    /// <summary>
+    /// El rango ya escrito, tal como va en el desplegable: "23 al 28 de
+    /// febrero". Lo compone el servidor.
+    ///
+    /// Antes el cliente lo armaba con las fechas y su propia lista de meses.
+    /// Dos copias de una regla se desincronizan solas en cuanto se toca una,
+    /// asi que aqui no se calcula nada: solo se pinta lo que llega.
+    /// </summary>
+    public string Texto { get; set; } = "";
 }
