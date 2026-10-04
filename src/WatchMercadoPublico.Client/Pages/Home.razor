@@ -108,10 +108,10 @@
                 <div class="mt-5">
                     <Aviso Tipo="aviso" Titulo="@TituloSemanaPendiente" Cerrable="false">
                         <p class="mt-1 text-sm leading-relaxed text-ink-soft">
-                            En el selector has elegido la
-                            <strong class="font-semibold text-ink">semana @NumeroSemana</strong>,
-                            pero lo que sigue en pantalla es de la
-                            <strong class="font-semibold text-ink">semana @SemanaMostrada</strong>.
+                            En el selector has elegido
+                            <strong class="font-semibold text-ink">@SemanaEnPalabras(Anio, Mes, NumeroSemana)</strong>,
+                            pero lo que sigue en pantalla es de
+                            <strong class="font-semibold text-ink">la última búsqueda</strong>.
                             Pulsa <strong class="font-semibold text-ink">Actualizar</strong>
                             para traerla.
                         </p>
@@ -242,7 +242,9 @@
                 <span class="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-field text-muted">
                     <Icon Name="calendario" Size="26" />
                 </span>
-                <p class="mt-4 text-base font-bold text-ink">Nada en la semana @SemanaMostrada</p>
+                <p class="mt-4 text-base font-bold text-ink">
+                    Nada en @SemanaEnPalabras(Semana.Anio, Semana.Mes, SemanaMostrada, capitalizado: true)
+                </p>
                 <p class="mx-auto mt-1.5 max-w-lg text-sm leading-relaxed text-muted">
                     Se consultaron @TextoDiasConsultados y no hay ninguna licitación
                     para este período.
@@ -500,7 +502,48 @@
     /// admite contenido mixto dentro de un atributo de componente: se calcula
     /// aquí y se pinta como <c>Titulo="@Texto"</c>.
     /// </summary>
-    private string TituloSemanaPendiente => $"Estás viendo la semana {SemanaMostrada}";
+    private string TituloSemanaPendiente =>
+        $"Estás viendo {SemanaEnPalabras(Semana.Anio, Semana.Mes, SemanaMostrada)}";
+
+    /// <summary>
+    /// "la semana 4 en febrero de 2026", o "la Semana 4 en Febrero de 2026" con
+    /// <paramref name="capitalizado"/>.
+    ///
+    /// Con el número solo no basta. Al cambiar el desplegable se puede pasar
+    /// de una semana a otra de otro mes, y "la semana 1" frente a "la semana 5"
+    /// no dice nada: el mismo número de semana existe en todos los meses. Con
+    /// mes y año, sí.
+    ///
+    /// El nombre del mes sale de la lista que manda el servidor, no de una
+    /// tabla propia del cliente: esa tabla ya estuvo aquí una vez, y mal.
+    ///
+    /// El guardia mira que el mes quepa en la lista, y no que la lista tenga
+    /// doce. Antes daba igual porque la lista eran siempre los doce meses, pero
+    /// ahora viene FILTERADA: en el año en curso solo llega hasta el mes de hoy.
+    /// Con un "Count >= 12" el nombre se caía al número y salía "la semana 4 de
+    /// 2 de 2026".
+    /// </summary>
+    private string SemanaEnPalabras(int anio, int mes, int semana, bool capitalizado = false)
+    {
+        var nombres = Estado?.MesesDisponibles;
+
+        var nombre = nombres is not null && mes is >= 1 && mes <= nombres.Count
+            ? nombres[mes - 1]
+            : TextoDeMesDesconocido(mes);
+
+        if (!capitalizado) nombre = nombre.ToLowerInvariant();
+
+        var palabra = capitalizado ? "Semana" : "semana";
+
+        return $"la {palabra} {semana} en {nombre} de {anio}";
+    }
+
+    /// <summary>
+    /// Mes fuera de la lista. No debería pasar nunca; si pasa, se ve enseguida
+    /// que es un número y no un nombre, en vez de imprimir un texto vacío que
+    /// dejaría "la semana 4 de  de 2026".
+    /// </summary>
+    private static string TextoDeMesDesconocido(int mes) => $"mes {mes}";
 
     /// <summary>
 
