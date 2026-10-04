@@ -1,10 +1,14 @@
 # WatchMercadoPublico
 
 Aplicación Blazor WebAssembly + ASP.NET Core que muestra **las licitaciones
-publicadas HOY en Mercado Público para una empresa fija**, y nada más.
+publicadas en Mercado Público para una empresa fija**, dentro del periodo que
+elija quien la usa, y nada más.
 
 La empresa vigilada (nombre, RUT y código de proveedor) se lee de
-`appsettings`, no de la pantalla. El día tampoco se elige: es siempre el de hoy.
+`appsettings`, no de la pantalla. El periodo sí se elige: año, mes y semana, y
+los tres van concatenados — lo que se consulta es **una semana**, no un mes ni un
+año. Por defecto se abre la semana en curso y se carga sola; cualquier otro
+periodo requiere pulsar "Actualizar".
 
 - **Cliente:** Blazor WebAssembly (.NET 10)
 - **Servidor:** ASP.NET Core 10, minimal API, sin base de datos
@@ -32,15 +36,22 @@ La empresa vigilada (nombre, RUT y código de proveedor) se lee de
 
 ## Qué hace
 
-Una pantalla, tres estados:
+Una pantalla, cuatro estados:
 
 | Estado | Qué muestra |
 |---|---|
-| **Hay novedades** | Las licitaciones de hoy, ordenadas: primero lo que sigue vigente. Al hacer clic se abre el detalle. |
-| **No hay nada** | "Nada nuevo hoy". Si hoy es sábado o domingo, lo dice, porque es lo más probable y evita que parezca un fallo. |
+| **Hay novedades** | Las licitaciones de la semana, agrupadas por día de publicación. Al hacer clic se abre el detalle. |
+| **No hay nada** | "Nada en la Semana 3 en Octubre de 2026". El nombre de la semana va porque el estado vacío no enseña ni el periodo ni la insignia, y sin él no se sabría a qué semana se refiere. |
 | **No se pudo consultar** | Un aviso explícito con botón de reintento. **Nunca** dice "no hay licitaciones" cuando lo que pasó es que no se pudo preguntar. |
+| **Los filtros no coinciden con la pantalla** | Al mover un desplegable sin pulsar "Actualizar": un aviso ámbar dice qué semana se está viendo y cuál se ha elegido, y el botón de la barra late. |
 
-La página se refresca sola cada 5 minutos, y avisa de cuándo se consultó.
+Ese último estado existe por una razón concreta. Los desplegables cambian al
+instante y los datos no: se traen al pulsar "Actualizar". Sin un aviso, moverlos
+no cambia nada de lo que hay en pantalla y el selector parece roto.
+
+La página se refresca sola cada 5 minutos **solo cuando se está viendo la semana
+en curso**, y avisa de cuándo se consultó. Una semana pasada no va a cambiar:
+repreguntarla gastaría cuota para devolver exactamente lo mismo.
 
 ### Lo que la pantalla NO dice, y aquí está
 
@@ -390,7 +401,7 @@ Tres mensajes distintos, según lo que pasó:
 | Situación | Lo que dice |
 |---|---|
 | Se consultó el día y hay licitaciones | Las lista, con el detalle al hacer clic |
-| Se consultó y salió vacío | "Nada nuevo hoy", o "… es fin de semana" si es sábado o domingo |
+| Se consultó y salió vacío | "Nada en la Semana 3 en Octubre de 2026", o "… es fin de semana" si es sábado o domingo |
 | **No se pudo consultar** | "No se pudo consultar", con botón de reintento, y se aclara que **no** significa que no haya nada |
 
 La pantalla se refresca sola cada `MinutosEntreRefrescos` (5 por defecto), así
@@ -447,7 +458,7 @@ peticiones.
 
 ### Las semanas van de lunes a domingo, recortadas al mes
 
-El desplegable lo dice: **"Semana 2 · 5 al 11 de Octubre"**. El 5 de octubre de
+El desplegable lo dice: **"Semana 2 - 5 al 11 de octubre"**. El 5 de octubre de
 2026 es lunes y el 11 es el domingo de esa semana.
 
 No son las semanas ISO, que se numeran por el año y pueden empezar en diciembre
@@ -470,6 +481,51 @@ Solo el **procesamiento** se queda con los días hábiles: en Chile no se public
 nada en fin de semana —comprobado: el 3 y el 4 de octubre de 2026 dieron 0—,
 así que consultarlos duplicaría las peticiones sin aportar nada.
 
+### Un mes que empieza en domingo
+
+Febrero de 2026 empieza en domingo, así que el tramo del día 1 al primer domingo
+es **solo ese domingo**: cero días hábiles. Dejarlo como "semana 1" gastaba un
+número del desplegable sin dejar consultar nada, y la pantalla llegaba a decir
+"se consultaron 0 días hábiles".
+
+Ese domingo es en realidad la cola de la semana del mes **anterior**, así que se
+descarta y la semana 1 pasa a ser la del lunes siguiente. Febrero queda con
+**4 semanas**:
+
+| Semana | Rango |
+|---|---|
+| 1 | del 2 al 8 de febrero |
+| 2 | del 9 al 15 de febrero |
+| 3 | del 16 al 22 de febrero |
+| 4 | del 23 al 28 de febrero |
+
+Es la regla general: **la semana 1 empieza el día 1 del mes, salvo que ese primer
+tramo no tenga ningún día hábil.** Octubre no la activa —su tramo inicial va del
+1 al 4 y tiene jueves y viernes— así que sigue teniendo 5 semanas y la semana 1
+es la del 1 al 4.
+
+### No se ofrecen periodos que aún no han ocurrido
+
+Un periodo solo aparece si **ya ha empezado**:
+
+- **Meses**: un año pasado ofrece los doce; el año en curso, solo hasta el mes de
+  hoy; un año futuro no ofrece ninguno.
+- **Semanas**: solo las que ya han empezado. La semana en curso sí, porque se ven
+  los días que ya pasaron más los que faltan.
+
+Con hoy 4 de octubre de 2026, el desplegable de semanas muestra **una sola**:
+`Semana 1 - 1 al 4 de octubre`. Las semanas 2 a 5 no han empezado.
+
+Antes sí se ofrecían, y elegir una gastaba una llamada al servidor para
+devolver semanas enteras marcadas como pendientes y una pantalla vacía que
+parecía un fallo. "No hay nada" y "todavía no ha pasado" tienen que verse
+distinto, y la mejor forma es no llegar a ofrecer la pregunta.
+
+El corte lo hace el servidor, en `DescribirSemanas` y `MesesVisibles`. Con hoy 4
+de octubre de 2026 la lista de meses llega con diez entradas, no con doce, así que
+**cualquier código del cliente que asuma doce meses se rompe**. Ya pasó: el nombre
+del mes del aviso salía como "de 2 de 2026" en vez de "de febrero de 2026".
+
 Los rangos los **calcula el servidor** y llegan en `/api/estado?anio=&mes=`. El
 cliente no repite la regla de lunes a domingo: solo pinta lo que le mandan.
 
@@ -484,7 +540,7 @@ ticket. En el cliente no queda ni una línea de aritmética de fechas: ni
 eso tampoco queda copia que se pueda desincronizar, y por eso `SemanasDelMesTests`
 ya solo tiene que vigilar el servidor.
 
-Dos fallos que teve el cálculo, y que los tests ahora fijan:
+Cuatro fallos que teve el cálculo, y que los tests ahora fijan:
 
 - En .NET, `DayOfWeek` empieza por **DOMINGO = 0**, no por lunes. Calcular la
   primera semana como `7 - diaDeSemana` daba un número que parecía correcto y
@@ -492,6 +548,14 @@ Dos fallos que teve el cálculo, y que los tests ahora fijan:
 - La primera semana no se recortaba al **primer domingo** del mes, así que un mes
   que empezaba en jueves decía "del 1 al 7" y la semana 2 arrancaba el 8, que es
   lunes pero no el lunes del calendario.
+- Un mes que empieza en domingo tenía una semana 1 de un solo día y sin días
+  hábiles. Ver arriba.
+- Al arreglar lo anterior, la semana 2 arrancaba el día siguiente al **fin** de la
+  semana 1 más siete, en vez de más uno. Con octubre daba el 12 en vez del 5.
+
+La regla tiene **una sola fuente de verdad**: `PrimeraSemana()` devuelve el inicio
+y el fin de la semana 1, y de ahí salen tanto el número de semanas como todos los
+rangos. Antes cada uno recalculaba por su cuenta y ya había divergido dos veces.
 
 ### Días futuros: no se consultan, y no son un fallo
 
@@ -775,7 +839,9 @@ Por **síntoma**, no por causa interna:
 |---|---|
 | Tarda más de un minuto en una sola semana | Son 5 peticiones seguidas y cada una puede insistir un minuto. Si además tardó **cuatro minutos y medio**, se estaban consultando días futuros: comprueba `diasPendientes` en la respuesta. |
 | La semana sale "incompleta" | `diasFallidos` > 0. Son días que se intentaron y no respondieron; `diasSinRespuesta` dice cuáles. Los días que **no han llegado** van aparte, en `diasPendientes`, y no son un fallo. |
-| Los desplegables salen vacíos | `/api/estado` no llegó, o no devolvió `aniosDisponibles` y `mesesDisponibles`. |
+| Los desplegables salen vacíos | `/api/estado` no llegó, o no devolvió `aniosDisponibles` y `mesesDisponibles`. Un mes futuro sale vacío **a propósito**: no se ofrecen periodos que no han ocurrido. |
+| Al mover un desplegable no cambia nada | Correcto: los datos llegan al pulsar "Actualizar", y sale un aviso ámbar diciéndolo. Si el aviso **no** sale, revisar que se comparen año, mes y semana: comparar solo el número de semana deja pasar los cambios de mes y de año, porque el número se repite en todos los periodos. |
+| Un día sale con el nombre de otro | El array de días del cliente indexado por `DayOfWeek`, que en .NET empieza por **domingo**. Esa lógica se movió al servidor (`TextosDeFecha`) precisamente por eso. Si alguien la reintroduce, el primer síntoma es "un viernes que pone sábado". |
 | Al abrir la página, la cabecera y nada debajo | Estado muerto: `Semana` a null sin error ni consulta en vuelo. Hay una rama `else` que lo evita, así que si aparece, hay que mirar la consola del navegador. |
 |---|---|
 | Se queda en "Cargando" tras publicar | Falta el target `SuperponerClienteBlazor`, o el `index.html` publicado sin sustituir. |
@@ -785,7 +851,7 @@ Por **síntoma**, no por causa interna:
 | La pantalla dice "No se pudo consultar" | Mercado Público está rechazando. Se intentó 6 veces durante un minuto y no respondió. **No** significa que no haya nada hoy. Se reintenta solo cada 5 min. |
 | Los 6 intentos salen con `500` y `Codigo 10300` | Casi siempre es **nuestro**, no de la API: se queja de lo que le mandamos. El mensaje concreto ahora llega a pantalla y al log, así que léelo antes de culpar a Mercado Público. |
 | Falla solo entre el día 1 y el 9 de cada mes | El día sin relleno a la izquierda en la fecha: `dMMyyyy` en vez de `ddMMyyyy`. Ver [`fecha` con los DOS campos rellenos](#%EF%B8%8F-fecha-con-los-dos-campos-rellenos-o-no-funciona). |
-| La lista sale vacía | Consulta real y de verdad no hay nada publicado hoy. La pantalla lo dice como "Nada nuevo hoy", no como error. |
+| La lista sale vacía | Consulta real y de verdad no hay nada publicado en esa semana. La pantalla lo dice como "Nada en la Semana 3 en Octubre de 2026", no como error. |
 | `401` o `403` al consultar | El ticket caducó, se revocó o se agotó su cupo diario. |
 | Aviso naranja en pantalla | Estás en `ModoConsulta: "demo"`: son datos inventados. |
 | Aviso "la aplicación no está configurada" | Falta el `Ticket` o el `CodigoProveedor` en la sección `MercadoPublico` del **servidor**. |
@@ -795,12 +861,13 @@ Por **síntoma**, no por causa interna:
 
 ## Marcas y propiedad intelectual
 
-Hay **dos marcas** en pantalla, y conviene no confundirlas:
+Hay **tres marcas** en pantalla, y conviene no confundirlas:
 
 | Marca | De quién es | Dónde sale |
 |---|---|---|
 | La *M* en zigzag + `WatchMercadoPublico` | **Propia**, dibujada para este proyecto | Símbolo y nombre de la herramienta |
 | El rótulo `SMC` | **De SMC**, la empresa para la que es la herramienta | Logotipo en la cabecera, a la derecha |
+| El logo de **Dirección ChileCompra** | **De ChileCompra**, el organismo que publica los datos | Logotipo en el pie |
 
 El logotipo de SMC se muestra porque la herramienta es **interna de SMC**: es una
 marca que se usa con permiso y para identificar al propietario, no una marca
@@ -810,11 +877,57 @@ rótulo. No se pone una línea divisoria entre ellos: con la barra a 1.152 px de
 ancho quedan a cientos de píxeles el uno del otro y la línea quedaría flotando
 en mitad del hueco.
 
+El logo de ChileCompra se pone por lo contrario: los datos que se muestran **son
+suyos**, y decir de dónde salen es lo mínimo que corresponde. Va en el pie, y
+además de pie lleva el crédito de autoría: "Desarrollado por **SMC Spa**", con
+enlace a `smc.cl`.
+
 Lo que **no** se hace, en ningún caso: reproducir, combinar ni fusionar el
 logotipo de Mercado Público / ChileCompra con la marca propia. Es una marca
 registrada de un tercero, y eso es infracción de marca, no solo de copyright.
+El logo de ChileCompra va en su propio elemento, en el pie, sin tocar la marca
+propia, que sigue solo en la cabecera.
 
-### El archivo del logo, y por qué se pinta con máscara
+### El logo de ChileCompra: dos ficheros, y no se pinta con máscara
+
+`wwwroot/LogoChc-blanco.png` y `wwwroot/LogoChc-oscuro.png` son las dos
+variantes del logo de Dirección ChileCompra: tinta blanca para el tema oscuro,
+tinta gris 900 para el tema claro. Se intercambian por la clase `.dark` del CSS,
+**no** por `prefers-color-scheme`: el tema también se cambia a mano con el botón,
+y una media query seguiría al sistema en vez de al botón, con lo que el logo se
+quedaría en la variante equivocada.
+
+El archivo del que salieron, que era solo la versión **blanca**, no está en el
+repositorio. Se quitó porque con el pie reducido a la autoría no había sitio para
+un recuadro oscuro debajo, que es lo que hacía falta para que el texto blanco se
+vera en el tema claro. Ese recuadro además quedaba feo, y el logo salía
+embarrado. La causa estaba en la imagen, no en el CSS:
+
+| Defecto del PNG | Medida |
+|---|---|
+| Halo difuso alrededor del logo | 1.963 px con alfa 1-80 (12,7 %) |
+| El texto no era blanco, era gris claro | `rgb(224,224,224)` |
+| El contenido tocaba los cuatro bordes | 0 px de margen |
+
+Las dos variantes quedan sin halo, con el blanco normalizado y con 12 px de
+margen igual, para que al cambiar de tema el logo no se mueva un píxel.
+
+**Por qué aquí sí y en SMC no:** el logo de ChileCompra tiene la barra azul y
+roja de la bandera, y una máscara de un solo color la dejaría en monocroma. El
+de SMC es blanco puro con alfa variable y una sola imagen le da los dos colores
+del tema. Por eso uno se pinta con `mask-image` y el otro con
+`background-image`.
+
+La bandera se respeta en el tratamiento: tiene saturación alta, así que la regla
+de "esto es blanco, lo pinto" no la toca. Si la tocara, el logo perdería su color.
+
+Va como `<span>` con `background-image` y no como `<img>`: con dos imágenes
+habría que decidir en Blazor cuál mostrar, y la clase `.dark` la pone el script
+en línea de `index.html` antes de pintar, sin parpadeo. Lleva
+`aria-label="Dirección ChileCompra"`, igual que el de SMC: si el logo se pierde,
+el nombre sigue leyéndose.
+
+### El archivo del logo de SMC, y por qué se pinta con máscara
 
 `wwwroot/logo-smc.png` es la derivada de 300×72 del logo oficial que usa
 `smc.cl` en su propia cabecera (`smc_b-300x72.png`, 2,8 KB). Se copia al
@@ -852,16 +965,17 @@ comprobación de cabecera mira el ``maskImage`` ya resuelto.
 |---|---|---|
 | Cabecera, izquierda | Símbolo propio + `WatchMercadoPublico` | Identidad de la herramienta |
 | Cabecera, derecha | Logotipo de **SMC** | Identifica al propietario: herramienta interna suya |
-| Encabezado de la página | "Novedades de hoy en **Mercado Público**" | Uso nominativo: describe la plataforma de la que salen los datos |
-| Pie | "© WatchMercadoPublico" | Solo la autoría del producto |
-| Pie | "Documentación de la API" → `api.mercadopublico.cl` | Enlace externo, con `rel="noopener noreferrer"` |
+| Encabezado de la página | "Novedades en **Mercado Público**" | Uso nominativo: describe la plataforma de la que salen los datos |
+| Pie | "© WatchMercadoPublico" | Autoría del producto |
+| Pie | "Desarrollado por **SMC Spa**" → `smc.cl` | Crédito de autoría. Se queda aunque no haya salida a internet |
+| Pie | Logotipo de **ChileCompra** | Los datos son suyos: atribución |
 | Aviso de demo | "No se está llamando a **Mercado Público**" | Uso nominativo |
 | Ficha de una licitación | Nombre del organismo y su RUT | Son los datos de la plataforma, no un atributo nuestro |
 
-**ChileCompra no aparece por ninguna parte**, y de SMC solo el logotipo.
-"WatchMercadoPublico" y el logo de SMC conviven en la cabecera sin mezclarse: están
-en extremos opuestos de la barra, y además el logo es blanco plano sobre el fondo
-mientras que el nombre propio va en degradado.
+De las tres marcas, **ninguna se toca**: la propia solo en la cabecera, la de SMC
+en la cabecera, la de ChileCompra en el pie. El logo de SMC es blanco plano sobre
+el fondo mientras que el nombre propio va en degradado, así que aunque se leyeran
+juntos se distinguirían.
 
 Lo que **conviene que se quede** es "Mercado Público" en el encabezado, en el
 aviso de demo y en los enlaces a `mercadopublico.cl`: sin eso, un aviso de error
@@ -878,10 +992,10 @@ Iconos de [Lucide](https://lucide.dev) (licencia ISC). Tipografía
 dotnet test
 ```
 
-**No hay que tener ticket, ni red, ni la API en pie.** Eso no es una comodidad:
-es lo que hace posible testear. Un método que hace una petición no se puede
-comprobar sin pedirla, y para la aplicación casi todo lo que se rompió no
-necesitaba la API para estar mal.
+**80 tests**, todos en verde. **No hay que tener ticket, ni red, ni la API en
+pie.** Eso no es una comodidad: es lo que hace posible testear. Un método que
+hace una petición no se puede comprobar sin pedirla, y para la aplicación casi
+todo lo que se rompió no necesitaba la API para estar mal.
 
 Por eso `ConstruirUrlDia` y `ConstruirError` están extraídos del cliente como
 funciones estáticas, aunque solo los use un sitio: es el requisito para poder
@@ -890,27 +1004,55 @@ mirarlos desde un test. Para exponerlos hay un `InternalsVisibleTo` en el
 
 ### Qué cubren, y por qué existen
 
-Los dos nacieron de bugs que estuvieron en producción:
+Todos nacieron de bugs que estuvieron en producción:
 
 | Archivo | Qué ata |
 |---|---|
 | `FormatoDeFechaTests.cs` | La fecha va en `DDMMAAAA` con los dos campos rellenos, los **730 días** de dos años, y no depende del calendario de la cultura del servidor |
 | `ErroresDeApiTests.cs` | Que el mensaje de la API llegue a quien lee, y que un `500` no se traduzca en "la API está caída" cuando la API está diciendo otra cosa |
+| `SemanasDelMesTests.cs` | La regla de lunes a domingo, recortada al mes, y que ninguna semana se quede sin días hábiles |
+| `TextosDeFechaTests.cs` | Los nombres de día y de mes, y que `DayOfWeek.Sunday` siga siendo 0 |
+| `PeriodosDisponiblesTests.cs` | Que no se ofrezcan meses ni semanas que aún no han ocurrido |
+
+### Lo que los tests no cubren
+
+**El cliente no tiene proyecto de pruebas.** Todo lo anterior vive en el
+servidor. Es una decisión con consecuencias, y hay que conocerlas:
+
+Los tres bugs de fechas que hicieron falta arreglar estaban **en el cliente**,
+no en el servidor: el array de días ordenado por lunes pero indexado por
+`DayOfWeek`, que en .NET empieza por domingo, y por eso un viernes salía como
+"sábado". **Ningún test lo detectó, porque no había ninguno que lo mirara.**
+
+La reacción fue mover el texto de las fechas al servidor, donde sí se prueba
+(`TextosDeFecha`). Quedó sin lógica de fechas en el cliente, pero el hueco
+sigue: `Formato.cs` no tiene tests, y `Home.razor` es una pantalla de 500 líneas
+que no se puede probar sin un proyecto de pruebas de Blazor.
+
+El último bug fue de la misma familia y **tampoco lo cazó ningún test**:
+comparar solo el número de semana para saber si los filtros habían cambiado.
+Como el número de semana se repite en todos los periodos, cambiar de mes o de
+año no disparaba el aviso. Era una línea, y estaba a dos líneas de otra que sí
+comparaba las tres cosas.
 
 ### La prueba de que un test sirve
 
 Un test de regresión que nunca ha fallado no demuestra nada: puede estar
-comprobando lo que siempre se comprobó. Los dos se validaron **reintroduciendo
-el bug**:
+comprobando lo que siempre se comprobó. Los primeros dos se validaron
+**reintroduciendo el bug**:
 
 | Con el bug reintroducido | Resultado |
 |---|---|
 | `ddMMyyyy` → `dMMyyyy` | **Falla** en los 9 días de la primera decena |
 | Sin leer `Mensaje` | **Falla** en los 2 tests que dependen de ese mensaje |
-| Restaurado | **32 de 32** |
+| Restaurado (en aquel momento, eran 32) | **32 de 32** |
 
-Si alguna vez se toca `ConstruirUrlDia` o `ConstruirError`, ese truco es la
-forma de saber si el test sigue vigilando algo.
+El mismo truco se usó después con `PeriodosDisponiblesTests`, desactivando el
+corte de semanas futuras: se pusieron rojos **3 tests**, entre ellos el barrido de
+dos años que exige que ninguna semana ofrecida empiece después de hoy.
+
+Si alguna vez se toca `ConstruirUrlDia`, `ConstruirError` o el corte de periodos
+futuros, ese truco es la forma de saber si el test sigue vigilando algo.
 
 ### Detalle que sale de escribir el test
 
@@ -933,21 +1075,42 @@ WatchMercadoPublico.slnx
 ├── secrets/                       # plantilla del ticket (fuera del repo)
 └── src
     ├── WatchMercadoPublico.Client # la SPA
-    │   ├── Components/            # Icon, Marca, Aviso, TemaOscuro,
-    │   │                          #   FichaLicitacion, ModalDetalle
-    │   ├── Layout/                # MainLayout
+    │   ├── Components/            # Icon, Marca, Aviso, LogoSmc, LogoChileCompra,
+    │   │                          #   FichaLicitacion, ModalDetalle, ThemeToggle
+    │   ├── Layout/MainLayout.razor # cabecera y pie
     │   ├── Models/                # DTOs (mismos nombres que el JSON del servidor)
-    │   ├── Pages/Home.razor       # la pantalla entera: hoy, y su refresco
+    │   ├── Pages/Home.razor       # la pantalla entera: los tres filtros, y su refresco
     │   ├── Services/              # MercadoPublicoApi, Formato, ThemeService
-    │   └── wwwroot/               # index.html, css/app.css, icono.svg, marca.svg
+    │   └── wwwroot/               # index.html, css/app.css, icono.svg, marca.svg,
+    │                              #   logo-smc.png, LogoChc-blanco.png, LogoChc-oscuro.png
     ├── WatchMercadoPublico.Server # la API y el hosting de la SPA
-    │   ├── Endpoints/             # LicitacionesEndpoints (/estado, /hoy, detalle)
+    │   ├── Endpoints/             # LicitacionesEndpoints (/estado, /semana, detalle)
     │   ├── Models/                # opciones y DTOs
     │   ├── Services/              # MercadoPublicoCliente, CacheMercadoPublico,
-    │   │                          #   CalendarioDelMes (nombres de mes), DatosDemo
+    │   │                          #   SemanasDelMes (la regla de semanas),
+    │   │                          #   CalendarioDelMes (nombres de mes),
+    │   │                          #   TextosDeFecha (días y meses en palabras),
+    │   │                          #   DatosDemo
     │   └── web.config
     └── WatchMercadoPublico.Server.Tests # tests, sin red y sin ticket
 ```
 
 `DatosDemo.cs` y el modo `demo` son **una ayuda de desarrollo**, no parte de la
 aplicación.
+
+### Quién decide qué
+
+La regla que vertebra el proyecto: **el servidor calcula, el cliente pinta.**
+
+| Cosa | Dónde vive | Por qué |
+|---|---|---|
+| Qué semanas tiene el mes | `SemanasDelMes` | Una sola copia de la regla de lunes a domingo |
+| Qué periodos se pueden elegir | `DescribirSemanas`, `MesesVisibles` | Que los tres desplegables no puedan discrepar |
+| Los nombres de día y de mes | `TextosDeFecha`, `CalendarioDelMes` | **El cliente ya tuvo su propia copia y salió un viernes como sábado** |
+| El rango de cada semana, escrito | `SemanaDescrita.Texto` | El cliente pintaba "23 al 28 de febrero" por su cuenta |
+| El día de una licitación, escrito | `Licitacion.PublicadoTexto` | Ídem |
+| El periodo del contador | `RespuestaSemana.Periodo` | Ídem |
+
+Hay un test que califica esto, y es `TextosDeFechaTests`. Si algún día alguien
+añade en el cliente un array de meses o de días, ese test no lo va a detectar:
+lo detectaría el próximo bug de un día corrido.
