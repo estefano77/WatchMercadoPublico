@@ -75,7 +75,10 @@
                     </select>
                 </div>
 
-                <button type="button" class="boton-actualizar" @onclick="ActualizarAsync" disabled="@Cargando">
+                <button type="button"
+                        class="boton-actualizar @ClaseBotonActualizar"
+                        @onclick="ActualizarAsync"
+                        disabled="@Cargando">
                     @if (Cargando)
                     {
                         <span class="icono-girando"><Icon Name="recargar" Size="17" /></span>
@@ -92,13 +95,49 @@
             @* El desplegable cambia al instante pero los datos no: se traen al
                pulsar "Actualizar". Sin este aviso, mover el desplegable no
                cambia nada de lo que hay en pantalla —la insignia ya no se mueve
-               a propósito— y el selector parece no funcionar. *@
+               a propósito— y el selector parece no funcionar.
+
+               Va como aviso y no como una línea de texto porque aquí lo que hay
+               que conseguir es que se pulse un botón, y una frase gris se lee
+               como informative y se pasa. El botón además late, para que la
+               mirada termine en la acción y no en el texto. *@
             @if (HaySemanaPendiente)
             {
-                <p class="mt-3 text-xs leading-relaxed text-muted">
-                    Sigues viendo la semana @SemanaMostrada. Pulsa "Actualizar" para
-                    traer la semana @NumeroSemana.
-                </p>
+                <Aviso Tipo="aviso" Titulo="@TituloSemanaPendiente" Cerrable="false">
+                    <p class="mt-1 text-sm leading-relaxed text-ink-soft">
+                        En el selector has elegido la
+                        <strong class="font-semibold text-ink">semana @NumeroSemana</strong>,
+                        pero lo que sigue en pantalla es de la
+                        <strong class="font-semibold text-ink">semana @SemanaMostrada</strong>.
+                        Pulsa <strong class="font-semibold text-ink">Actualizar</strong>
+                        para traerla.
+                    </p>
+
+                    @* El mismo botón, aquí dentro. En pantallas anchas es el de
+                       la barra de arriba; repetirlo evita tener que subir la
+                       mirada a buscarlo. *@
+                    <div class="mt-3 flex flex-wrap items-center gap-2">
+                        <button type="button"
+                                class="boton-actualizar"
+                                @onclick="ActualizarAsync"
+                                disabled="@Cargando">
+                            @if (Cargando)
+                            {
+                                <span class="icono-girando"><Icon Name="recargar" Size="17" /></span>
+                                <span>Consultando…</span>
+                            }
+                            else
+                            {
+                                <Icon Name="recargar" Size="17" />
+                                <span>Traer la semana @NumeroSemana</span>
+                            }
+                        </button>
+                        <span class="text-xs text-muted">
+                            No gasta más consultas: los días que ya se miraron
+                            están guardados.
+                        </span>
+                    </div>
+                </Aviso>
             }
 
             @* Aquí ya no va el periodo. Estaba debajo de los filtros y se leía como si
@@ -466,6 +505,23 @@
     /// </summary>
     private bool HaySemanaPendiente =>
         Semana is not null && NumeroSemana != Semana.Semana;
+
+    /// <summary>
+    /// El botón de la barra late cuando hay algo pendiente de traer.
+    ///
+    /// El aviso de abajo ya explica la situación y trae su propio botón, pero el
+    /// de la barra es el que está siempre a la vista. Que se mueva es lo que
+    /// convierte "he cambiado el desplegable y no pasa nada" en un clic.
+    /// </summary>
+    private string ClaseBotonActualizar =>
+        HaySemanaPendiente ? "boton-actualizar-pendiente" : "";
+
+    /// <summary>
+    /// Título del aviso. Va en una propiedad y no en el atributo porque Razor no
+    /// admite contenido mixto dentro de un atributo de componente: se calcula
+    /// aquí y se pinta como <c>Titulo="@Texto"</c>.
+    /// </summary>
+    private string TituloSemanaPendiente => $"Estás viendo la semana {SemanaMostrada}";
 
     /// <summary>
 

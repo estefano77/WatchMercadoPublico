@@ -296,11 +296,40 @@ select option:checked {
     animation: girar 1s linear infinite;
 }
 
+/* ---------------------------------------------------------------------------
+   Botón "Actualizar" cuando hay algo pendiente de traer.
+
+   El aviso de "sigues viendo la semana 1" avisa de que los datos no son los
+   que pediste, pero el aviso solo no basta: el lector tiene que convertir eso
+   en un clic, y un clic cae donde algo se mueve. Por eso el botón late.
+
+   Es un anillo que se abre y se cierra, no un parpadeo de opacidad: un
+   parpadeo sobre un botón con texto encima lo hace ilegible en el punto
+   justo en que tiene que leerse.
+   --------------------------------------------------------------------------- */
+
+@keyframes llamar-atencion {
+    0%, 100% { box-shadow: 0 0 0 0 rgb(139 92 246 / 0.55); }
+    70%      { box-shadow: 0 0 0 10px rgb(139 92 246 / 0); }
+}
+
+.boton-actualizar-pendiente {
+    animation: llamar-atencion 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Cuando el botón está busy no late: ya está girando y hay que evitar dos
+   animaciones peleándose por el mismo elemento. */
+.boton-actualizar-pendiente:disabled {
+    animation: none;
+    box-shadow: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .esqueleto,
     .entrada-suave,
     .punto-pulsante,
-    .icono-girando {
+    .icono-girando,
+    .boton-actualizar-pendiente {
         animation: none;
     }
 }
