@@ -61,9 +61,9 @@
                         Semana
                     </label>
                     <select id="f-semana" class="campo" value="@NumeroSemana" @onchange="CambiarSemana">
-                        @foreach (var s in SemanasDisponibles)
+                        @foreach (var s in Estado?.Semanas ?? [])
                         {
-                            <option value="@s" selected="@(s == NumeroSemana)">Semana @s - @RangoDeSemana(s)</option>
+                            <option value="@s.Numero" selected="@(s.Numero == NumeroSemana)">Semana @s.Numero - @RangoDe(s)</option>
                         }
                     </select>
                 </div>
@@ -382,104 +382,40 @@
     /// <c>DateTime.DaysInMonth(0, 0)</c> revienta, y este valor se calcula en
     /// cada render, también el primero.
     /// </summary>
-    private List<int> SemanasDisponibles
-    {
-        get
-        {
-            var dias = Anio is < 1 or > 9999 || Mes is < 1 or > 12
-                ? 31
-                : DateTime.DaysInMonth(Anio, Mes);
-
-            var total = (dias + 6) / 7;
-            return Enumerable.Range(1, total).ToList();
-        }
-    }
-
-    /// <summary>
-    /// ¿Lo que se está mirando es la semana en que estamos? Decide si tiene
-    /// sentido el refresco automático: una semana pasada no va a cambiar.
-    /// </summary>
-    private bool EsSemanaActual
-    {
-        get
-        {
-            var hoy = DateOnly.FromDateTime(DateTime.Today);
-            return Anio == hoy.Year && Mes == hoy.Month && NumeroSemana == SemanaDe(hoy);
-        }
-    }
-
     /// <summary>
     /// Rango de la semana tal como se muestra en el desplegable: "5 al 11 de
-    /// Octubre". Incluye sábado y domingo, porque una semana va de lunes a
-    /// domingo; solo el PROCESO se queda con los días hábiles.
+    /// Octubre". Incluye sábado y domingo porque la semana va de lunes a
+    /// domingo; solo el PROCESAMIENTO se queda con los días hábiles.
     ///
-    /// Es el mismo cálculo que hace SemanasDelMes en el servidor, y a propósito
-    /// está duplicado: el cliente no puede llamar al servidor para rotular cuatro
-    /// opciones, y el servidor es quien manda. Lo que ata las dos copias es
-    /// SemanasDelMesTests, que fija el caso de octubre de 2026 con todos sus
-    /// rangos. Si se cambia la regla hay que cambiar las dos cosas.
+    /// NO hay aquí ningún cálculo de fechas: el servidor manda el rango ya
+    /// hecho. Antes esta función repetía la regla de lunes a domingo en el
+    /// cliente, y dos copias de una regla se desincronizan solas en cuanto una
+    /// se toca y la otra no.
     /// </summary>
-    private string RangoDeSemana(int semana)
+    private string RangoDe(SemanaInfo semana)
     {
-        var primeroDelMes = new DateOnly(Anio, Mes, 1);
-        var ultimoDelMes = new DateOnly(Anio, Mes, DateTime.DaysInMonth(Anio, Mes));
+        if (semana.Desde is null || semana.Hasta is null) return "";
 
-        // .NET: DayOfWeek empieza en DOMINGO = 0.
-        var hastaElDomingo = (7 - (int)primeroDelMes.DayOfWeek) % 7;
-        var longitudPrimera = hastaElDomingo + 1;
+        var desde = DateOnly.Parse(semana.Desde);
+        var hasta = DateOnly.Parse(semana.Hasta);
 
-        var desplazamiento = 0;
-        for (var k = 1; k < semana; k++) desplazamiento += k == 1 ? longitudPrimera : 7;
-
-        var desde = primeroDelMes.AddDays(desplazamiento);
-        if (desde > ultimoDelMes) desde = ultimoDelMes;
-
-        var hasta = semana == 1 ? desde.AddDays(longitudPrimera - 1) : desde.AddDays(6);
-        if (hasta > ultimoDelMes) hasta = ultimoDelMes;
-
-        // "5 al 11" cuando los meses no cambian; si la semana toca dos meses, se
-        // dice, porque "del 26 al 31" no basta para saber a qué mes pertenece.
-        var nombre = NombreDeMes(desde.Month).ToLowerInvariant();
-
-        return hasta.Month != desde.Month
-            ? $"{desde.Day} de {NombreDeMes(desde.Month).ToLowerInvariant()} al {hasta.Day} de {NombreDeMes(hasta.Month).ToLowerInvariant()}"
-            : $"{desde.Day} al {hasta.Day} de {nombre}";
+        return desde.Month == hasta.Month
+            ? $"{desde.Day} al {hasta.Day} de {NombreDeMes(desde.Month).ToLowerInvariant()}"
+            : $"{desde.Day} de {NombreDeMes(desde.Month).ToLowerInvariant()} " +
+              $"al {hasta.Day} de {NombreDeMes(hasta.Month).ToLowerInvariant()}";
     }
-
-    private static int SemanaDe(DateOnly d)
-        => SemanasDelMesDelCliente.SemanaDe(d.Year, d.Month, d);
 
     /// <summary>
-    /// Copia de SemanasDelMes del servidor, para no tener la regla en dos
-    /// sitios distintos. Lo ata SemanasDelMesTests, en el servidor.
+    /// ¿Lo que se está mirando es la semana en que estamos?
+    ///
+    /// Se compara contra lo que el servidor ya mandó al decir en qué semana
+    /// está hoy, así que tampoco hace falta aquí aritmética de fechas.
     /// </summary>
-    private static class SemanasDelMesDelCliente
-    {
-        public static int SemanaDe(int anio, int mes, DateOnly fecha)
-        {
-            if (anio is < 1 or > 9999 || mes is < 1 or > 12) return 1;
-            if (fecha.Year != anio || fecha.Month != mes) return 1;
-
-            var hastaElDomingo = (7 - (int)new DateOnly(anio, mes, 1).DayOfWeek) % 7;
-            var longitudPrimera = hastaElDomingo + 1;
-            var ultimoDelMes = new DateOnly(anio, mes, DateTime.DaysInMonth(anio, mes));
-            var total = Math.Max(1, 1 + Math.Max(0, (ultimoDelMes.Day - longitudPrimera + 6) / 7));
-
-            for (var s = 1; s <= total; s++)
-            {
-                var desplazamiento = 0;
-                for (var k = 1; k < s; k++) desplazamiento += k == 1 ? longitudPrimera : 7;
-
-                var desde = new DateOnly(anio, mes, 1).AddDays(desplazamiento);
-                var hasta = s == 1 ? desde.AddDays(longitudPrimera - 1) : desde.AddDays(6);
-                if (hasta > ultimoDelMes) hasta = ultimoDelMes;
-
-                if (fecha >= desde && fecha <= hasta) return s;
-            }
-
-            return 1;
-        }
-    }
+    private bool EsSemanaActual =>
+        Estado is not null
+        && Anio == Estado.Anio
+        && Mes == Estado.Mes
+        && NumeroSemana == Estado.Semana;
 
     // --- Rótulos del rango ---
 
@@ -549,23 +485,23 @@
     // Filtros
     // ------------------------------------------------------------------
 
-    private void CambiarAnio(ChangeEventArgs e)
+    private async Task CambiarAnio(ChangeEventArgs e)
     {
         // Se valida antes de guardar: un año imposible dejaría la pantalla
         // en un estado que no se puede ni pintar.
         if (int.TryParse(e.Value?.ToString(), out var n) && n is >= 1 and <= 9999 && n != Anio)
         {
             Anio = n;
-            AjustarSemanaAlMes();
+            await RecargarSemanasAsync();
         }
     }
 
-    private void CambiarMes(ChangeEventArgs e)
+    private async Task CambiarMes(ChangeEventArgs e)
     {
         if (int.TryParse(e.Value?.ToString(), out var n) && n is >= 1 and <= 12 && n != Mes)
         {
             Mes = n;
-            AjustarSemanaAlMes();
+            await RecargarSemanasAsync();
         }
     }
 
@@ -578,6 +514,28 @@
     }
 
     /// <summary>
+    /// Vuelve a pedir al servidor los rangos del mes que se acaba de elegir.
+    ///
+    /// Hace falta porque los rangos vienen del servidor: al cambiar de mes, los
+    /// que tenemos son los del anterior, y un mes de 30 días no tiene las
+    /// mismas semanas que uno de 31. Es una llamada local que no gasta cupo del
+    /// ticket, y es el precio de no tener la regla de lunes a domingo escrita en
+    /// los dos lados.
+    /// </summary>
+    private async Task RecargarSemanasAsync()
+    {
+        var (estado, error) = await Api.GetEstadoAsync(Anio, Mes);
+
+        if (estado is null)
+        {
+            ErrorConsulta = error ?? "No se pudo actualizar las semanas del mes.";
+            return;
+        }
+
+        Estado = estado;
+        AjustarSemanaAlMes();
+    }
+    /// <summary>
     /// Al cambiar de mes, la semana elegida puede no existir: octubre tiene 5 y
     /// septiembre 5, pero no todos los meses. Se deja la última, que siempre
     /// existe, en vez de dejar el número colgando sin opción a la que
@@ -585,7 +543,7 @@
     /// </summary>
     private void AjustarSemanaAlMes()
     {
-        var maximo = SemanasDisponibles.Count;
+        var maximo = Estado?.Semanas.Count ?? 1;
         if (NumeroSemana > maximo) NumeroSemana = maximo;
         if (NumeroSemana < 1) NumeroSemana = 1;
     }

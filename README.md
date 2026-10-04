@@ -457,11 +457,19 @@ Solo el **procesamiento** se queda con los días hábiles: en Chile no se public
 nada en fin de semana —comprobado: el 3 y el 4 de octubre de 2026 dieron 0—,
 así que consultarlos duplicaría las peticiones sin aportar nada.
 
-⚠️ El cálculo está en `SemanasDelMes` (servidor) y **copiado** en
-`Home.razor` (cliente), porque rotular cuatro opciones no justifica una llamada
-al servidor. Lo que ata las dos copias es `SemanasDelMesTests`, que fija todos
-los rangos de octubre de 2026. **Si se cambia la regla, hay que cambiar las dos
-cosas.**
+Los rangos los **calcula el servidor** y llegan en `/api/estado?anio=&mes=`. El
+cliente no repite la regla de lunes a domingo: solo pinta lo que le mandan.
+
+Antes estaba escrita en los dos lados, y **dos copias de una misma regla se
+desincronizan solas** en cuanto se toca una y no la otra. Ningún aviso: el rótulo
+diría una cosa y los datos consultados serían de otra. Con el cálculo en un
+sitio, es imposible que discrepen.
+
+El coste es una llamada local al cambiar de mes o de año, que no gasta cupo del
+ticket. En el cliente no queda ni una línea de aritmética de fechas: ni
+`DateOnly`, ni `DayOfWeek`, ni el cálculo de cuántas semanas tiene el mes. Por
+eso tampoco queda copia que se pueda desincronizar, y por eso `SemanasDelMesTests`
+ya solo tiene que vigilar el servidor.
 
 Dos fallos que teve el cálculo, y que los tests ahora fijan:
 

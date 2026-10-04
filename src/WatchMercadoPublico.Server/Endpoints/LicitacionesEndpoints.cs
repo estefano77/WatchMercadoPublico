@@ -61,7 +61,12 @@ public static class LicitacionesEndpoints
     /// cuerpo de la petición y la ruta peta al arrancar con "Body was inferred…",
     /// que tumba TODAS las rutas, incluida la SPA.
     /// </summary>
-    private static IResult ObtenerEstado(IOptions<MercadoPublicoOpciones> opciones)
+    /// <param name="anio">Mes cuyas semanas se detalla. Por defecto, el actual.</param>
+    /// <param name="mes">Mes cuyas semanas se detalla. Por defecto, el actual.</param>
+    private static IResult ObtenerEstado(
+        IOptions<MercadoPublicoOpciones> opciones,
+        [FromQuery] int? anio = null,
+        [FromQuery] int? mes = null)
     {
         var config = opciones.Value;
         var hoy = DateOnly.FromDateTime(DateTime.Today);
@@ -96,13 +101,49 @@ public static class LicitacionesEndpoints
             // semanas que no existen.
             AniosDisponibles = SemanasDelMes.Anios(hoy.Year),
             MesesDisponibles = CalendarioDelMes.TodosLosMeses(),
-            SemanasDelMesActual = SemanasDelMes.Cuantas(hoy.Year, hoy.Month),
+
+            // Los rangos de las semanas del mes pedido. Van aquí, y no en el
+            // cliente, para que el cálculo de "de lunes a domingo" exista en UN
+            // solo sitio. El cliente los pinta; no los calcula. Antes estaba
+            // copiado en los dos lados, que es una forma segura de que un día
+            // se desincronicen sin que nada avise.
+            Semanas = DescribirSemanas(
+                anio is >= 1 and <= 9999 ? anio.Value : hoy.Year,
+                mes is >= 1 and <= 12 ? mes.Value : hoy.Month),
 
             MinutosEntreRefrescos = config.MinutosRefresco,
 
             // Solo en demo: el RUT de ejemplo, para probar el flujo.
             RutDemo = config.Modo == "demo" ? DatosDemo.RutDemo : null,
         });
+    }
+
+    /// <summary>
+    /// Rango y días hábiles de cada semana de un mes, para pintar el desplegable.
+    ///
+    /// El cliente recibe los datos ya hechos y no los calcula: es la única forma
+    /// de que no haya dos copias de la regla "de lunes a domingo" que acaben
+    /// discrepando sin que nada se note.
+    /// </summary>
+    private static List<object> DescribirSemanas(int anio, int mes)
+    {
+        var resultado = new List<object>();
+        var total = SemanasDelMes.Cuantas(anio, mes);
+
+        for (var s = 1; s <= total; s++)
+        {
+            var (desde, hasta) = SemanasDelMes.Rango(anio, mes, s);
+
+            resultado.Add(new
+            {
+                Numero = s,
+                Desde = $"{desde:yyyy-MM-dd}",
+                Hasta = $"{hasta:yyyy-MM-dd}",
+                DiasHabiles = SemanasDelMes.DiasHabiles(anio, mes, s).Count,
+            });
+        }
+
+        return resultado;
     }
 
     // =====================================================================

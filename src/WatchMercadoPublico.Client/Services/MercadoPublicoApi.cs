@@ -25,11 +25,17 @@ public sealed class MercadoPublicoApi(HttpClient http)
     /// Configuración del servidor: qué empresa se mira, si hay ticket y cada
     /// cuánto se refresca.
     /// </summary>
-    public async Task<(EstadoApi? Data, string? Error)> GetEstadoAsync(CancellationToken ct = default)
+    public async Task<(EstadoApi? Data, string? Error)> GetEstadoAsync(
+        int? anio = null, int? mes = null, CancellationToken ct = default)
     {
         try
         {
-            var estado = await http.GetFromJsonAsync<EstadoApi>("api/estado", Json, ct);
+            var url = "api/estado";
+
+            if (anio is not null && mes is not null)
+                url += $"?anio={anio}&mes={mes}";
+
+            var estado = await http.GetFromJsonAsync<EstadoApi>(url, Json, ct);
             return estado is null ? (null, "El servidor no devolvió el estado.") : (estado, null);
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or NotSupportedException)

@@ -286,7 +286,12 @@ public sealed class EstadoApi
     public List<string> MesesDisponibles { get; set; } = [];
 
     /// <summary>Cuántas semanas tiene el mes en que está hoy.</summary>
-    public int SemanasDelMesActual { get; set; } = 5;
+    /// <summary>
+    /// Rangos y días hábiles de cada semana del mes pedido. Los CALCULA el
+    /// servidor: el cliente no repite la regla de lunes a domingo, y eso es lo
+    /// que garantiza que el rótulo y los datos consultados digan lo mismo.
+    /// </summary>
+    public List<SemanaInfo> Semanas { get; set; } = [];
 
     /// <summary>Cada cuántos minutos se refresca sola la pantalla.</summary>
     public int MinutosEntreRefrescos { get; set; } = 5;
@@ -307,4 +312,19 @@ public sealed class EstadoApi
         : !TicketConfigurado ? "falta el ticket de Mercado Público"
         : !EmpresaConfigurada ? "falta el código de proveedor de la empresa"
         : null;
+}
+
+/// <summary>Una semana del mes, tal como la calcula el servidor.</summary>
+public sealed class SemanaInfo
+{
+    public int Numero { get; set; }
+
+    /// <summary>Primer día, en ISO. Puede no ser lunes si la semana está recortada.</summary>
+    public string? Desde { get; set; }
+
+    /// <summary>Último día, en ISO. Puede no ser domingo si la semana está recortada.</summary>
+    public string? Hasta { get; set; }
+
+    /// <summary>Cuántos de esos días se consultan: los de lunes a viernes.</summary>
+    public int DiasHabiles { get; set; }
 }
