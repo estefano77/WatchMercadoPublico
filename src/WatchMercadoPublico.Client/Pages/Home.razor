@@ -7,7 +7,10 @@
 <div class="space-y-6">
 
     @* ------------------------------------------------------------------ *@
-    @* Encabezado                                                           *@
+    @* Encabezado. El título NO se toca: sigue siendo "Novedades en Mercado     *@
+    @* Público". Lo que se cambió es lo que va debajo, que antes repetía        *@
+    @* empresa y periodo y ahora solo dice para qué empresa se muestran las     *@
+    @* licitaciones. El periodo se mudó junto al contador de novedades.          *@
     @* ------------------------------------------------------------------ *@
     <section>
         <h1 class="text-2xl font-extrabold tracking-tight sm:text-3xl">
@@ -16,7 +19,7 @@
         </h1>
 
         <p class="mt-2 max-w-2xl text-sm leading-relaxed text-ink-soft">
-            Licitaciones de <strong class="text-ink">@RangoEnPalabras</strong> para
+            Licitaciones publicadas para
             <strong class="text-ink">@NombreEmpresa</strong>.
         </p>
     </section>
@@ -83,15 +86,12 @@
             </div>
 
             @* Detalle de lo que se está mirando. Con los fines de semana incluidos
-               en el rango pero no consultados, que es una diferencia que sin decir
-               parece un error de cálculo. *@
-            <p class="mt-3 text-xs leading-relaxed text-muted">
-                Del @DiaCorto(Desde) al @DiaCorto(Hasta) · @TextoDiasHabiles
-                @if (!EsSemanaActual)
-                {
-                    <span>· Esta semana ya pasó, así que no se vuelve a preguntar lo mismo.</span>
-                }
-            </p>
+            @* El periodo NO va aqui. Estava debajo de los filtros y se leia
+               como si describiera los desplegables; en realidad describe los
+               RESULTADOS, asi que ahora va junto al contador, donde se lee
+               "de estos dias hay esto". Con el aqui se ve de un vistazo cuando
+               cambia algo al elegir otra semana: antes solo cambiaba un numero
+               de semana y parecia que no se hubiera movido nada. *@
         </section>
     }
 
@@ -230,6 +230,15 @@
                     </h2>
                     <span class="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[0.68rem] font-bold text-emerald-600 uppercase dark:text-emerald-400">
                         @RangoCorto
+                    </span>
+
+                    @* El periodo va AQUÍ, junto al contador, y no debajo de los
+                       filtros. Hace dos cosas: pegado al número se lee "de estos
+                       días hay esto", y al elegir otra semana se ve cambiar el
+                       rango. Con solo la insignia, cambiar de semana no se
+                       notaba y parecía que la pantalla no se hubiera movido. *@
+                    <span class="text-sm text-muted">
+                        Del @DiaCorto(Desde) al @DiaCorto(Hasta)
                     </span>
                 </div>
                 <p class="text-xs text-muted">
@@ -422,15 +431,7 @@
     private DateOnly? Desde => Semana?.Desde is { } d ? DateOnly.Parse(d) : null;
     private DateOnly? Hasta => Semana?.Hasta is { } h ? DateOnly.Parse(h) : null;
 
-    private string RangoEnPalabras =>
-        $"la semana {NumeroSemana} de {NombreDeMes(Mes).ToLowerInvariant()} de {Anio}";
-
     private string RangoCorto => $"Semana {NumeroSemana}";
-
-    private string TextoDiasHabiles =>
-        Semana is null
-            ? "los días hábiles de la semana"
-            : Semana.DiasHabiles == 1 ? "1 día hábil" : $"{Semana.DiasHabiles} días hábiles";
 
     /// <summary>
     /// Cuántos días se CONSULTARON de verdad. Distinto del total de la semana:

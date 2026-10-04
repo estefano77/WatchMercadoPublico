@@ -159,16 +159,57 @@ public class SemanasDelMesTests
         Assert.Equal(7, hasta.Day);
     }
 
-    [Fact]
-    public void Mes_que_empieza_en_domingo_tiene_una_semana_de_un_solo_dia()
+    [Theory]
+    // Febrero de 2026 empieza en domingo. El tramo del día 1 al primer domingo
+    // es solo ese domingo y no tiene ni un día hábil, así que se descarta: es la
+    // cola de la semana de enero. La semana 1 pasa a ser la del lunes siguiente.
+    // Con el tramo descartado, febrero tiene 4 semanas y la 4 es "del 23 al 28",
+    // que es lo que se lee en el desplegable.
+    [InlineData(1, 2, 8)]
+    [InlineData(2, 9, 15)]
+    [InlineData(3, 16, 22)]
+    [InlineData(4, 23, 28)]
+    public void Mes_que_empieza_en_domingo_descarta_el_domingo_suelto(
+        int semana, int diaDesde, int diaHasta)
     {
-        // Febrero de 2026 empieza en domingo: la semana 1 es solo el día 1.
         Assert.Equal(DayOfWeek.Sunday, new DateOnly(2026, 2, 1).DayOfWeek);
 
-        var (desde, hasta) = SemanasDelMes.Rango(2026, 2, 1);
+        var (desde, hasta) = SemanasDelMes.Rango(2026, 2, semana);
 
-        Assert.Equal(1, desde.Day);
-        Assert.Equal(1, hasta.Day);
+        Assert.Equal(diaDesde, desde.Day);
+        Assert.Equal(diaHasta, hasta.Day);
+        Assert.Equal(DayOfWeek.Monday, desde.DayOfWeek);
+    }
+
+    [Fact]
+    public void Mes_que_empieza_en_domingo_no_gasta_un_numero_de_semana()
+    {
+        Assert.Equal(4, SemanasDelMes.Cuantas(2026, 2));
+    }
+
+    [Fact]
+    public void Ninguna_semana_de_ningun_mes_queda_sin_dias_habiles()
+    {
+        // Esta es la propiedad que un mes que empieza en domingo incumplía: la
+        // pantalla llegaba a decir "se consultaron 0 días hábiles", o sea, un
+        // número de semana en el desplegable que no dejaba mirar nada. Se
+        // comprueba mes a mes en cuatro años, no solo en los casos conocidos.
+        for (var anio = 2024; anio <= 2027; anio++)
+        {
+            for (var mes = 1; mes <= 12; mes++)
+            {
+                var total = SemanasDelMes.Cuantas(anio, mes);
+                Assert.InRange(total, 4, 5);
+
+                for (var s = 1; s <= total; s++)
+                {
+                    var habiles = SemanasDelMes.DiasHabiles(anio, mes, s);
+                    Assert.True(
+                        habiles.Count > 0,
+                        $"La semana {s} de {mes}/{anio} se quedó sin días hábiles.");
+                }
+            }
+        }
     }
 
     [Theory]
