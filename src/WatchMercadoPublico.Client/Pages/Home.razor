@@ -222,8 +222,8 @@
                 </span>
                 <p class="mt-4 text-base font-bold text-ink">Nada en esa semana</p>
                 <p class="mx-auto mt-1.5 max-w-lg text-sm leading-relaxed text-muted">
-                    Se consultaron @TextoDiasConsultados y no salió ninguna licitación de esta
-                    empresa. Es una respuesta real, no un fallo.
+                    Se consultaron @TextoDiasConsultados y no hay ninguna licitación
+                    para este período.
                 </p>
             </div>
         }
@@ -387,21 +387,18 @@
             ? "los días hábiles de la semana"
             : Semana.DiasConsultados == 1 ? "1 día hábil" : $"{Semana.DiasConsultados} días hábiles";
 
-    /// <summary>Los días que fallaron, en palabras: "el martes y el jueves".</summary>
+    /// <summary>
+    /// Días que no respondieron. Es un CONTEO, no la lista de fechas: el aviso
+    /// que lo usa dice "(3 días). Lo que ves está completo, pero puede que
+    /// falte algo de esos días", y ahí un "Sin respuesta: 2026-02-24,
+    /// 2026-02-25" se leería como un error.
+    /// </summary>
     private string DiasFallidosEnPalabras
     {
         get
         {
-            var dias = Semana?.DiasSinRespuesta ?? [];
-
-            if (dias.Count == 0) return "Ningún día sin respuesta";
-
-            if (dias.Count == 1) return $"Sin respuesta: {dias[0]}";
-
-            var ultimos = dias.Count > 3 ? dias.GetRange(dias.Count - 3, 3) : dias;
-            var todos = $"{string.Join(", ", ultimos)} y {dias.Count - ultimos.Count} más";
-
-            return $"Sin respuesta: {todos}";
+            var n = Semana?.DiasFallidos ?? 0;
+            return n == 1 ? "1 día" : $"{n} días";
         }
     }
 
