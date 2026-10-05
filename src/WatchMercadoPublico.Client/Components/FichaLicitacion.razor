@@ -5,64 +5,85 @@
     así que la ficha muestra poco y pretende que la información rica se vea al
     abrir el detalle. El nombre viene de la API, o sea de FUERA: se resalta
     troceándolo, nunca con MarkupString sobre el texto entero.
+
+    POR QUÉ AHORA ES UN DIV Y NO UN BOTÓN
+    La tarjeta entera fue un <button> durante semanas. Al meterle el enlace al
+    acta al pie, eso dejó de valer: un <a> dentro de un <button> es HTML
+    inválido, el clic del enlace dispara también el del botón —se abriría el
+    modal y el acta a la vez— y, lo que peor es, el enlace no llega a ser
+    enfocable con el teclado, porque dentro de un botón solo se enfoca el botón.
+
+    Así que el marco se fue a un <div> y dentro quedan dos cosas sueltas: un
+    <button> con el contenido, que es el camino accesible para abrir el detalle,
+    y el enlace al acta, que es su hermano y no su hijo. El div del pie lleva su
+    propio @onclick para que el pie siga abriendo el detalle como hasta ahora, y
+    el enlace lleva @onclick:stopPropagation para que no lo abra.
+
+    El marco conserva la clase group, así que el "Ver detalle" de la esquina sigue
+    apareciendo al pasar el ratón por cualquier parte de la tarjeta, y el
+    :focus-visible global sigue pintando el anillo en el botón de dentro.
 *@
 
-<button type="button" @onclick="() => AbrirAsync.InvokeAsync(Licitacion)"
-        class="ficha-entra group w-full rounded-2xl border border-line bg-surface p-5 text-left shadow-card transition hover:border-violet-400/50 hover:bg-hover">
+<div class="ficha-entra group w-full rounded-2xl border border-line bg-surface p-5 text-left shadow-card transition hover:border-violet-400/50 hover:bg-hover">
 
-    <div class="flex flex-wrap items-start justify-between gap-3">
-        <div class="min-w-0 flex-1">
-            <div class="flex flex-wrap items-center gap-2">
-                <span class="@ClaseEstado">@Licitacion.EstadoLegible</span>
-                @if (Licitacion.FechaPublicacion is { } publicada)
+    <button type="button" @onclick="() => AbrirAsync.InvokeAsync(Licitacion)"
+            class="block w-full text-left">
+
+        <div class="flex flex-wrap items-start justify-between gap-3">
+            <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-2">
+                    <span class="@ClaseEstado">@Licitacion.EstadoLegible</span>
+                    @if (Licitacion.FechaPublicacion is { } publicada)
+                    {
+                        @* Con año: "publicada 27/02/2026". Sin él, el día y el mes no dicen de qué
+                           estamos hablando, que es justo lo que pasa cuando se está
+                           mirando una semana de hace tiempo.
+                           Pasa por Formato, y no por un ToString aquí: al llamar a
+                           ToString("dd/MM/yyyy") sin cultura salía con barras, y el sello
+                           de la cabecera, que sí pasaba cultura, salía con guiones. Dos
+                           formatos para lo mismo según quién preguntara. *@                    <span class="text-[0.65rem] font-semibold text-muted">
+                            publicada @Formato.FechaNumerica(publicada)
+                        </span>
+                    }
+                </div>
+
+                <h3 class="mt-2 text-[0.95rem] leading-snug font-bold text-ink">
+                    @foreach (var trozo in Resaltado)
+                    {
+                        if (trozo.Coincide)
+                        {
+                            <mark class="resaltado">@trozo.Texto</mark>
+                        }
+                        else
+                        {
+                            @trozo.Texto
+                        }
+                    }
+                </h3>
+
+                @* El organismo comprador: quién va a comprar. Va debajo del título y no en
+                   la fila de abajo porque es un nombre de entidad, con palabras,
+                   y ahí solo caben fechas y un contador. Solo se pinta si vino:
+                   si el detalle falla, la tarjeta sale sin esta línea en vez de con
+                   un hueco. *@            @if (!string.IsNullOrWhiteSpace(Licitacion.Detalle?.NombreOrganismo))
                 {
-                    @* Con año: "publicada 27/02/2026". Sin él, el día y el mes no dicen de qué
-                   estamos hablando, que es justo lo que pasa cuando se está
-                   mirando una semana de hace tiempo.
-                   Pasa por Formato, y no por un ToString aquí: al llamar a
-                   ToString("dd/MM/yyyy") sin cultura salía con barras, y el sello
-                   de la cabecera, que sí pasaba cultura, salía con guiones. Dos
-                   formatos para lo mismo según quién preguntara. *@                    <span class="text-[0.65rem] font-semibold text-muted">
-                        publicada @Formato.FechaNumerica(publicada)
-                    </span>
+                    <p class="mt-1.5 flex items-start gap-1.5 text-xs leading-snug text-ink-soft">
+                        <span class="mt-px shrink-0 opacity-60">
+                            <Icon Name="edificio" Size="13" />
+                        </span>
+                        <span class="min-w-0">@Licitacion.Detalle.NombreOrganismo</span>
+                    </p>
                 }
             </div>
 
-            <h3 class="mt-2 text-[0.95rem] leading-snug font-bold text-ink">
-                @foreach (var trozo in Resaltado)
-                {
-                    if (trozo.Coincide)
-                    {
-                        <mark class="resaltado">@trozo.Texto</mark>
-                    }
-                    else
-                    {
-                        @trozo.Texto
-                    }
-                }
-            </h3>
-
-            @* El organismo comprador: quién va a comprar. Va debajo del título y no en
-               la fila de abajo porque es un nombre de entidad, con palabras,
-               y ahí solo caben fechas y un contador. Solo se pinta si vino:
-               si el detalle falla, la tarjeta sale sin esta línea en vez de con
-               un hueco. *@            @if (!string.IsNullOrWhiteSpace(Licitacion.Detalle?.NombreOrganismo))
-            {
-                <p class="mt-1.5 flex items-start gap-1.5 text-xs leading-snug text-ink-soft">
-                    <span class="mt-px shrink-0 opacity-60">
-                        <Icon Name="edificio" Size="13" />
-                    </span>
-                    <span class="min-w-0">@Licitacion.Detalle.NombreOrganismo</span>
-                </p>
-            }
+            <span class="shrink-0 text-[0.65rem] font-bold tracking-wide text-violet-500 uppercase opacity-0 transition group-hover:opacity-100">
+                Ver detalle
+            </span>
         </div>
+    </button>
 
-        <span class="shrink-0 text-[0.65rem] font-bold tracking-wide text-violet-500 uppercase opacity-0 transition group-hover:opacity-100">
-            Ver detalle
-        </span>
-    </div>
-
-    <div class="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-line pt-3.5 text-xs">
+    <div class="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line pt-3.5 text-xs"
+         @onclick="() => AbrirAsync.InvokeAsync(Licitacion)">
         <span class="inline-flex items-center gap-1.5">
             <Icon Name="calendario" Size="13" Class="shrink-0 opacity-70" />
             <span class="text-muted">Cierre</span>
@@ -75,8 +96,32 @@
         <span class="ml-auto font-mono text-[0.7rem] font-semibold text-muted">
             @Licitacion.CodigoExterno
         </span>
+
+        @* El enlace al acta de adjudicación, tal cual lo pinta el detalle: mismo
+           texto, mismo icono de externo y mismo borde. Va al final del pie, que
+           es donde se lee lo último de la tarjeta, y es lo que más se usa: es el
+           documento con la decisión.
+
+           Solo sale si hay acta. No toda licitación adjudicada la tiene, y una
+           que aún no se adjudicó no la tendrá nunca. Y depende del mismo detalle
+           que el organismo: si aquella petición falló, aquí tampoco hay nada que
+           enlazar.
+
+           El stopPropagation es lo que impide que al pulsarlo se abra también el
+           modal del detalle, que es justo lo que pasaba con el botón entero. *@
+        @if (!string.IsNullOrWhiteSpace(Licitacion.Detalle?.UrlActa))
+        {
+            <a href="@Licitacion.Detalle.UrlActa"
+               target="_blank"
+               rel="noopener noreferrer"
+               @onclick:stopPropagation="true"
+               class="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border border-line px-3 font-bold text-ink-soft transition hover:border-violet-400/50 hover:text-violet-500">
+                Ver acta
+                <Icon Name="externo" Size="13" />
+            </a>
+        }
     </div>
-</button>
+</div>
 
 @code {
     [Parameter, EditorRequired] public Licitacion Licitacion { get; set; } = default!;
