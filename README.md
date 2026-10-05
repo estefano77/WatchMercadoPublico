@@ -684,6 +684,14 @@ Test-Path publicacion\appsettings.Development.json   # debe ser False
 
 ### En IIS
 
+> **Hay un script que hace todo esto**: `scripts\Publicar-Iis.ps1`. Publica,
+> comprueba la publicación **antes** de tocar IIS, crea el grupo y el sitio, pone
+> las cinco variables de entorno, asigna permisos y verifica que la web responde
+> con una consulta real. **Necesita una consola de PowerShell como
+> administrador**, porque `appcmd` no puede ni *leer* la configuración de IIS sin
+> privilegios. Lo que hay debajo es el procedimiento paso a paso, para hacerlo a
+> mano o para entender qué hace el script.
+
 `web.config` incluido, con lo importante ya decidido dentro:
 
 | Decisión | Valor | Por qué |

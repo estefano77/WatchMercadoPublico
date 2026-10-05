@@ -15,4 +15,10 @@ appsettings.Local.json
 *.env
 
 # Publicación
-publicacion/
+#
+# Con el asterisco, no solo "publicacion/". Escribido así solo ignoraba la
+# carpeta con ese nombre exacto, y cualquier variante (publicacion2, una prueba
+# al lado, publicacion-test) se colaba en el repositorio: llegaron a commitearse
+# 74 ficheros de compilación, casi 10 MB de binarios y .pdb incluidos.
+publicacion*/
+publicacion
