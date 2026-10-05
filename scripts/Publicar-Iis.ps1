@@ -449,6 +449,24 @@ if ($SaltarPublicacion) {
     } finally { Pop-Location }
 
     Write-Info 'dotnet publish (framework-dependent)'
+
+    # LIMPIAR ANTES. 'dotnet publish -o' NO borra lo que ya hay en la carpeta de
+    # destino: solo escribe encima. Cada publicacion cambia la huella de los
+    # modulos de _framework, asi que al publicar sobre una carpeta usada se
+    # quedan mezclados los ficheros de la version nueva con los de las
+    # anteriores. Comprobado en el despliegue real: 5 ficheros
+    # dotnet.*.js viejos conviviendo con los nuevos, ninguno de ellos
+    # referenciado por el index.html.
+    #
+    # No es solo suciedad: si el index.html acabara apuntando a una huella que no
+    # esta en disco, Blazor se queda en "Cargando" sin decir por que.
+    if (Test-Path $PhysicalPath) {
+        Write-Info "Vaciando $PhysicalPath"
+        Get-ChildItem $PhysicalPath -Force | ForEach-Object {
+            Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
     Push-Location $raiz
     try {
         $salida = Ejecutar ('dotnet publish .\src\WatchMercadoPublico.Server -c Release -o "{0}" --nologo -v minimal' -f $PhysicalPath) 'La publicacion'
@@ -671,14 +689,16 @@ if ($fallosVars -gt 0) {
 # ---------------------------------------------------------------------------
 # 5. Permisos
 #
-# La cache vive en memoria, asi que la carpeta puede ser de SOLO LECTURA. Eso es
-# una ventaja frente a las aplicaciones que escriben: no hace falta dar permiso
-# de escritura a ninguna parte, y por lo tanto no hay donde meter un fichero.
+# MODIFY, no solo lectura. Antes ponia (RX) con el razonamiento de que la cache
+# vive en memoria y no hacia falta escribir. Era una teoria mia, y el sitio que
+# SI funciona en este mismo equipo (GestorArchivos) tiene Modify para su grupo.
+# Cuando dos sitios con la misma estructura se comportan distinto, se copia lo
+# del que funciona; no se razona sobre por que deberian ser iguales.
 # ---------------------------------------------------------------------------
 Write-Step '5. Permisos'
 
-Ejecutar-Tolerante ('icacls "{0}" /grant "IIS AppPool\{1}:(OI)(CI)(RX)" /T /Q' -f $PhysicalPath, $AppPoolName) | Out-Null
-Write-Ok "IIS AppPool\$AppPoolName con lectura y ejecucion (solo lectura: la cache es en memoria)"
+Ejecutar-Tolerante ('icacls "{0}" /grant "IIS AppPool\{1}:(OI)(CI)(M)" /T /Q' -f $PhysicalPath, $AppPoolName) | Out-Null
+Write-Ok "IIS AppPool\$AppPoolName con Modify (igual que el sitio que funciona en este equipo)"
 
 # ---------------------------------------------------------------------------
 # 6. Variables de entorno
