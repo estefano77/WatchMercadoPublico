@@ -46,6 +46,15 @@
     --app-blob-1: rgb(29 78 216 / 0.22);
     --app-blob-2: rgb(220 38 38 / 0.16);
     --app-blob-3: rgb(109 40 217 / 0.14);
+
+    /* Barras del esqueleto de carga. Van aparte de --app-field a proposito:
+       --app-field es el relleno de un campo de formulario, y en los dos temas
+       es practicamente igual a la superficie. Medido: con --app-field la barra
+       quedaba en rgb(23,29,43) sobre una tarjeta #0b1120, contraste 1,12, y en
+       tema claro era #ffffff sobre #ffffff, contraste 1,00: la barra era
+       invisible y solo se veía el destello de paso. */
+    --app-esqueleto: #cbd5e1;
+    --app-esqueleto-brillo: #eef2f7;
     color-scheme: light;
 }
 
@@ -71,6 +80,12 @@
     --app-blob-1: rgb(59 130 246 / 0.18);
     --app-blob-2: rgb(239 68 68 / 0.12);
     --app-blob-3: rgb(139 92 246 / 0.12);
+
+    /* Sobre #0b1120, que es muy oscuro, un blanco al 18% da rgb(55,60,72) y
+       contraste 1,71: se ve sin destacar. El brillo llega al 30%, rgb(79,84,94),
+       para que el destello se note. */
+    --app-esqueleto: rgb(255 255 255 / 0.18);
+    --app-esqueleto-brillo: rgb(255 255 255 / 0.30);
     color-scheme: dark;
 }
 
@@ -282,11 +297,11 @@ select option:checked {
 
 .esqueleto {
     border-radius: 0.5rem;
-    background-color: var(--app-field);
+    background-color: var(--app-esqueleto);
     background-image: linear-gradient(
         90deg,
         transparent 0%,
-        var(--app-hover) 50%,
+        var(--app-esqueleto-brillo) 50%,
         transparent 100%);
     background-size: 200% 100%;
     animation: brillo 1.6s ease-in-out infinite;
