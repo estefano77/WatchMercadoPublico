@@ -217,6 +217,56 @@ function Get-PuertoLibre {
 Write-Host 'WatchMercadoPublico · publicacion en IIS' -ForegroundColor White
 Write-Host '========================================' -ForegroundColor White
 
+# ---------------------------------------------------------------------------
+# Guardas de los parametros
+#
+# "-CodigoProveedor 71284" escrito SIN el guion delante de CodigoProveedor es un
+# error facil de cometar, y PowerShell no dice nada: lo toma como argumento
+# POSICIONAL y lo reparte entre los primeros parametros del param(). Pasó de
+# verdad: CodigoProveedor se metio como $SiteName y 71284 como $AppPoolName, y
+# el script creo un sitio llamado "CodigoProveedor" con un grupo llamado "71284"
+# sin avisar de nada. El sintoma aparecia luego como "la web no consulta", muy
+# lejos de su causa.
+#
+# Se comprueba que ningun valor recibido se parezca a un nombre de parametro, que
+# es la senal de que falta un guion por ahi.
+# ---------------------------------------------------------------------------
+# La lista es explicita a proposito. La via corta seria
+# $MyInvocation.MyCommand.Parameters.Keys, pero en el CUERPO de un script esa
+# propiedad no existe: solo esta disponible dentro de una funcion. Escribiendolo
+# asi, el array sale vacio, la comparacion no encuentra nada, y la guarda se
+# queda callada sin decir que ha fallado. Que es peor que no tenerla.
+$nombresParametros = @(
+    'SiteName', 'AppPoolName', 'PhysicalPath', 'Port',
+    'Ticket', 'CodigoProveedor', 'NombreEmpresa', 'RutEmpresa',
+    'SaltarPublicacion', 'PuertoDePrueba'
+)
+$recibidos = [ordered]@{
+    'SiteName'      = $SiteName
+    'AppPoolName'   = $AppPoolName
+    'PhysicalPath'  = $PhysicalPath
+    'NombreEmpresa' = $NombreEmpresa
+    'RutEmpresa'    = $RutEmpresa
+}
+
+$sospechosos = @()
+foreach ($clave in $recibidos.Keys) {
+    $valor = $recibidos[$clave]
+    if ($valor -and ($nombresParametros -contains $valor)) {
+        $sospechosos += "$clave recibio '$valor', que es el nombre de un parametro"
+    }
+}
+if ($sospechosos.Count -gt 0) {
+    Write-Erro 'Algun parametro se ha recibido mal.'
+    $sospechosos | ForEach-Object { Write-Host "         $_" -ForegroundColor DarkGray }
+    Write-Host ''
+    Write-Host '  almost seguro falta un guion:  -CodigoProveedor 71284' -ForegroundColor Yellow
+    Write-Host '  Sin el, PowerShell lo trata como posicional y el valor se va al' -ForegroundColor Yellow
+    Write-Host '  primer parametro libre, que en este script es el nombre del sitio.' -ForegroundColor Yellow
+    Write-Host ''
+    Write-Host '  No se ha tocado nada. Revisa la orden y repite.' -ForegroundColor Cyan
+    exit 1
+}
 if (-not (Test-Admin)) {
     Write-Erro 'Este script necesita una consola de PowerShell COMO ADMINISTRADOR.'
     Write-Host ''
@@ -372,6 +422,10 @@ if ($cortos.Count -gt 0) {
 # 3.5 El web.config debe ser XML valido. Un comentario con "--" dentro, que es
 #     facil de colar, da HTTP 500.19 y el sitio no arranca sin explicacion clara.
 $webConfig = Join-Path $PhysicalPath 'web.config'
+# Alias con nombre explicito, porque se usa mas adelante para escribir las
+# variables de entorno y conviene que se vea de un vistazo que es el fichero
+# PUBLICADO y no el del repositorio.
+$webConfigPublicado = $webConfig
 if (-not (Test-Path $webConfig)) {
     Write-Erro 'No hay web.config en la publicacion. IIS no sabria arrancarla.'
     $fallos++
@@ -502,33 +556,109 @@ if (-not $variables.Contains('MercadoPublico__CodigoProveedor')) {
 # Contador de variables que no se pudieron poner. Se mira al final, porque lo
 # peligroso no es que falle una: es que el script siga adelante como si nada y
 # el fallo se descubra en uso.
+# Contador de variables que no se pudieron escribir. Se mira al final, porque lo
+# peligroso no es que falle una: es que el script siga adelante como si nada y
+# el fallo se descubra en uso.
 $fallosVars = 0
 
 foreach ($clave in $variables.Keys) {
-    # El valor va entre comillas dobles porque appcmd las usa como separadores,
-    # y las comillas del interior se escapan con barra invertida.
+    # NOTA SOBRE EL MECANISMO. La primera version de este script ponia las
+    # variables con
     #
-    # OJO con el /+ : es lo que ANADE una entrada. Sin la barra seria un
-    # "replace" que buscaria una entrada con ese nombre, y como no existe en un
-    # grupo nuevo, no haria nada ydiria "exito" sin poner nada. El fallo seria
-    # silencioso y se veria tres dias despues, en que la web arranca y no
-    # consulta.
-    $valor = $variables[$clave] -replace '"', '\"'
-    $antes = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        & cmd.exe /c "`"$appcmd`" set config -section:system.applicationHost/applicationPools `" "`
-            "/+[name='$AppPoolName'].environmentVariables.[name='$clave',value='$valor']`"" 2>&1 | Out-Null
-        $codigo = $LASTEXITCODE
-    }
-    finally { $ErrorActionPreference = $antes }
+    #     appcmd set config -section:system.applicationHost/applicationPools
+    #         /+"[name='POOL'].environmentVariables.[name='CLAVE',value='VALOR']"
+    #
+    # y en el equipo real devolvio CODIGO 1168 (ERROR_INVALID_NAME) en las
+    # cuatro. No es un problema de permisos: es que ese argumento tiene comillas
+    # anidadas, un signo + pegado a la barra y corchetes, y al pasar por cmd.exe
+    # las comillas se deforman y appcmd lee un nombre que no existe. Se probo
+    # tambien llamando a appcmd directamente desde PowerShell, y sigue sin ser
+    # fiable.
+    #
+    # Se hace en el web.config de la carpeta publicada, y es MUCHO mas robusto:
+    # es un fichero XML que se puede editar y luego REELEER para comprobar que
+    # ha quedado bien. ANCM lee ese bloque y lo inyecta como variables de entorno
+    # del proceso, que es exactamente lo que la aplicacion consume.
+    #
+    # El inconveniente, dicho con todas las letras: si alguien publica desde
+    # Visual Studio en vez de usar este script, el web.config vuelve al del
+    # repositorio y se quedan sin configurar. Es el unico motivo por el que se
+    # prefiero appcmd cuando funcione. Este script SIEMPRE reescribe el bloque,
+    # asi que mientras se use el script, no hay nada que recordar.
+    $fallosVars += Set-VariableEnWebConfig $webConfigPublicado $clave $variables[$clave]
+}
 
-    if ($codigo -eq 0) {
-        $mostrado = if ($clave -like '*Ticket*') { '(el ticket no se imprime)' } else { $variables[$clave] }
-        Write-Ok "$clave = $mostrado"
-    } else {
-        Write-Erro "No se pudo poner $clave (codigo $codigo)"
-        $fallosVars++
+if ($fallosVars -eq 0) {
+    Write-Ok "$($variables.Count) variables escritas en el web.config de la carpeta publicada"
+}
+
+# ---------------------------------------------------------------------------
+# Poner UNA variable en el web.config, y devolver 1 si no se pudo.
+#
+# Se edita el XML y se vuelve a leer para comprobarlo. Ese ultimo paso es el
+# que importa: escribir en un fichero y darlo por bueno a la primera fue
+# exactamente lo que fallo con appcmd, donde el comando decia "exito" y no habia
+# puesto nada.
+# ---------------------------------------------------------------------------
+function Set-VariableEnWebConfig {
+    param(
+        [string] $Ruta,
+        [string] $Clave,
+        [string] $Valor
+    )
+
+    try {
+        $xml = New-Object System.Xml.XmlDocument
+        $xml.PreserveWhitespace = $true
+        $xml.Load($Ruta)
+
+        $nodo = $xml.SelectSingleNode('/configuration/system.webServer/aspNetCore/environmentVariables')
+        if (-not $nodo) {
+            Write-Erro 'El web.config no tiene el nodo aspNetCore/environmentVariables'
+            return 1
+        }
+
+        # Quitar la entrada con ese nombre si ya estaba, para no duplicarla al
+        # reejecutar el script.
+        foreach ($hijo in @($nodo.SelectNodes('environmentVariable'))) {
+            if ($hijo.GetAttribute('name') -eq $Clave) { $nodo.RemoveChild($hijo) | Out-Null }
+        }
+
+        $elem = $xml.CreateElement('environmentVariable')
+        $elem.SetAttribute('name', $Clave)
+        $elem.SetAttribute('value', $Valor)
+        $nodo.AppendChild($elem) | Out-Null
+
+        # Los comentarios se eliminan antes de escribir: XmlDocument los
+        # conservaria, pero al reordenar el fichero quedan descuadrados y un
+        # comentario mal cerrado es un 500.19 que no dice nada util.
+        foreach ($comentario in @($xml.SelectNodes('//comment()'))) {
+            if ($comentario.ParentNode -eq $nodo) { $nodo.RemoveChild($comentario) | Out-Null }
+        }
+
+        $ajustes = New-Object System.Xml.XmlWriterSettings
+        $ajustes.Indent = $true
+        $ajustes.Encoding = New-Object System.Text.UTF8Encoding($false)
+        $ajustes.OmitXmlDeclaration = $false
+        $escritor = [System.Xml.XmlWriter]::Create($Ruta, $ajustes)
+        try { $xml.Save($escritor) } finally { $escritor.Close() }
+
+        # Relectura: es la unica prueba de que ha quedado bien.
+        $comprobacion = New-Object System.Xml.XmlDocument
+        $comprobacion.Load($Ruta)
+        $nodoFinal = $comprobacion.SelectSingleNode("/configuration/system.webServer/aspNetCore/environmentVariables/environmentVariable[@name='$Clave']")
+        if ($nodoFinal -and $nodoFinal.GetAttribute('value') -eq $Valor) {
+            $mostrado = if ($Clave -like '*Ticket*') { '(el ticket no se imprime)' } else { $Valor }
+            Write-Ok "$Clave = $mostrado"
+            return 0
+        }
+
+        Write-Erro "$Clave no se ha podido escribir (no aparece al releer)"
+        return 1
+    }
+    catch {
+        Write-Erro "Fallo al escribir ${Clave}: $($_.Exception.Message)"
+        return 1
     }
 }
 
@@ -595,6 +725,11 @@ if ($estado.Servible) {
 } else {
     Write-Erro 'Servible = false. La web ARRANCARA pero no consultara nada.'
     Write-Host '         Falta el ticket o el CodigoProveedor. Mira el log del sitio.' -ForegroundColor Yellow
+    Write-Host ''
+    Write-Host '         OJO, esto tambien lo hace fallar cuando el CodigoProveedor NO' -ForegroundColor DarkYellow
+    Write-Host '         se ha pasado por el guion: si se escribe CodigoProveedor sin -,' -ForegroundColor DarkYellow
+    Write-Host '         PowerShell lo guarda como nombre del sitio y el script cree un' -ForegroundColor DarkYellow
+    Write-Host '         sitio con un nombre que no es el que queria, sin avisar.' -ForegroundColor DarkYellow
 }
 
 # Una consulta de verdad, no solo el estado.
