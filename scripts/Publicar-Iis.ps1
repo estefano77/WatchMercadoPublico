@@ -97,6 +97,68 @@ function Test-Admin {
 }
 
 # ---------------------------------------------------------------------------
+# Ejecutar herramientas externas sin que sus avisos maten el script
+#
+# npm y dotnet escriben en stderr SIEMPRE: el "npm notice run ..." del arranque,
+# los avisos de MSBuild, los interlINEOS. Con ErrorActionPreference en 'Stop',
+# PowerShell convierte eso en un error TERMINANTE y el script se para EN
+# SILENCIO, justo despues de imprimir el aviso. Pasó de verdad: la primera
+# ejecucion se paró en "npm run css" con un "Hecho: tailwindcss" que no era un
+# fallo, solo estaba en el canal equivocado.
+#
+# Aqui se baja la preferencia solo mientras dura la llamada y el fallo se decide
+# por el CODIGO DE SALIDA, que es lo unico que significa algo. Es el mismo
+# truco que usa scripts/arrancar.ps1, y por algo esta escrito en un fichero
+# aparte.
+#
+# Se usa cmd.exe /c ademas de invocar el comando directamente: asi el comando
+# llega a cmd con sus argumentos intactos y no hay que pelease con el
+# analisis de comillas de PowerShell.
+# ---------------------------------------------------------------------------
+function Ejecutar {
+    param(
+        [string]   $Orden,
+        [string]   $Etiqueta,
+        [switch]   $Critico = $true,
+        [int]      $UltimasLineas = 8
+    )
+
+    $antes = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $salida = & cmd.exe /c $Orden 2>&1
+        $codigo = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $antes
+    }
+
+    if ($codigo -ne 0) {
+        if ($Critico) {
+            Write-Erro "$Etiqueta ha fallado (codigo $codigo). Sus ultimas lineas:"
+            @($salida) | Select-Object -Last $UltimasLineas | ForEach-Object { Write-Host "         $_" -ForegroundColor DarkGray }
+            exit 1
+        }
+        Write-Aviso "$Etiqueta (codigo ${codigo}), se continua"
+    }
+
+    return @($salida)
+}
+
+# appcmd y icacls se llaman mucho y casi siempre está bien que fallen (el sitio
+# puede no existir todavía). Esta variante no interrumpe nunca.
+function Ejecutar-Tolerante {
+    param([string] $Orden)
+    $antes = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $salida = & cmd.exe /c $Orden 2>&1
+        return $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $antes }
+}
+
+# ---------------------------------------------------------------------------
 # Deteccion de lo que hay puesto
 #
 # LAS RUTAS DEL MODULO SON IMPORTANTES Y SON FACILES DE ACIERTO MAL. ANCM no
@@ -233,20 +295,17 @@ if ($SaltarPublicacion) {
     Write-Info 'Compilando el CSS (npm run css)'
     Push-Location $raiz
     try {
-        & npm run css 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { Write-Aviso 'npm run css devolvio un error; se continua.' }
+        # No es critico: si el CSS falla, se puede publicar igual con el que haya,
+        # y abortar aqui dejaria al usuario sin sitio por un detalle de estilo.
+        Ejecutar 'npm run css' 'La compilacion del CSS' -Critico:$false | Out-Null
     } finally { Pop-Location }
 
     Write-Info 'dotnet publish (framework-dependent)'
     Push-Location $raiz
     try {
-        & dotnet publish .\src\WatchMercadoPublico.Server -c Release -o $PhysicalPath --nologo -v minimal 2>&1 |
-            Select-Object -Last 6 | ForEach-Object { Write-Host "         $_" -ForegroundColor DarkGray }
-        if ($LASTEXITCODE -ne 0) {
-            Write-Erro "dotnet publish devolvio $LASTEXITCODE"
-            exit 1
-        }
+        $salida = Ejecutar ('dotnet publish .\src\WatchMercadoPublico.Server -c Release -o "{0}" --nologo -v minimal' -f $PhysicalPath) 'La publicacion'
     } finally { Pop-Location }
+    @($salida) | Select-Object -Last 3 | ForEach-Object { Write-Host "         $_" -ForegroundColor DarkGray }
     Write-Ok "Publicado en $PhysicalPath"
 }
 
@@ -344,8 +403,8 @@ if ($fallos -gt 0) {
 # ---------------------------------------------------------------------------
 Write-Step '4. Sitio y grupo de aplicaciones'
 
-& $appcmd stop site    /site.name:"$SiteName"    2>$null | Out-Null
-& $appcmd stop apppool /apppool.name:"$AppPoolName" 2>$null | Out-Null
+Ejecutar-Tolerante ("`"{0}`" stop site /site.name:`"{1}`"" -f $appcmd, $SiteName) | Out-Null
+Ejecutar-Tolerante ("`"{0}`" stop apppool /apppool.name:`"{1}`"" -f $appcmd, $AppPoolName) | Out-Null
 
 $offline = Join-Path $PhysicalPath 'app_offline.htm'
 if (Test-Path $offline) { Remove-Item $offline -Force }
@@ -354,19 +413,19 @@ Write-Ok 'app_offline.htm puesto (IIS parara la app de forma ordenada)'
 
 $existePool = @(& $appcmd list apppool 2>$null | Where-Object { $_ -like "*$AppPoolName*" })
 if ($existePool) {
-    & $appcmd delete apppool /apppool.name:"$AppPoolName" | Out-Null
+    Ejecutar-Tolerante ("`"{0}`" delete apppool /apppool.name:`"{1}`"" -f $appcmd, $AppPoolName) | Out-Null
     Write-Info "Grupo recreado: $AppPoolName"
 }
 
 $existeSitio = @(& $appcmd list site 2>$null | Where-Object { $_ -like "*$SiteName*" })
 if ($existeSitio) {
-    & $appcmd delete site /site.name:"$SiteName" | Out-Null
+    Ejecutar-Tolerante ("`"{0}`" delete site /site.name:`"{1}`"" -f $appcmd, $SiteName) | Out-Null
     Write-Info "Sitio recreado: $SiteName"
 }
 
 # managedRuntimeVersion vacio es "No Managed Code". No es cosmetico: ASP.NET Core
 # no carga el CLR de escritorio, arranca CoreCLR dentro de w3wp.
-& $appcmd add apppool /name:"$AppPoolName" /managedRuntimeVersion:"" /managedPipelineMode:Integrated /enable32BitAppOnWin64:false | Out-Null
+Ejecutar ("`"{0}`" add apppool /name:`"{1}`" /managedRuntimeVersion:`"`" /managedPipelineMode:Integrated /enable32BitAppOnWin64:false" -f $appcmd, $AppPoolName) 'Crear el grupo de aplicaciones' | Out-Null
 Write-Ok "Grupo creado: $AppPoolName (No Managed Code, x64, integrated)"
 
 if (-not (Test-Path $PhysicalPath)) { New-Item -Path $PhysicalPath -ItemType Directory -Force | Out-Null }
@@ -374,7 +433,7 @@ if (-not (Test-Path $PhysicalPath)) { New-Item -Path $PhysicalPath -ItemType Dir
 # llaves es obligatorio: escrito como "$Port:" PowerShell lee los dos puntos
 # como el inicio de un nombre de variable con ambito y el fichero no llega
 # ni a compilar.
-& $appcmd add site /name:"$SiteName" /bindings:"http/*:${Port}:" /physicalPath:"$PhysicalPath" | Out-Null
+Ejecutar ("`"{0}`" add site /name:`"{1}`" /bindings:`"http/*:{2}:`" /physicalPath:`"{3}`"" -f $appcmd, $SiteName, $Port, $PhysicalPath) 'Crear el sitio' | Out-Null
 Write-Ok "Sitio creado: http://localhost:$Port/"
 
 # AlwaysRunning + Preload: sin esto, el primer visitante paga el arranque en
@@ -386,6 +445,18 @@ Write-Host '         Start Mode = AlwaysRunning, Preload Enabled = True' -Foregr
 Remove-Item $offline -Force -ErrorAction SilentlyContinue
 Write-Ok 'app_offline.htm retirado'
 
+# Si alguna variable no se pudo poner, se dice ANTES de arrancar nada, con el
+# sitio ya creado pero sin configuracion completa. Es mejor pararse aqui que
+# dejar una web que parece funcionar y no consulta nada.
+if ($fallosVars -gt 0) {
+    Write-Host ''
+    Write-Erro "$fallosVars variable(s) de entorno no se pudieron poner."
+    Write-Host '  El sitio esta creado pero NO va a consultar. Mira el comentario' -ForegroundColor Yellow
+    Write-Host '  del web.config sobre MercadoPublico__CodigoProveedor, y ponlas a mano' -ForegroundColor Yellow
+    Write-Host '  en el Administrador de IIS > Configuration Editor >' -ForegroundColor Yellow
+    Write-Host '  system/applicationHost/applicationPools/'"$AppPoolName"'/environmentVariables' -ForegroundColor Yellow
+}
+
 # ---------------------------------------------------------------------------
 # 5. Permisos
 #
@@ -395,7 +466,7 @@ Write-Ok 'app_offline.htm retirado'
 # ---------------------------------------------------------------------------
 Write-Step '5. Permisos'
 
-& icacls $PhysicalPath /grant "IIS AppPool\${AppPoolName}:(OI)(CI)(RX)" /T /Q 2>&1 | Out-Null
+Ejecutar-Tolerante ('icacls "{0}" /grant "IIS AppPool\{1}:(OI)(CI)(RX)" /T /Q' -f $PhysicalPath, $AppPoolName) | Out-Null
 Write-Ok "IIS AppPool\$AppPoolName con lectura y ejecucion (solo lectura: la cache es en memoria)"
 
 # ---------------------------------------------------------------------------
@@ -428,17 +499,36 @@ if (-not $variables.Contains('MercadoPublico__CodigoProveedor')) {
     Write-Aviso 'Es el unico dato imprescindible de los cinco.'
 }
 
+# Contador de variables que no se pudieron poner. Se mira al final, porque lo
+# peligroso no es que falle una: es que el script siga adelante como si nada y
+# el fallo se descubra en uso.
+$fallosVars = 0
+
 foreach ($clave in $variables.Keys) {
-    # El valor va entre comillas dobles y se escapan las comillas del interior,
-    # porque appcmd las usa como separadores.
+    # El valor va entre comillas dobles porque appcmd las usa como separadores,
+    # y las comillas del interior se escapan con barra invertida.
+    #
+    # OJO con el /+ : es lo que ANADE una entrada. Sin la barra seria un
+    # "replace" que buscaria una entrada con ese nombre, y como no existe en un
+    # grupo nuevo, no haria nada ydiria "exito" sin poner nada. El fallo seria
+    # silencioso y se veria tres dias despues, en que la web arranca y no
+    # consulta.
     $valor = $variables[$clave] -replace '"', '\"'
-    & $appcmd set config -section:system.applicationHost/applicationPools `
-        "/+[name='$AppPoolName'].environmentVariables.[name='$clave',value='$valor']" 2>&1 | Out-Null
-    if ($LASTEXITCODE -eq 0) {
+    $antes = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & cmd.exe /c "`"$appcmd`" set config -section:system.applicationHost/applicationPools `" "`
+            "/+[name='$AppPoolName'].environmentVariables.[name='$clave',value='$valor']`"" 2>&1 | Out-Null
+        $codigo = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $antes }
+
+    if ($codigo -eq 0) {
         $mostrado = if ($clave -like '*Ticket*') { '(el ticket no se imprime)' } else { $variables[$clave] }
         Write-Ok "$clave = $mostrado"
     } else {
-        Write-Erro "No se pudo poner $clave"
+        Write-Erro "No se pudo poner $clave (codigo $codigo)"
+        $fallosVars++
     }
 }
 
@@ -451,8 +541,8 @@ foreach ($clave in $variables.Keys) {
 # ---------------------------------------------------------------------------
 Write-Step '7. Verificacion'
 
-& $appcmd start apppool /apppool.name:"$AppPoolName" | Out-Null
-& $appcmd start site    /site.name:"$SiteName"    | Out-Null
+Ejecutar-Tolerante ("`"{0}`" start apppool /apppool.name:`"{1}`"" -f $appcmd, $AppPoolName) | Out-Null
+Ejecutar-Tolerante ("`"{0}`" start site /site.name:`"{1}`"" -f $appcmd, $SiteName) | Out-Null
 Write-Ok 'Grupo y sitio arrancados'
 
 if ($PuertoDePrueba -eq 0) { $PuertoDePrueba = Get-PuertoLibre }
