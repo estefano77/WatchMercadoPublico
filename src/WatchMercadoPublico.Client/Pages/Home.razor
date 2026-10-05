@@ -292,10 +292,14 @@
                         @Periodo
                     </span>
                 </div>
+                @* El sello lleva FECHA y hora, no solo la hora. Va junto al contador, y ese
+                   contador puede ser de una semana de hace meses: "23:32" a secas
+                   no dice si eso fue anteayer o en junio, que es justo lo que
+                   hace falta saber para fiarse de lo que se está viendo. *@
                 <p class="text-xs text-muted">
                     @(Semana.DesdeCache
-                        ? $"consultado a las {Formato.Hora(Semana.Consultado)}"
-                        : $"consultado a la API a las {Formato.Hora(Semana.Consultado)}")
+                        ? $"consultado el {Formato.FechaYHoraCorta(Semana.Consultado)}"
+                        : $"consultado a la API el {Formato.FechaYHoraCorta(Semana.Consultado)}")
                 </p>
             </div>
 

@@ -90,6 +90,63 @@ public class FormatoTests
         Assert.Equal("—", Formato.Fecha(null));
         Assert.Equal("—", Formato.FechaHora(null));
         Assert.Equal("", Formato.Hora(null));
+        Assert.Equal("—", Formato.FechaYHoraCorta(null));
+    }
+
+    /// <summary>
+    /// Un instante LOCAL, con la zona de esta máquina.
+    ///
+    /// Los formateadores llaman a <c>ToLocalTime()</c>, así que un instante
+    /// construido con desfase cero se convierte y la prueba dépendería de en
+    /// qué zona se ejecuta. Con la zona local, la conversión no hace nada y lo
+    /// que se comprueba es el formato, que es lo que importa.
+    /// </summary>
+    private static DateTimeOffset Local(int anio, int mes, int dia, int hora, int minuto)
+    {
+        var naive = new DateTime(anio, mes, dia, hora, minuto, 0);
+        return new DateTimeOffset(naive, TimeZoneInfo.Local.GetUtcOffset(naive));
+    }
+
+    [Fact]
+    public void El_sello_de_consulta_lleva_fecha_y_hora_en_numero()
+    {
+        // El sello va junto al contador, y ese contador puede ser de una semana
+        // de hace meses. Con solo la hora, "23:32" no dice si fue anteayer o
+        // en junio, que es justo lo que hace falta para fiarse.
+        var sello = Formato.FechaYHoraCorta(Local(2026, 10, 4, 23, 32));
+
+        Assert.Equal("04/10/2026 23:32", sello);
+        Assert.Contains("/2026", sello);
+        Assert.Contains(":", sello);
+    }
+
+    [Fact]
+    public void Las_fechas_numericas_usan_barra_y_no_guion()
+    {
+        // REGRESIÓN. En un formato de .NET "/" no es una barra: es el separador
+        // de la cultura, y en es-CL ese separador es el guion. Con la barra sin
+        // escapar salía "04-10-2026" en el sello de la cabecera y
+        // "27/02/2026" en la tarjeta, según cuál de los dos caminos usara
+        // cultura. Dos formatos para lo mismo.
+        Assert.Equal("27/02/2026", Formato.FechaNumerica(Local(2026, 2, 27, 12, 0)));
+        Assert.Equal("04/10/2026 23:32", Formato.FechaYHoraCorta(Local(2026, 10, 4, 23, 32)));
+
+        // Y los dos tienen que ser EL MISMO formato: la fecha de una es el
+        // principio de la otra, y solo añade la hora. Si divergen, vuelve el
+        // problema.
+        var conFecha = Formato.FechaNumerica(Local(2026, 10, 4, 23, 32));
+        var conFechaYHora = Formato.FechaYHoraCorta(Local(2026, 10, 4, 23, 32));
+
+        Assert.Equal(conFecha + " 23:32", conFechaYHora);
+    }
+
+    [Fact]
+    public void El_sello_usa_ceros_a_la_izquierda()
+    {
+        // El 4 va como 04 y las 5 de la mañana como 05. Sin los ceros, el día
+        // y la hora quedan alineados de forma distinta según el valor y el
+        // sello da un salto de ancho cada vez que cambia.
+        Assert.Equal("04/10/2026 05:07", Formato.FechaYHoraCorta(Local(2026, 10, 4, 5, 7)));
     }
 
     [Fact]

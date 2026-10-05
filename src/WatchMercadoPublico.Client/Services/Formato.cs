@@ -72,6 +72,34 @@ public static class Formato
         valor is null ? "" : valor.Value.ToLocalTime().ToString("HH:mm", Chileno);
 
     /// <summary>
+    /// Fecha numérica: "27/02/2026".
+    ///
+    /// OJO con la barra. En un formato de .NET, "/" NO es una barra: es un
+    /// marcador que se sustituye por el separador de la cultura, y en es-CL ese
+    /// separador es el guion. Por eso el formato va con la barra escapada.
+    ///
+    /// Sin escapar salía "27-02-2026" en un sitio y "27/02/2026" en otro,
+    /// según cuál de los dos caminos usara cultura y cuál no. Los dos formatos
+    /// numéricos de aquí pasan por es-CL y con la barra escapada, así que
+    /// dan siempre barras.
+    /// </summary>
+    public static string FechaNumerica(DateTimeOffset? valor) =>
+        valor is null ? "—" : valor.Value.ToLocalTime().ToString(@"dd\/MM\/yyyy", Chileno);
+
+    /// <summary>
+    /// Fecha y hora numéricas: "04/10/2026 23:32".
+    ///
+    /// Va con la fecha y no solo con la hora porque el sello aparece junto al
+    /// contador, y ese contador puede ser de una semana de hace meses: "23:32"
+    /// no dice si eso fue anteayer o en junio.
+    ///
+    /// Misma barra escapada que en <see cref="FechaNumerica"/>, y por el mismo
+    /// motivo.
+    /// </summary>
+    public static string FechaYHoraCorta(DateTimeOffset? valor) =>
+        valor is null ? "—" : valor.Value.ToLocalTime().ToString(@"dd\/MM\/yyyy HH:mm", Chileno);
+
+    /// <summary>
     /// Cuenta los días que faltan para el cierre. Es el dato más útil de la
     /// ficha: un "cierra en 2 días" pesa mucho más que la fecha suelta.
     /// </summary>

@@ -16,13 +16,14 @@
                 <span class="@ClaseEstado">@Licitacion.EstadoLegible</span>
                 @if (Licitacion.FechaPublicacion is { } publicada)
                 {
-                    @* Con año: "publicada 28/09/2026". Sin él, el día y el mes no dicen de qué
+                    @* Con año: "publicada 27/02/2026". Sin él, el día y el mes no dicen de qué
                    estamos hablando, que es justo lo que pasa cuando se está
-                   mirando una semana de hace tiempo. El formato numérico corto
-                   se mantiene porque va en una etiqueta diminuta, y aquí el año
-                   ocupa tres caracteres de más sin estorbar. *@
-                    <span class="text-[0.65rem] font-semibold text-muted">
-                        publicada @publicada.ToLocalTime().ToString("dd/MM/yyyy")
+                   mirando una semana de hace tiempo.
+                   Pasa por Formato, y no por un ToString aquí: al llamar a
+                   ToString("dd/MM/yyyy") sin cultura salía con barras, y el sello
+                   de la cabecera, que sí pasaba cultura, salía con guiones. Dos
+                   formatos para lo mismo según quién preguntara. *@                    <span class="text-[0.65rem] font-semibold text-muted">
+                        publicada @Formato.FechaNumerica(publicada)
                     </span>
                 }
             </div>
