@@ -55,7 +55,7 @@
     Pregunta por el ticket y publica todo.
 
 .EXAMPLE
-    .\scripts\Publicar-Iis.ps1 -CodigoProveedor 71284 -SaltarPublicacion
+    .\scripts\Publicar-Iis.ps1 -CodigoProveedor <codigo> -SaltarPublicacion
     Reaprovecha lo ya publicado y solo ajusta IIS.
 
 .NOTES
