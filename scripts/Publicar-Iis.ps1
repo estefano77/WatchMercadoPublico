@@ -140,7 +140,20 @@ function Set-VariableEnWebConfig {
 
         $ajustes = New-Object System.Xml.XmlWriterSettings
         $ajustes.Indent = $true
-        $ajustes.Encoding = New-Object System.Text.UTF8Encoding($false)
+        # CON BOM, y no sin BOM. Es la causa del 500.19 con 0x8007000d y SIN
+        # numero de linea que dio el despliegue real.
+        #
+        # El lector rapido de configuracion de IIS decide la codificacion por la
+        # marca BOM. Sin ella, un web.config que lleva acentos en los comentarios
+        # se lee con la pagina de codigos del sistema, se descuelga el analisis y
+        # devuelve "datos de configuracion no validos" sin decir DONDE. Un error de
+        # esquema de verdad da linea y mensaje; este no daba ninguna de las dos
+        # cosas, y por eso durante horas se culpaba al esquema.
+        #
+        # La prueba esta en el equipo: el sitio GestorArchivos, que funciona, tiene
+        # BOM y tambien acentos. Con BOM los acentos son indiferentes; sin BOM,
+        # rompen.
+        $ajustes.Encoding = New-Object System.Text.UTF8Encoding($true)
         $ajustes.OmitXmlDeclaration = $false
         $escritor = [System.Xml.XmlWriter]::Create($Ruta, $ajustes)
         try { $xml.Save($escritor) } finally { $escritor.Close() }
@@ -524,6 +537,19 @@ if (-not (Test-Path $webConfig)) {
         Write-Erro "web.config no es XML valido: $($_.Exception.Message)"
         Write-Host '         IIS devolveria HTTP 500.19 (error de configuracion).' -ForegroundColor DarkGray
         $fallos++
+    }
+
+    # 3.7 La marca BOM. Sin ella, IIS no consigue leer un web.config con
+    #     acentos y devuelve 500.19 con 0x8007000d SIN numero de linea, que es
+    #     la pista que faltaba. El paso 6 escribe el fichero con BOM siempre, asi
+    #     que esto solo puede fallar si alguien publico por otra via.
+    $cabecera = [System.IO.File]::ReadAllBytes($webConfig)[0..2]
+    if ($cabecera[0] -eq 0xEF -and $cabecera[1] -eq 0xBB -and $cabecera[2] -eq 0xBF) {
+        Write-Ok 'El web.config tiene la marca BOM (IIS lo necesita para leerlo)'
+    } else {
+        Write-Aviso 'El web.config NO tiene marca BOM.'
+        Write-Aviso 'IIS puede devolver 500.19 (0x8007000d) sin decir donde, si lleva acentos.'
+        Write-Aviso 'El paso 6 lo reescribe con BOM; si esto persiste, se publico por otra via.'
     }
 
     # 3.6 La estructura, y no solo que el XML cargue. Este es el control que
