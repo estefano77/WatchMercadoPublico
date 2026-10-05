@@ -18,10 +18,29 @@
             <span class="marca-texto">Mercado Publico</span>
         </h1>
 
-        <p class="mt-2 max-w-2xl text-sm leading-relaxed text-ink-soft">
+        @* La línea del subtítulo lleva el enlace a la derecha. Es un flex con
+       justify-between en vez de un <p> suelto porque hay que empujar el enlace al
+       extremo sin que el subtítulo se estire con él: por eso el texto se queda
+       en su propio <p> y el contenedor es el que reparte. Sin ese max-w-2xl que
+       tenía antes, el enlace no podría llegar a la derecha.
+
+       El enlace solo sale si el servidor manda una URL utilizable. Con la
+       configuración vacía no se pinta nada, en vez de un enlace roto. *@
+    <div class="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+        <p class="text-sm leading-relaxed text-ink-soft">
             Licitaciones publicadas para
             <strong class="text-ink">@NombreEmpresa</strong>.
         </p>
+
+        @if (Estado?.Empresa is { TieneUrlMercadoPublico: true })
+        {
+            <a href="@Estado.Empresa.UrlMercadoPublico" target="_blank" rel="noopener noreferrer"
+               class="inline-flex items-center gap-1.5 text-sm font-bold text-violet-500 transition hover:brightness-110">
+                Ir a Mercado Público
+                <Icon Name="externo" Size="13" />
+            </a>
+        }
+    </div>
     </section>
 
     @* ------------------------------------------------------------------ *@
@@ -355,6 +374,7 @@
              Cargando="@cargandoDetalle"
              DesdeCache="@detalleDesdeCache"
              MensajeError="@errorDetalle"
+             UrlMercadoPublico="@(Estado?.Empresa is { TieneUrlMercadoPublico: true } e ? e.UrlMercadoPublico : null)"
              OnCerrar="CerrarDetalleAsync" />
 
 @code {

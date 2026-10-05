@@ -29,6 +29,33 @@ public sealed class MercadoPublicoOpciones
     /// <summary>RUT de la empresa, para la cabecera.</summary>
     public string RutEmpresa { get; set; } = "";
 
+    /// <summary>
+    /// A dónde lleva el enlace "Ir a Mercado Público" de la cabecera.
+    ///
+    /// Va en la configuración y no en el marcado por la misma razón que la
+    /// empresa: es un dato del entorno, no de la pantalla. Si algún día el
+    /// enlace tiene que apuntar a otra página —o a una intranet que lo replique—
+    /// se cambia aquí y no se toca el .razor, que además no es un sitio donde
+    /// tenga sentido cambiar URLs.
+    ///
+    /// Es configurable a propósito y no se valida contra una lista: no hay forma
+    /// barata de saber si una URL de Mercado Público existe hoy sin pedirla, y
+    /// una comprobación en cada carga sería peor que un enlace que alguien
+    /// pueda cambiar mal y ver enseguida.
+    /// </summary>
+    public string UrlMercadoPublico { get; set; } =
+        "https://www.mercadopublico.cl/Home/BusquedaLicitacion";
+
+    /// <summary>
+    /// El enlace solo se pinta si hay una URL detrás.
+    ///
+    /// Con la vacía no sale nada, en vez de un enlace roto: es lo mismo que se
+    /// hace con el resto de datos que pueden faltar.
+    /// </summary>
+    public bool TieneUrlMercadoPublico =>
+        !string.IsNullOrWhiteSpace(UrlMercadoPublico)
+        && UrlMercadoPublico.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>"v1" (diario) o "c2" (Compra Ágil).</summary>
     public string ModoConsulta { get; set; } = "v1";
 

@@ -14,14 +14,6 @@
         <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-2">
                 <span class="@ClaseEstado">@Licitacion.EstadoLegible</span>
-                @* El tipo solo llega con el detalle, y este listado aún no lo
-                   tiene: se muestra si ya vino cacheado. *@
-                @if (!string.IsNullOrWhiteSpace(Licitacion.Detalle?.Tipo))
-                {
-                    <span class="rounded-md border border-line bg-field px-2 py-0.5 text-[0.65rem] font-bold tracking-wide text-muted uppercase">
-                        @Licitacion.Detalle.Tipo
-                    </span>
-                }
                 @if (Licitacion.FechaPublicacion is { } publicada)
                 {
                     @* Con año: "publicada 28/09/2026". Sin él, el día y el mes no dicen de qué
@@ -48,6 +40,20 @@
                     }
                 }
             </h3>
+
+            @* El organismo comprador: quién va a comprar. Va debajo del título y no en
+               la fila de abajo porque es un nombre de entidad, con palabras,
+               y ahí solo caben fechas y un contador. Solo se pinta si vino:
+               si el detalle falla, la tarjeta sale sin esta línea en vez de con
+               un hueco. *@            @if (!string.IsNullOrWhiteSpace(Licitacion.Detalle?.NombreOrganismo))
+            {
+                <p class="mt-1.5 flex items-start gap-1.5 text-xs leading-snug text-ink-soft">
+                    <span class="mt-px shrink-0 opacity-60">
+                        <Icon Name="edificio" Size="13" />
+                    </span>
+                    <span class="min-w-0">@Licitacion.Detalle.NombreOrganismo</span>
+                </p>
+            }
         </div>
 
         <span class="shrink-0 text-[0.65rem] font-bold tracking-wide text-violet-500 uppercase opacity-0 transition group-hover:opacity-100">

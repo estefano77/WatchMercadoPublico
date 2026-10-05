@@ -364,11 +364,14 @@
 
             @* Pie *@
             <div class="flex items-center justify-between gap-3 border-t border-line px-5 py-3 sm:px-6">
-                <a href="@UrlMercadoPublico" target="_blank" rel="noopener noreferrer"
-                   class="inline-flex min-h-[40px] items-center gap-1.5 text-xs font-bold text-violet-500 transition hover:brightness-110">
-                    Ver en mercadopublico.cl
-                    <Icon Name="externo" Size="13" />
-                </a>
+                @if (HayUrl)
+                {
+                    <a href="@UrlMercadoPublico" target="_blank" rel="noopener noreferrer"
+                       class="inline-flex min-h-[40px] items-center gap-1.5 text-xs font-bold text-violet-500 transition hover:brightness-110">
+                        Ir a Mercado Público
+                        <Icon Name="externo" Size="13" />
+                    </a>
+                }
                 <button type="button" @onclick="CerrarAsync"
                         class="inline-flex min-h-[40px] items-center rounded-xl border border-line px-4 text-xs font-bold text-ink-soft transition hover:bg-hover">
                     Cerrar
@@ -469,10 +472,29 @@
         }
     }
 
-    private string UrlMercadoPublico =>
-        string.IsNullOrWhiteSpace(Licitacion?.CodigoExterno)
-            ? "https://www.mercadopublico.cl/"
-            : $"https://www.mercadopublico.cl/licitacion/{Licitacion.CodigoExterno}";
+    /// <summary>
+    /// A dónde lleva el enlace a Mercado Público.
+    ///
+    /// ANTES se armaba aquí con el código: mercadopublico.cl/licitacion/{código}.
+    /// ESA RUTA ESTÁ ROTA — se comprobó: devuelve HTTP 200 con una página de
+    /// cuatro mil bytes que es una SPA, y al abrirla en el navegador redirige a
+    /// una pantalla de "En estos momentos no podemos atender su solicitud". El
+    /// 200 engañaba; comprobada en el navegador, no lo está.
+    ///
+    /// Así que el enlace usa la MISMA URL configurable que el de la cabecera. Se
+    /// pierde una cosa: antes llevaba a la licitación concreta y ahora lleva al
+    /// buscador. A cambio funciona, y el sitio puede cambiar de rutas sin que
+    /// haya que tocar código.
+    /// </summary>
+    [Parameter] public string? UrlMercadoPublico { get; set; }
+
+    /// <summary>
+    /// El texto del enlace cambió de "Ver en mercadopublico.cl" a "Ir a Mercado
+    /// Público" porque ya no lleva a VER esta licitación, sino al buscador.
+    /// Decir "Ver" engañaría, y esa es justo la diferencia que hace que alguien
+    /// confíe en un enlace y pulse donde no toca.
+    /// </summary>
+    private bool HayUrl => !string.IsNullOrWhiteSpace(UrlMercadoPublico);
 
     private async Task CerrarAsync() => await OnCerrar.InvokeAsync();
 }

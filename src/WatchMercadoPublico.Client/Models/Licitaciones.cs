@@ -242,10 +242,20 @@ public sealed class EmpresaInfo
     public string? RutEmpresa { get; set; }
     public string? CodigoProveedor { get; set; }
 
+    /// <summary>
+    /// A dónde lleva el enlace "Ir a Mercado Público" de la cabecera. Viene
+    /// escrito desde la configuración del servidor; vacío si la URL no es
+    /// utilizable, y entonces el enlace no se pinta.
+    /// </summary>
+    public string? UrlMercadoPublico { get; set; }
+
     /// <summary>¿Hay nombre para poner en la cabecera?</summary>
     public bool TieneNombre => !string.IsNullOrWhiteSpace(NombreEmpresa);
 
     public string Nombre => TieneNombre ? NombreEmpresa! : "Empresa sin configurar";
+
+    /// <summary>¿Se puede pintar el enlace a Mercado Público?</summary>
+    public bool TieneUrlMercadoPublico => !string.IsNullOrWhiteSpace(UrlMercadoPublico);
 }
 
 /// <summary>Respuesta del endpoint de detalle.</summary>

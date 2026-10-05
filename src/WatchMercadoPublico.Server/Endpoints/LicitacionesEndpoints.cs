@@ -97,6 +97,14 @@ public static class LicitacionesEndpoints
                 config.NombreEmpresa,
                 config.RutEmpresa,
                 config.CodigoProveedor,
+
+                // El enlace de la cabecera, ya escrito desde la configuración.
+                // Viaja vacío si la URL no es utilizable, para que el cliente no
+                // tenga que decidir: pintar un enlace es cosa del servidor, que
+                // es quien sabe si la URL es válida.
+                UrlMercadoPublico = config.TieneUrlMercadoPublico
+                    ? config.UrlMercadoPublico
+                    : "",
             },
 
             // Lo que se está mirando, para que la cabecera lo diga.
@@ -338,6 +346,10 @@ public static class LicitacionesEndpoints
 
                 var ordenadas = AplicarOrden(todas);
 
+                // El organismo comprador solo viene en el detalle, no en el
+                // listado. Va en la tarjeta, así que hay que traerlo aquí.
+                await AdjuntarDetallesAsync(ordenadas, api, cache, config, log, ct);
+
                 return Results.Ok(ConstruirRespuesta(
                     anio, mes, semana, consultables.Count, sinRespuesta, ordenadas,
                     pendientes.Count, desdeCache));
@@ -350,6 +362,66 @@ public static class LicitacionesEndpoints
         catch (MercadoPublicoException ex)
         {
             return Results.Json(new { error = ex.Message }, statusCode: ex.CodigoHttp);
+        }
+    }
+
+    /// <summary>
+    /// Pide el detalle de cada licitación para poder pintar el organismo
+    /// comprador en la tarjeta.
+    ///
+    /// COSTE: una consulta a la API por licitación que no esté ya en caché. El
+    /// listado diario solo trae cuatro campos —código, nombre, estado y fecha de
+    /// cierre—, así que no hay manera de sacarlo de ahí. Para una semana son las
+    /// mismas licitaciones que se están mostrando, que suelen ser cero o una.
+    ///
+    /// UN DETALLE QUE FALLA NO TIRA LA SEMANA. Es la misma regla que se aplica a
+    /// los días: si un día falla, se marca y se sigue con los demás. Aquí si un
+    /// detalle falla, esa tarjeta se queda sin organismo y las demás salen
+    /// igual. La alternativa —fallar la semana entera— perdería datos que sí se
+    /// pudieron traer, y sería mentir por un dato acessorio.
+    ///
+    /// Se pide de uno en uno, sin paralelismo: pedirlos a la vez dispara el
+    /// límite de ritmo, que es el <c>429</c> del que ya se habla en el README.
+    /// </summary>
+    private static async Task AdjuntarDetallesAsync(
+        List<Licitacion> items,
+        MercadoPublicoCliente api,
+        CacheMercadoPublico cache,
+        MercadoPublicoOpciones config,
+        ILogger log,
+        CancellationToken ct)
+    {
+        foreach (var item in items)
+        {
+            if (item.Detalle is not null) continue;
+            if (string.IsNullOrWhiteSpace(item.CodigoExterno)) continue;
+
+            var cacheado = cache.ObtenerDetalle(item.CodigoExterno, out var hayCache);
+            if (hayCache)
+            {
+                item.Detalle = cacheado;
+                continue;
+            }
+
+            try
+            {
+                var detalle = config.Modo == "demo"
+                    ? DatosDemo.Detalle(item.CodigoExterno)
+                    : await api.ObtenerDetalleAsync(item.CodigoExterno, ct);
+
+                // Se cachea también el "no hay detalle": si la API dice que no
+                // existe, no se vuelve a preguntar en cada carga.
+                cache.GuardarDetalle(item.CodigoExterno, detalle);
+                item.Detalle = detalle;
+            }
+            catch (Exception ex) when (ex is MercadoPublicoException or TaskCanceledException
+                                           or HttpRequestException or OperationCanceledException)
+            {
+                log.LogWarning(
+                    ex,
+                    "No se pudo traer el detalle de {Codigo}; la tarjeta saldrá sin organismo",
+                    item.CodigoExterno);
+            }
         }
     }
 

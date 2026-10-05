@@ -345,7 +345,32 @@ GET https://api.mercadopublico.cl/servicios/v1/publico/licitaciones.json
 
 Trae mucho más que el listado: organismo comprador con su RUT, todas las fechas
 del proceso, adjudicación con número de oferentes, enlace al acta y **los ítems
-adjudicados**. Ejemplo real:
+adjudicados**.
+
+**El detalle se pide siempre, no solo al abrir la ficha.** El listado diario
+devuelve cuatro campos —código, nombre, estado y fecha de cierre— y ninguno es el
+organismo, así que no hay manera de sacarlo de ahí. Como ahora el organismo se
+pinta en la tarjeta, el servidor trae el detalle de cada licitación al responder
+la semana, y lo cachea igual que antes.
+
+Lo que cuesta, medido:
+
+| | Peticiones | Tiempo |
+|---|---|---|
+| Semana con 1 licitación | 5 días + 1 detalle = **6** | 8,4 s |
+| Semana vacía | 5 días + 0 detalles = **5** | 8,3 s |
+
+El detalle añade una petición de las seis, o sea alrededor de un 17% en una
+semana con una licitación, y **nada** en una semana vacía. Se piden **de uno en
+uno**: en paralelo se dispararía el límite de ritmo, que es el `429` del que se
+habla más abajo.
+
+**Un detalle que falla no tira la semana.** Es la misma regla que se aplica a los
+días: si un detalle falla, esa tarjeta sale sin organismo y las demás se pintan
+igual. Fallar la semana entera por un dato accesorio perdería datos que sí se
+pudieron traer.
+
+Ejemplo real:
 
 ```
 estado     Adjudicada   tipo LP
@@ -1002,6 +1027,8 @@ comprobación de cabecera mira el ``maskImage`` ya resuelto.
 | Cabecera, izquierda | Símbolo propio + `WatchMercadoPublico` | Identidad de la herramienta |
 | Cabecera, derecha | Logotipo de **SMC** | Identifica al propietario: herramienta interna suya |
 | Encabezado de la página | "Novedades en **Mercado Público**" | Uso nominativo: describe la plataforma de la que salen los datos |
+| Encabezado, a la derecha | "Ir a **Mercado Público**" → la URL de `UrlMercadoPublico` | Salida a la plataforma. La URL viene de la configuración, no del marcado |
+| Ficha, al abrirla | "Ir a **Mercado Público**", la misma `UrlMercadoPublico` | El buscador del portal |
 | Pie | "© WatchMercadoPublico" | Autoría del producto |
 | Pie | "Desarrollado por **SMC Spa**" → `smc.cl` | Crédito de autoría. Se queda aunque no haya salida a internet |
 | Pie | Logotipo de **ChileCompra** | Los datos son suyos: atribución |
@@ -1012,6 +1039,31 @@ De las tres marcas, **ninguna se toca**: la propia solo en la cabecera, la de SM
 en la cabecera, la de ChileCompra en el pie. El logo de SMC es blanco plano sobre
 el fondo mientras que el nombre propio va en degradado, así que aunque se leyeran
 juntos se distinguirían.
+
+**Los dos enlaces que salen a internet usan la misma configuración.**
+`UrlMercadoPublico`, en la sección `MercadoPublico` del `appsettings`, llega al
+cliente por `/api/estado` y lo usan tanto el de la cabecera como el de la ficha.
+Se puede cambiar por entorno sin tocar el `.razor`, que no es un sitio donde
+tenga sentido cambiar URLs.
+
+Si `UrlMercadoPublico` se deja vacía o no empieza por `https://`, **ninguno de los
+dos enlaces se pinta**: es preferible a un enlace que no lleva a ninguna parte.
+
+### Por qué ninguno de los dos va a la licitación concreta
+
+Se probó la ruta `mercadopublico.cl/licitacion/{código}`, que es la que se usaba
+antes, y **está rota**. Lo difícil de verlo es que responde **HTTP 200**: devuelve
+una página de cuatro mil bytes que es la shell de una SPA, y con un código
+inventado devuelve exactamente lo mismo. El 200 no dice nada.
+
+Abriéndola en un navegador sí se ve: redirige a una pantalla de **"En estos
+momentos no podemos atender su solicitud"**.
+
+Por eso los dos enlaces van al buscador. Se pierde poder abrir una licitación
+concreta desde aquí, que es lo que haría el `/licitacion/{código}`; a cambio el
+enlace funciona, y el texto del botón de la ficha pasó de "Ver en
+mercadopublico.cl" a "Ir a Mercado Público", porque ya no lleva a ver esa
+licitación y decir "Ver" sería engañoso.
 
 Lo que **conviene que se quede** es "Mercado Público" en el encabezado, en el
 aviso de demo y en los enlaces a `mercadopublico.cl`: sin eso, un aviso de error
