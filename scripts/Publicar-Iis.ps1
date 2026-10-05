@@ -95,6 +95,68 @@ function Test-Admin {
     (New-Object Security.Principal.WindowsPrincipal($identity)).IsInRole(
         [Security.Principal.WindowsBuiltInRole]::Administrator)
 }
+# ---------------------------------------------------------------------------
+function Set-VariableEnWebConfig {
+    param(
+        [string] $Ruta,
+        [string] $Clave,
+        [string] $Valor
+    )
+
+    try {
+        $xml = New-Object System.Xml.XmlDocument
+        $xml.PreserveWhitespace = $true
+        $xml.Load($Ruta)
+
+        $nodo = $xml.SelectSingleNode('/configuration/system.webServer/aspNetCore/environmentVariables')
+        if (-not $nodo) {
+            Write-Erro 'El web.config no tiene el nodo aspNetCore/environmentVariables'
+            return 1
+        }
+
+        # Quitar la entrada con ese nombre si ya estaba, para no duplicarla al
+        # reejecutar el script.
+        foreach ($hijo in @($nodo.SelectNodes('environmentVariable'))) {
+            if ($hijo.GetAttribute('name') -eq $Clave) { $nodo.RemoveChild($hijo) | Out-Null }
+        }
+
+        $elem = $xml.CreateElement('environmentVariable')
+        $elem.SetAttribute('name', $Clave)
+        $elem.SetAttribute('value', $Valor)
+        $nodo.AppendChild($elem) | Out-Null
+
+        # Los comentarios se eliminan antes de escribir: XmlDocument los
+        # conservaria, pero al reordenar el fichero quedan descuadrados y un
+        # comentario mal cerrado es un 500.19 que no dice nada util.
+        foreach ($comentario in @($xml.SelectNodes('//comment()'))) {
+            if ($comentario.ParentNode -eq $nodo) { $nodo.RemoveChild($comentario) | Out-Null }
+        }
+
+        $ajustes = New-Object System.Xml.XmlWriterSettings
+        $ajustes.Indent = $true
+        $ajustes.Encoding = New-Object System.Text.UTF8Encoding($false)
+        $ajustes.OmitXmlDeclaration = $false
+        $escritor = [System.Xml.XmlWriter]::Create($Ruta, $ajustes)
+        try { $xml.Save($escritor) } finally { $escritor.Close() }
+
+        # Relectura: es la unica prueba de que ha quedado bien.
+        $comprobacion = New-Object System.Xml.XmlDocument
+        $comprobacion.Load($Ruta)
+        $nodoFinal = $comprobacion.SelectSingleNode("/configuration/system.webServer/aspNetCore/environmentVariables/environmentVariable[@name='$Clave']")
+        if ($nodoFinal -and $nodoFinal.GetAttribute('value') -eq $Valor) {
+            $mostrado = if ($Clave -like '*Ticket*') { '(el ticket no se imprime)' } else { $Valor }
+            Write-Ok "$Clave = $mostrado"
+            return 0
+        }
+
+        Write-Erro "$Clave no se ha podido escribir (no aparece al releer)"
+        return 1
+    }
+    catch {
+        Write-Erro "Fallo al escribir ${Clave}: $($_.Exception.Message)"
+        return 1
+    }
+}
 
 # ---------------------------------------------------------------------------
 # Ejecutar herramientas externas sin que sus avisos maten el script
@@ -599,68 +661,6 @@ if ($fallosVars -eq 0) {
 # que importa: escribir en un fichero y darlo por bueno a la primera fue
 # exactamente lo que fallo con appcmd, donde el comando decia "exito" y no habia
 # puesto nada.
-# ---------------------------------------------------------------------------
-function Set-VariableEnWebConfig {
-    param(
-        [string] $Ruta,
-        [string] $Clave,
-        [string] $Valor
-    )
-
-    try {
-        $xml = New-Object System.Xml.XmlDocument
-        $xml.PreserveWhitespace = $true
-        $xml.Load($Ruta)
-
-        $nodo = $xml.SelectSingleNode('/configuration/system.webServer/aspNetCore/environmentVariables')
-        if (-not $nodo) {
-            Write-Erro 'El web.config no tiene el nodo aspNetCore/environmentVariables'
-            return 1
-        }
-
-        # Quitar la entrada con ese nombre si ya estaba, para no duplicarla al
-        # reejecutar el script.
-        foreach ($hijo in @($nodo.SelectNodes('environmentVariable'))) {
-            if ($hijo.GetAttribute('name') -eq $Clave) { $nodo.RemoveChild($hijo) | Out-Null }
-        }
-
-        $elem = $xml.CreateElement('environmentVariable')
-        $elem.SetAttribute('name', $Clave)
-        $elem.SetAttribute('value', $Valor)
-        $nodo.AppendChild($elem) | Out-Null
-
-        # Los comentarios se eliminan antes de escribir: XmlDocument los
-        # conservaria, pero al reordenar el fichero quedan descuadrados y un
-        # comentario mal cerrado es un 500.19 que no dice nada util.
-        foreach ($comentario in @($xml.SelectNodes('//comment()'))) {
-            if ($comentario.ParentNode -eq $nodo) { $nodo.RemoveChild($comentario) | Out-Null }
-        }
-
-        $ajustes = New-Object System.Xml.XmlWriterSettings
-        $ajustes.Indent = $true
-        $ajustes.Encoding = New-Object System.Text.UTF8Encoding($false)
-        $ajustes.OmitXmlDeclaration = $false
-        $escritor = [System.Xml.XmlWriter]::Create($Ruta, $ajustes)
-        try { $xml.Save($escritor) } finally { $escritor.Close() }
-
-        # Relectura: es la unica prueba de que ha quedado bien.
-        $comprobacion = New-Object System.Xml.XmlDocument
-        $comprobacion.Load($Ruta)
-        $nodoFinal = $comprobacion.SelectSingleNode("/configuration/system.webServer/aspNetCore/environmentVariables/environmentVariable[@name='$Clave']")
-        if ($nodoFinal -and $nodoFinal.GetAttribute('value') -eq $Valor) {
-            $mostrado = if ($Clave -like '*Ticket*') { '(el ticket no se imprime)' } else { $Valor }
-            Write-Ok "$Clave = $mostrado"
-            return 0
-        }
-
-        Write-Erro "$Clave no se ha podido escribir (no aparece al releer)"
-        return 1
-    }
-    catch {
-        Write-Erro "Fallo al escribir ${Clave}: $($_.Exception.Message)"
-        return 1
-    }
-}
 
 # ---------------------------------------------------------------------------
 # 7. Verificacion
