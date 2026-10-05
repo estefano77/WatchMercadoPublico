@@ -1114,9 +1114,9 @@ no en el servidor: el array de días ordenado por lunes pero indexado por
 "sábado". **Ningún test lo detectó, porque no había ninguno que lo mirara.**
 
 La reacción fue mover el texto de las fechas al servidor, donde sí se prueba
-(`TextosDeFecha`). Quedó sin lógica de fechas en el cliente, pero el hueco
-sigue: `Formato.cs` no tiene tests, y `Home.razor` es una pantalla de 500 líneas
-que no se puede probar sin un proyecto de pruebas de Blazor.
+(`TextosDeFecha`), y después sacar de `Home.razor` la otra mitad, la que depende
+de los filtros, a `FiltrosDeSemana`, que sí se puede probar. Ver "Lo que los
+tests no cubren", más abajo, para lo que queda.
 
 El último bug fue de la misma familia y **tampoco lo cazó ningún test**:
 comparar solo el número de semana para saber si los filtros habían cambiado.
@@ -1126,10 +1126,27 @@ comparaba las tres cosas.
 
 ### Lo que los tests no cubren
 
-**`Home.razor` sigue sin poder probarse.** Hay proyecto de tests para el cliente,
-pero solo alcanza a las clases estáticas: `Formato`, `Texto`, los DTOs. La
-lógica de la pantalla vive en el code-behind de un componente Blazor, y eso
-necesita otra cosa: bUnit, o sacar la lógica fuera del componente.
+**El `code-behind` de `Home.razor` sigue sin poder probarse.** Hay proyecto de
+tests para el cliente, y alcanza a todo lo que son funciones puras: `Formato`,
+`Texto`, los DTOs, y ahora `FiltrosDeSemana`. Lo que queda dentro del
+componente es lo que de verdad necesita Blazor —el render, el temporizador del
+refresco, el estado de "cargando"—, y eso sigue sin cobertura. Para cerrarlo
+haría falta bUnit.
+
+Lo que NO se hizo fue moverlo todo por gusto. Se movió una sola cosa, por un
+motivo concreto: `HaySemanaPendiente` y `SemanaEnPalabras` son las dos funciones
+que han tenido bugs vivos, y estaban en un sitio donde ningún test podía mirar.
+Ahora viven en `FiltrosDeSemana`, con el motivo escrito al lado de cada una, y
+sus dos tests son regresiones de los bugs que tuvieron.
+
+**Los tests no miran la pantalla.** Que `FiltrosDeSemana` acierte no dice que el
+aviso se pinte, ni que el botón lata, ni que el desplegable ofrezca la semana que
+no existe. Eso sigue comprobándose a ojo, y por eso conviene probar la pantalla a
+mano después de tocar el componente.
+
+Lo que sí hacen los tests, y está medido: **metiendo los bugs de vuelta, saltan.**
+No es una cifra de los tests: se comprobó una por una, quitando cada bug de la
+clase y viendo cuál test lo cazaba.
 
 Conviene tener presente el historial, porque explica por qué el hueco importa:
 
@@ -1197,7 +1214,9 @@ WatchMercadoPublico.slnx
     │   ├── Layout/MainLayout.razor # cabecera y pie
     │   ├── Models/                # DTOs (mismos nombres que el JSON del servidor)
     │   ├── Pages/Home.razor       # la pantalla entera: los tres filtros, y su refresco
-    │   ├── Services/              # MercadoPublicoApi, Formato, ThemeService
+    │   ├── Services/              # MercadoPublicoApi, Formato, ThemeService,
+    │   │                          #   FiltrosDeSemana (qué dice la semana,
+    │   │                          #   con sus dos regresiones)
     │   └── wwwroot/               # index.html, css/app.css, icono.svg, marca.svg,
     │                              #   logo-smc.png, LogoChc-blanco.png, LogoChc-oscuro.png
     ├── WatchMercadoPublico.Client.Tests # tests del cliente, sin Blazor

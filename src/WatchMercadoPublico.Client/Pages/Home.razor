@@ -429,11 +429,11 @@
     /// Cuántos días se CONSULTARON de verdad. Distinto del total de la semana:
     /// si la semana aún no termina, no se han preguntado los días futuros, y
     /// decir "se consultaron 5" cuando se preguntaron 2 es mentir.
+    ///
+    /// El texto vive en FiltrosDeSemana, con su plural y su caso sin semana.
     /// </summary>
     private string TextoDiasConsultados =>
-        Semana is null
-            ? "los días hábiles de la semana"
-            : Semana.DiasConsultados == 1 ? "1 día hábil" : $"{Semana.DiasConsultados} días hábiles";
+        FiltrosDeSemana.DiasConsultadosEnPalabras(Semana?.DiasConsultados, haySemana: Semana is not null);
 
     /// <summary>
     /// Días que no respondieron. Es un CONTEO, no la lista de fechas: el aviso
@@ -441,14 +441,8 @@
     /// falte algo de esos días", y ahí un "Sin respuesta: 2026-02-24,
     /// 2026-02-25" se leería como un error.
     /// </summary>
-    private string DiasFallidosEnPalabras
-    {
-        get
-        {
-            var n = Semana?.DiasFallidos ?? 0;
-            return n == 1 ? "1 día" : $"{n} días";
-        }
-    }
+    private string DiasFallidosEnPalabras =>
+        FiltrosDeSemana.DiasFallidosEnPalabras(Semana?.DiasFallidos);
 
     /// El encabezado de cada grupo: "viernes 27 de febrero".
     private static string EncabezadoDelGrupo(IGrouping<DateOnly, Licitacion> grupo) =>
@@ -502,29 +496,19 @@
     private string RangoCorto => $"Semana {SemanaMostrada}";
 
     /// <summary>
-    /// ¿El desplegable apunta a una semana distinta de la que está en pantalla?
-    ///
-    /// Hace falta porque, con la insignia ya quieta, mover el desplegable no
-    /// cambia NADA visible hasta que se pulse "Actualizar". Sin este aviso el
-    /// selector parece roto. Con él se ve qué está pendiente de traer.
-    /// </summary>
-    /// <summary>
     /// ¿El desplegable apunta a algo distinto de lo que está en pantalla?
     ///
-    /// Hay que comparar AÑO, MES y semana, no solo el número de semana. El
-    /// número se repite en todos los periodos: la semana 1 de octubre de 2026 y
-    /// la semana 1 de febrero de 2026 se llaman igual, así que comparando solo
-    /// el número, cambiar de mes o de año se creería que no había cambiado nada
-    /// y el aviso no salía. Los datos en pantalla seguían siendo los de octubre
-    /// mientras el desplegable decía febrero, sin ninguna señal de ello.
-    ///
-    /// Es el mismo error que tuvo <see cref="EsSemanaActual"/> cuando se
-    /// escribió comparando solo la semana. Esa está bien porque compara las tres
-    /// cosas; por eso las dos comprobaciones se dejan juntas y a la vista.
+    /// La comparación vive en FiltrosDeSemana, no aquí. Estaba aquí y era un
+    /// bug vivo: comparaba solo el número de semana, y como el número se
+    /// repite en todos los periodos, cambiar de mes o de año no disparaba el
+    /// aviso. Ningún test lo podía ver porque el code-behind de un componente
+    /// Blazor no se prueba.
     /// </summary>
     private bool HaySemanaPendiente =>
         Semana is not null
-        && (Anio != Semana.Anio || Mes != Semana.Mes || NumeroSemana != Semana.Semana);
+        && FiltrosDeSemana.HayCambioPendiente(
+            Anio, Mes, NumeroSemana,
+            Semana.Anio, Semana.Mes, Semana.Semana);
 
     /// <summary>
     /// El botón de la barra late cuando hay algo pendiente de traer.
@@ -561,28 +545,13 @@
     /// ahora viene FILTERADA: en el año en curso solo llega hasta el mes de hoy.
     /// Con un "Count >= 12" el nombre se caía al número y salía "la semana 4 de
     /// 2 de 2026".
+    ///
+    /// El texto entero vive en FiltrosDeSemana y la lista de meses va como
+    /// argumento. Aquí solo se lee del estado y se le pasa, para que el método no
+    /// pueda quedarse con una copia propia.
     /// </summary>
-    private string SemanaEnPalabras(int anio, int mes, int semana, bool capitalizado = false)
-    {
-        var nombres = Estado?.MesesDisponibles;
-
-        var nombre = nombres is not null && mes is >= 1 && mes <= nombres.Count
-            ? nombres[mes - 1]
-            : TextoDeMesDesconocido(mes);
-
-        if (!capitalizado) nombre = nombre.ToLowerInvariant();
-
-        var palabra = capitalizado ? "Semana" : "semana";
-
-        return $"la {palabra} {semana} en {nombre} de {anio}";
-    }
-
-    /// <summary>
-    /// Mes fuera de la lista. No debería pasar nunca; si pasa, se ve enseguida
-    /// que es un número y no un nombre, en vez de imprimir un texto vacío que
-    /// dejaría "la semana 4 de  de 2026".
-    /// </summary>
-    private static string TextoDeMesDesconocido(int mes) => $"mes {mes}";
+    private string SemanaEnPalabras(int anio, int mes, int semana, bool capitalizado = false) =>
+        FiltrosDeSemana.EnPalabras(anio, mes, semana, Estado?.MesesDisponibles, capitalizado);
 
     /// <summary>
 
