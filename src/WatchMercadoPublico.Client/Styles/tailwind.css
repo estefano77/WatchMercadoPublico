@@ -259,10 +259,15 @@ select option:checked {
    de las esperas largas para quien no la soporta.
    --------------------------------------------------------------------------- */
 
-/* Barrido de luz, como el esqueleto de carga de una tabla. */
+/* Barrido de luz, como el esqueleto de carga de una tabla.
+
+   El recorrido va de -150% a 150% y se queda ahí hasta el final del ciclo: una
+   sola pasada y después la barra se queda solida un rato. Antes iba de -200% a
+   200% sin pausa, y con una sola pasada se cruzaba dos veces por ciclo. */
 @keyframes brillo {
-    0%   { background-position: -200% 0; }
-    100% { background-position: 200% 0; }
+    0%   { background-position: -150% 0; }
+    55%  { background-position: 150% 0; }
+    100% { background-position: 150% 0; }
 }
 
 /* Entrada suave de los resultados: un poco de verticalidad da la sensación de
@@ -298,13 +303,25 @@ select option:checked {
 .esqueleto {
     border-radius: 0.5rem;
     background-color: var(--app-esqueleto);
+    /* El brillo es una BANDA que cruza la barra, no un degradado que la cubre
+       entera. Importa, y no es un detalle de gusto: con el degradado repartido
+       por todo el ancho y el lienzo al doble de la barra, la rampa ocupaba
+       SIEMPRE la barra completa y no quedaba nunca una parte solida. Y como las
+       ocho barras de las tres tarjetas iban en la misma fase, se veía una sola
+       mancha de izquierda a derecha en toda la pantalla, como un fallo de
+       renderizado en vez de un esqueleto.
+
+       Ahora la banda ocupa el 16% de un lienzo de 1,5 veces el ancho: cerca de
+       la cuarta parte de la barra. El resto se queda en el color base. */
     background-image: linear-gradient(
         90deg,
         transparent 0%,
+        transparent 42%,
         var(--app-esqueleto-brillo) 50%,
+        transparent 58%,
         transparent 100%);
-    background-size: 200% 100%;
-    animation: brillo 1.6s ease-in-out infinite;
+    background-size: 150% 100%;
+    animation: brillo 2.1s ease-in-out infinite;
 }
 
 .entrada-suave {
