@@ -696,11 +696,36 @@ Test-Path publicacion\appsettings.Development.json   # debe ser False
 
 | Decisión | Valor | Por qué |
 |---|---|---|
-| Modelo de hosting | **`InProcess`** | Es el **valor por defecto** en ASP.NET Core desde .NET 6. Menos saltos, menos memoria, y `HttpRequest.Protocol` da HTTP/2 de verdad (en out-of-process da HTTP/1.1, porque el salto interno a Kestrel es HTTP/1.1). Esta app no usa nada propio de Kestrel, así que no obliga a nada |
-| Timeout | `<limits activityTimeout="300">` | Ver abajo: **esto es obligatorio**, no cosmético |
-| Ticket | variable de entorno | Nunca en un fichero versionado |
+| Modelo de hosting | **`inprocess`** | Es el **valor por defecto** en ASP.NET Core desde .NET 6. Menos saltos, menos memoria, y `HttpRequest.Protocol` da HTTP/2 de verdad (en out-of-process da HTTP/1.1, porque el salto interno a Kestrel es HTTP/1.1). Esta app no usa nada propio de Kestrel, así que no obliga a nada |
+| Estructura | **copia del `web.config` de un sitio que funciona** | Ver "Por qué este web.config es una copia", que es la parte que costó el despliegue |
+| Ticket y los otros cuatro | variables de entorno, en el `web.config` publicado | Nunca en un fichero versionado |
+| Timeout | **fuera a propósito** | Ver "El timeout, que es una deuda declarada" |
 
-#### El timeout, que es lo que no se puede dejar como está
+#### Por qué este `web.config` es una copia
+
+Porque lo escrito a ojo no levantaba. Una versión anterior tenía cuatro cosas que el
+`web.config` de un sitio que sí funciona, en este mismo equipo, **no tiene**:
+
+| Diferencia | Qué pasó |
+|---|---|
+| `<limits activityTimeout="300" />` | IIS: **HTTP 500.19** |
+| `<httpErrors existingResponse="PassThrough" />` | IIS: **HTTP 500.19** |
+| `<remove name="X-Powered-By" />` | IIS: **HTTP 500.19** |
+| `maxAllowedContentLength="1048576"` | IIS: **HTTP 500.19** |
+
+Con cualquiera de las cuatro, el sitio **no levantaba**, con
+`0x8007000d` y **sin número de línea**, que es lo que hizo el diagnóstico
+imposible durante horas: un error de esquema de verdad da línea y mensaje.
+
+**No se llegó a aislar cuál era la culpable.** Se quitaron las cuatro y se copió
+la estructura del fichero que funciona. Eso deja el sitio arriba, pero **no es
+haber encontrado el bug**, y queda escrito para que no se perda.
+
+La lección está en el historial: el `web.config` que funcionaba estaba a
+`C:\inetpub\GestorArchivos\web.config`, **en el mismo disco y a un comando de
+distancia**, y se leyó tarde.
+
+#### El timeout, que es una deuda declarada
 
 Una semana son **hasta 5 días hábiles** consultados contra Mercado Público, más
 una petición de detalle por licitación, y cada petición a la API se corta a los
@@ -710,12 +735,26 @@ días son **150 s**.
 El límite de IIS son **120 s por defecto**. Y el atributo `requestTimeout` del
 elemento `<aspNetCore>` **no arregla nada en in-process**: la documentación de
 Microsoft dice que no aplica a ese modelo, porque el módulo espera a que la app
-termine. El límite que manda es el de IIS, y se cambia en
-`<system.webServer><limits activityTimeout="300">`.
+termine.
 
-No es un detalle de adorno. La app está montada para tolerar que un día no
-responda, con reintentos y un aviso de "días sin comprobar". Si el corte lo
-provoca IIS y no la API, ese aviso pasa a mentir sobre la causa.
+`<limits activityTimeout="300">` era la forma de subirlo, y **está fuera** porque
+era una de las cuatro diferencias que tumbaban el sitio. Así que **ahora mismo el
+timeout es el de IIS por defecto**, y el sitio funciona pero una semana muy lenta
+se puede cortar a los 120 s.
+
+Subirlo sin tocar el fichero de la aplicación, desde el servidor:
+
+```powershell
+appcmd set config -section:system.webServer/limits /activityTimeout:300
+```
+
+Es a nivel de servidor, así que **afecta a los demás sitios de IIS**. Si se quiere
+solo para este, hay que avenuesar antes en `web.config` y comprobar que el sitio
+sigue levantando.
+
+No es cosmético: la app está montada para tolerar que un día no responda, con
+reintentos y un aviso de "días sin comprobar". Si el corte lo provoca IIS y no la
+API, ese aviso pasa a mentir sobre la causa.
 
 #### Procedimiento
 
