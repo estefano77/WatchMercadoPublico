@@ -16,8 +16,14 @@
        quedaría flotando en mitad del hueco, sin separar nada. La distancia ya
        hace el trabajo.
 
-       Cabe a 320 px: icono 36 + logo 83 + botón 44 + espacios ≈ 199 px con el
-       padding, así que no hay que ocultar nada en móvil. *@
+       OJO, una corrección. Aquí decía que la barra "cabe a 320 px: icono 36 +
+       logo 83 + botón 44 + espacios ≈ 199 px, así que no hay que ocultar nada
+       en móvil". Era una cuenta que se olvidaba de una pieza: el RÓTULO de la
+       marca, que a 1.15rem mide 246 px. Con él, la barra necesita 477 px, no
+       199. En un iPhone 13 (390 px) el nombre salía cortado a media palabra,
+       pegado al logo de SMC.
+
+       El umbral para ocultarlo lo fija Marca.razor, medido, no estimado. *@
     <header class="pt-safe sticky top-0 z-40 border-b border-line bg-canvas/70 backdrop-blur-xl">
         <div class="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
             <a href="/" class="group flex min-w-0 items-center gap-3">

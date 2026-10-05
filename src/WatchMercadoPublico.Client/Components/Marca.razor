@@ -37,11 +37,19 @@
 
     @if (ConTexto)
     {
-        @* Sin subtítulo: solo el nombre, más grande. En pantallas estrechas
-           (320-380 px) el rótulo + el botón de tema no caben y la cabecera se
-           desborda hacia la derecha, así que por debajo de 380 px se oculta el
-           nombre; el icono ya identifica la aplicación. *@
-        <span class="hidden text-[1.15rem] leading-none font-extrabold tracking-tight min-[380px]:inline sm:text-[1.3rem]">
+        @* Sin subtítulo: solo el nombre, más grande.
+
+           EL UMBRAL ESTÁ MEDIDO, NO SACADO A OJO. Con el rótulo a 1.15rem la
+           cabecera necesita 477 px: 32 de padding, 36 del icono, 12 de hueco,
+           246 del rótulo, 12 de hueco y 139 del logo de SMC con el botón de
+           tema. Antes el umbral estaba en 380 px, y en un iPhone 13 (390 px)
+           el nombre salía a medias: "WatchMercadoPub" pegado al logo de SMC,
+           cortado dentro de la palabra.
+
+           Que no quepa el nombre no es una pérdida: el icono ya identifica la
+           aplicación, y el logo de SMC sí se queda, que es lo que el usuario
+           pidió que se viera. Por debajo de 480 px va solo el icono. *@
+        <span class="hidden text-[1.15rem] leading-none font-extrabold tracking-tight min-[480px]:inline sm:text-[1.3rem]">
             Watch<span class="marca-texto">MercadoPublico</span>
         </span>
     }

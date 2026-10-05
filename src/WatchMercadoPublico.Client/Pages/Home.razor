@@ -50,9 +50,17 @@
     @if (Estado is not { Servible: false })
     {
         <section class="rounded-2xl border border-line bg-surface p-4">
-            <div class="flex flex-wrap items-end gap-3">
+            @* EN MÓVIL ES UNA REJILLA DE DOS COLUMNAS, y no el flex con wrap que
+               había. Con wrap, en 390 px, "Año" y "Mes" cabían juntos (151 px
+               cada uno) y la semana se quedaba con 169 px al lado del botón,
+               con "Semana 2 - 5 al 11 de" y el final cortado. Aquí la semana
+               ocupa las dos columnas, que es lo que necesita para verse entera,
+               y el botón va a lo ancho debajo, que además es mejor para el
+               dedo. A partir de sm (640 px) se vuelve el flex de antes, con
+               flex-1, porque ahí sí caben los cuatro. *@
+            <div class="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:items-end">
 
-                <div class="min-w-[7rem] flex-1">
+                <div class="min-w-0 sm:min-w-[7rem] sm:flex-1">
                     <label for="f-anio" class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted">
                         Año
                     </label>
@@ -64,7 +72,7 @@
                     </select>
                 </div>
 
-                <div class="min-w-[9rem] flex-1">
+                <div class="min-w-0 sm:min-w-[9rem] sm:flex-1">
                     <label for="f-mes" class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted">
                         Mes
                     </label>
@@ -82,7 +90,7 @@
                     </select>
                 </div>
 
-                <div class="min-w-[9rem] flex-1">
+                <div class="col-span-2 min-w-0 sm:col-span-1 sm:min-w-[9rem] sm:flex-1">
                     <label for="f-semana" class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted">
                         Semana
                     </label>
@@ -95,7 +103,7 @@
                 </div>
 
                 <button type="button"
-                        class="boton-actualizar @ClaseBotonActualizar"
+                        class="boton-actualizar @ClaseBotonActualizar col-span-2 sm:col-span-1"
                         @onclick="ActualizarAsync"
                         disabled="@Cargando">
                     @if (Cargando)
@@ -274,12 +282,19 @@
         {
 
             @* --- Cabecera de resultados --- *@
-            <div class="flex flex-wrap items-center justify-between gap-2">
-                <div class="flex items-center gap-2">
-                    <h2 class="text-base font-bold text-ink">
+            @* EN MÓVIL ESTA FILA SE APILA, y no por gusto: medido en un iPhone 13
+               (390 px) en una sola línea de flex, "3 publicaciones" se partía
+               después del número y la insignia "SEMANA 2" se partía en dos
+               renglones, de 37 px de alto. Partir una insignia de dos palabras
+               es lo que hace que una pantalla parezca rota aunque no falte
+               nada. En escritorio sigue igual que antes, en una fila con el
+               sello a la derecha. *@
+            <div class="flex flex-col gap-1 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-2">
+                <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <h2 class="whitespace-nowrap text-base font-bold text-ink">
                         @FiltrosDeSemana.Publicaciones(Semana.Total)
                     </h2>
-                    <span class="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[0.68rem] font-bold text-emerald-600 uppercase dark:text-emerald-400">
+                    <span class="shrink-0 whitespace-nowrap rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[0.68rem] font-bold text-emerald-600 uppercase dark:text-emerald-400">
                         @RangoCorto
                     </span>
 

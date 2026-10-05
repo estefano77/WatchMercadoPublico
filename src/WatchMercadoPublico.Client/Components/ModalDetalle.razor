@@ -162,7 +162,7 @@
                                     Ítems adjudicados
                                 </h3>
                                 <div class="overflow-hidden rounded-2xl border border-line">
-                                    <table class="w-full border-collapse text-left text-xs">
+                                    <table class="tabla-eltos w-full border-collapse text-left text-xs">
                                         <thead class="bg-field text-[0.62rem] tracking-wide text-muted uppercase">
                                             <tr>
                                                 <th scope="col" class="px-3 py-2 font-bold">Ítem</th>
@@ -191,13 +191,17 @@
                                                             </p>
                                                         }
                                                     </td>
-                                                    <td class="px-3 py-2.5 text-right tabular-nums text-ink-soft">
+                                                    @* data-label: en móvil la tabla se apila y cada
+                                                       celda necesita su nombre a la izquierda. El texto
+                                                       va en el marcado una sola vez, no duplicado en un
+                                                       pseudoelemento de cada fila. *@
+                                                    <td data-label="Cant." class="px-3 py-2.5 text-right tabular-nums text-ink-soft">
                                                         @Formato.Cantidad(item.CantidadEfectiva)
                                                     </td>
-                                                    <td class="px-3 py-2.5 text-right tabular-nums text-ink-soft">
+                                                    <td data-label="Unitario" class="px-3 py-2.5 text-right tabular-nums text-ink-soft">
                                                         @Formato.Monto(item.MontoUnitario)
                                                     </td>
-                                                    <td class="px-3 py-2.5 text-right font-bold tabular-nums text-ink">
+                                                    <td data-label="Subtotal" class="px-3 py-2.5 text-right font-bold tabular-nums text-ink">
                                                         @Formato.Monto(item.Subtotal)
                                                     </td>
                                                 </tr>

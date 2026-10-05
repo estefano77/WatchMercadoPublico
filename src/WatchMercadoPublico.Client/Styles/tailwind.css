@@ -389,7 +389,11 @@ select option:checked {
 
 .campo {
     width: 100%;
-    min-height: 42px;
+    /* 44 px, no 42. Es el mínimo que pide iOS para un objetivo táctil, y 42
+       son 2 px por debajo: medido en un iPhone 13, los desplegables quedaban
+       en 42 y fallaban el mínimo sin que se notara. En escritorio 44 se ve
+       igual de bien, así que no hace falta hacerlo solo en móvil. */
+    min-height: 44px;
     border-radius: 0.75rem;
     border: 1px solid var(--app-line);
     background-color: var(--app-field);
@@ -409,7 +413,8 @@ select option:checked {
 
 .boton-actualizar {
     display: inline-flex;
-    min-height: 42px;
+    /* 44 px por lo mismo que .campo: el mínimo táctil de iOS. */
+    min-height: 44px;
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
@@ -499,6 +504,82 @@ select option:checked {
 
 .carril-chips > * {
     scroll-snap-align: center;
+}
+
+/* ---------------------------------------------------------------------------
+   Tabla de ítems adjudicados, en móvil.
+
+   MEDIDO en un iPhone 13: con cuatro columnas en 333 px, la de Ítem se quedaba
+   en 86 px, y un nombre de producto normal se partía en cuatro renglones con el
+   proveedor en otros cuatro debajo. La tabla no estaba "estrecha": estaba
+   ilegible.
+
+   Aquí cada ítem se apila en bloque, con la etiqueta a la izquierda y el valor
+   a la derecha. Se descartó el scroll horizontal a propósito: el modal ya
+   scrollea en vertical, y meter un segundo eje dentro obliga a mover el dedo en
+   diagonal, que es donde más cuesta acertar en un móvil.
+
+   Desde 640 px se vuelve a ser tabla de verdad, que es donde se lee mejor. Las
+   etiquetas salen de data-label, que es lo que pone el marcado en cada celda:
+   así el texto se escribe una vez y no hay dos versiones que se puedan
+   desincronizar.
+   --------------------------------------------------------------------------- */
+@media (max-width: 639px) {
+    .tabla-eltos thead {
+        display: none;
+    }
+
+    .tabla-eltos,
+    .tabla-eltos tbody,
+    .tabla-eltos tfoot,
+    .tabla-eltos tr,
+    .tabla-eltos td {
+        display: block;
+        width: 100%;
+    }
+
+    .tabla-eltos tr {
+        border-top: 1px solid var(--app-line);
+        padding: 0.5rem 0;
+    }
+
+    .tabla-eltos tbody tr:first-child {
+        border-top: 0;
+    }
+
+    .tabla-eltos td {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.1rem 0.75rem;
+    }
+
+    /* El nombre del producto va arriba del todo y sin etiqueta: es lo que se
+       busca cuando se abre el modal, y con una "Ítem" al lado solo estorba. */
+    .tabla-eltos td:first-child {
+        display: block;
+        padding-bottom: 0.3rem;
+    }
+
+    .tabla-eltos td::before {
+        content: attr(data-label);
+        flex: none;
+        color: var(--app-muted);
+        font-size: 0.62rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+
+    .tabla-eltos td:first-child::before {
+        content: none;
+    }
+
+    .tabla-eltos tfoot tr {
+        border-top: 2px solid var(--app-line-strong);
+        background-color: var(--app-field);
+    }
 }
 
 /* ---------------- Resaltado de la búsqueda ----------------
