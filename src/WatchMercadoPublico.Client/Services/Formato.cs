@@ -171,6 +171,12 @@ public static class Formato
     /// <summary>
     /// Minúsculas y sin tildes, para comparar sin que estorben tildes.
     ///
+    /// OJO: hay que bajar a minúscula en las DOS ramas. Antes solo se hacía en
+    /// la de los caracteres acentuados, y el resto se copiaba tal cual, con su
+    /// mayúscula: "Licitación" quedaba como "Licitacion" y no se encontraba
+    /// buscando "licitacion". Como casi todos escriben sin tildes, el resaltado
+    /// de la búsqueda no funcionaba en cuanto la palabra empezaba por mayúscula.
+    ///
     /// Tabla explícita en vez de RemoveDiacritics() o NormalizationForm.FormD:
     /// no está disponible en este runtime, y FormD además reserva una cadena
     /// nueva por comparación. El filtro corre en cada tecla y sobre cada
@@ -185,7 +191,7 @@ public static class Formato
         for (var i = 0; i < texto.Length; i++)
         {
             var sustituto = SinAcentuar(texto[i]);
-            buffer[i] = sustituto != '\0' ? char.ToLowerInvariant(sustituto) : texto[i];
+            buffer[i] = char.ToLowerInvariant(sustituto != '\0' ? sustituto : texto[i]);
         }
 
         return new string(buffer);

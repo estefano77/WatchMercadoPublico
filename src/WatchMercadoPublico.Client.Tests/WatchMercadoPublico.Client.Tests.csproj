@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>WatchMercadoPublico.Client.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <!--
+    ===================================================================
+    Por qué existe este proyecto
+
+    El servidor tenía tests y el cliente no. Esa falta de simetría costó caro:
+    TRES bugs de fechas estaban en el cliente y ninguno pudo ser visto por un
+    test, porque no había ninguno que mirara. El más caro de todos, el array de
+    días ordenado por lunes pero indexado por DayOfWeek, que en .NET empieza por
+    DOMINGO, y un viernes salía como "sábado" en pantalla.
+
+    La reacción inmediata fue mover el texto de las fechas al servidor, que sí
+    se prueba. Eso quitó el bug, pero no el hueco: aquí sigue habiendo lógica
+    pura sin comprobar, y Formato.cs es la parte más densa.
+
+    Lo que se puede testear desde aquí es lo que NO depende de Blazor: clases
+    estáticas y funciones puras. El componente Home.razor sigue sin poder
+    probarse aquí, porque su lógica vive en el code-behind de un .razor.
+
+    Esto NO cubre la pantalla. Cubre el texto que la pantalla pinta.
+    ===================================================================
+  -->
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WatchMercadoPublico.Client\WatchMercadoPublico.Client.csproj" />
+  </ItemGroup>
+
+</Project>

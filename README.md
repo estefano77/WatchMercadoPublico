@@ -1028,10 +1028,11 @@ Iconos de [Lucide](https://lucide.dev) (licencia ISC). Tipografía
 dotnet test
 ```
 
-**80 tests**, todos en verde. **No hay que tener ticket, ni red, ni la API en
-pie.** Eso no es una comodidad: es lo que hace posible testear. Un método que
-hace una petición no se puede comprobar sin pedirla, y para la aplicación casi
-todo lo que se rompió no necesitaba la API para estar mal.
+**104 tests** (80 del servidor, 24 del cliente), todos en verde. **No hay que
+tener ticket, ni red, ni la API en pie.** Eso no es una comodidad: es lo que hace
+posible testear. Un método que hace una petición no se puede comprobar sin
+pedirla, y para la aplicación casi todo lo que se rompió no necesitaba la API para
+estar mal.
 
 Por eso `ConstruirUrlDia` y `ConstruirError` están extraídos del cliente como
 funciones estáticas, aunque solo los use un sitio: es el requisito para poder
@@ -1070,6 +1071,33 @@ comparar solo el número de semana para saber si los filtros habían cambiado.
 Como el número de semana se repite en todos los periodos, cambiar de mes o de
 año no disparaba el aviso. Era una línea, y estaba a dos líneas de otra que sí
 comparaba las tres cosas.
+
+### Lo que los tests no cubren
+
+**`Home.razor` sigue sin poder probarse.** Hay proyecto de tests para el cliente,
+pero solo alcanza a las clases estáticas: `Formato`, `Texto`, los DTOs. La
+lógica de la pantalla vive en el code-behind de un componente Blazor, y eso
+necesita otra cosa: bUnit, o sacar la lógica fuera del componente.
+
+Conviene tener presente el historial, porque explica por qué el hueco importa:
+
+Los **tres** bugs de fechas estaban **en el cliente**, y ninguno pudo ser visto
+por un test, porque no había ninguno que mirara. El más caro de todos, el array
+de días ordenado por lunes pero indexado por `DayOfWeek`, que en .NET empieza por
+domingo, y por eso un viernes salía como "sábado" en pantalla. La reacción
+inmediata fue mover el texto de las fechas al servidor, donde sí se prueba.
+
+Y el proyecto de tests del cliente, cuando se creó, **encontró un bug real a la
+primera**: `Formato.SinAcentos` bajaba a minúscula solo los caracteres a los que
+les quitaba la tilde, y el resto los copiaba con su mayúscula. Así que "Licitación"
+quedaba como "Licitacion" y no se encontraba buscando "licitacion": **el
+resaltado de la búsqueda no funcionaba en cuanto la palabra empezaba por
+mayúscula**, que es justo el caso normal en un nombre de licitación. Ese bug
+llevaba tiempo ahí y solo apareció al escribir el test.
+
+Un test de regresión que nunca ha fallado no demuestra nada, así que el del
+resaltado se validó **volviendo a romper el código a propósito**: sin el
+`ToLowerInvariant` en la segunda rama, falla.
 
 ### La prueba de que un test sirve
 
@@ -1120,6 +1148,7 @@ WatchMercadoPublico.slnx
     │   ├── Services/              # MercadoPublicoApi, Formato, ThemeService
     │   └── wwwroot/               # index.html, css/app.css, icono.svg, marca.svg,
     │                              #   logo-smc.png, LogoChc-blanco.png, LogoChc-oscuro.png
+    ├── WatchMercadoPublico.Client.Tests # tests del cliente, sin Blazor
     ├── WatchMercadoPublico.Server # la API y el hosting de la SPA
     │   ├── Endpoints/             # LicitacionesEndpoints (/estado, /semana, detalle)
     │   ├── Models/                # opciones y DTOs
@@ -1129,7 +1158,7 @@ WatchMercadoPublico.slnx
     │   │                          #   TextosDeFecha (días y meses en palabras),
     │   │                          #   DatosDemo
     │   └── web.config
-    └── WatchMercadoPublico.Server.Tests # tests, sin red y sin ticket
+    └── WatchMercadoPublico.Server.Tests # tests del servidor, sin red y sin ticket
 ```
 
 `DatosDemo.cs` y el modo `demo` son **una ayuda de desarrollo**, no parte de la

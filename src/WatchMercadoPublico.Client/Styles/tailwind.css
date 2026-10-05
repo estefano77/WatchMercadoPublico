@@ -303,25 +303,38 @@ select option:checked {
    que pediste, pero el aviso solo no basta: el lector tiene que convertir eso
    en un clic, y un clic cae donde algo se mueve. Por eso el botón late.
 
-   Es un anillo que se abre y se cierra, no un parpadeo de opacidad: un
+   PERO EL LATIDO NO ES LO UNICO. Con prefers-reduced-motion la animación se
+   apaga, y entonces el botón se quedaba con su aspecto de siempre y lo único
+   que señalaba la espera era el texto del aviso. Un anillo fijo se distingue
+   sin movimiento, así que va siempre, se anime o no.
+
+   El anillo es del mismo ámbar que el aviso a propósito: así los dos se leen
+   como una sola cosa en vez de como dos avisos sueltos.
+
+   El anillo y el latido no compiten porque uno es outline y el otro es
+   box-shadow.
+
+   El latido es un anillo que se abre y se cierra, no un parpadeo de opacidad: un
    parpadeo sobre un botón con texto encima lo hace ilegible en el punto
    justo en que tiene que leerse.
    --------------------------------------------------------------------------- */
 
 @keyframes llamar-atencion {
-    0%, 100% { box-shadow: 0 0 0 0 rgb(139 92 246 / 0.55); }
-    70%      { box-shadow: 0 0 0 10px rgb(139 92 246 / 0); }
+    0%, 100% { box-shadow: 0 0 0 0 rgb(245 158 11 / 0.6); }
+    70%      { box-shadow: 0 0 0 10px rgb(245 158 11 / 0); }
 }
 
 .boton-actualizar-pendiente {
+    outline: 2px solid #f59e0b;
+    outline-offset: 2px;
     animation: llamar-atencion 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
-/* Cuando el botón está busy no late: ya está girando y hay que evitar dos
-   animaciones peleándose por el mismo elemento. */
+/* Cuando el botón está ocupado no late: ya está girando el icono y dos
+   animaciones peleándose por el mismo elemento salen mal. El anillo se queda,
+   porque el botón sigue siendo lo que hay que esperar. */
 .boton-actualizar-pendiente:disabled {
     animation: none;
-    box-shadow: none;
 }
 
 /* ---------------------------------------------------------------------------
