@@ -97,4 +97,20 @@ public static class FiltrosDeSemana
         var n = diasFallidos ?? 0;
         return n == 1 ? "1 día" : $"{n} días";
     }
+
+    /// <summary>
+    /// El contador de la cabecera: "1 publicación", "7 publicaciones".
+    ///
+    /// "publicación" y no "licitación" porque lo que se cuenta es lo que se
+    /// PUBLICÓ en la semana, que es justo lo que el usuario pidió mirar. Y
+    /// "novedad", que era lo que decía antes, suena a hecho reciente: en
+    /// pantalla hay semanas de hace meses y todas sus publicaciones son
+    /// viejas, así que la palabra no era cierta.
+    ///
+    /// Vive aquí y no en el componente porque salía en DOS sitios —el contador
+    /// grande y el encabezado de cada grupo por día— y son dos copias del
+    /// mismo plural. Es el patrón que ya ha dado dos bugs en este proyecto.
+    /// </summary>
+    public static string Publicaciones(int total) =>
+        total == 1 ? "1 publicación" : $"{total} publicaciones";
 }

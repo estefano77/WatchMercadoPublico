@@ -10,7 +10,7 @@
     @* Encabezado. El título NO se toca: sigue siendo "Novedades en Mercado     *@
     @* Público". Lo que se cambió es lo que va debajo, que antes repetía        *@
     @* empresa y periodo y ahora solo dice para qué empresa se muestran las     *@
-    @* licitaciones. El periodo se mudó junto al contador de novedades.          *@
+    @* licitaciones. El periodo se mudó junto al contador de publicaciones.      *@
     @* ------------------------------------------------------------------ *@
     <section>
         <h1 class="text-2xl font-extrabold tracking-tight sm:text-3xl">
@@ -277,7 +277,7 @@
             <div class="flex flex-wrap items-center justify-between gap-2">
                 <div class="flex items-center gap-2">
                     <h2 class="text-base font-bold text-ink">
-                        @(Semana.Total == 1 ? "1 novedad" : $"{Semana.Total} novedades")
+                        @FiltrosDeSemana.Publicaciones(Semana.Total)
                     </h2>
                     <span class="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[0.68rem] font-bold text-emerald-600 uppercase dark:text-emerald-400">
                         @RangoCorto
@@ -330,7 +330,7 @@
                             <Icon Name="calendario" Size="13" />
                             @EncabezadoDelGrupo(grupo)
                             <span class="font-normal normal-case tracking-normal text-muted opacity-70">
-                                (@grupo.Count() @(grupo.Count() == 1 ? "novedad" : "novedades"))
+                                (@FiltrosDeSemana.Publicaciones(grupo.Count()))
                             </span>
                         </h3>
 

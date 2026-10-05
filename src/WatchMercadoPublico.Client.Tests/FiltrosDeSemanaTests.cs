@@ -163,4 +163,25 @@ public class FiltrosDeSemanaTests
         Assert.Equal("0 días", FiltrosDeSemana.DiasFallidosEnPalabras(0));
         Assert.Equal("0 días", FiltrosDeSemana.DiasFallidosEnPalabras(null));
     }
+
+    [Fact]
+    public void El_contador_dice_publicaciones_y_no_novedades()
+    {
+        Assert.Equal("1 publicación", FiltrosDeSemana.Publicaciones(1));
+        Assert.Equal("2 publicaciones", FiltrosDeSemana.Publicaciones(2));
+        Assert.Equal("7 publicaciones", FiltrosDeSemana.Publicaciones(7));
+
+        // "novedad" era lo que decía, y suena a hecho reciente. En pantalla hay
+        // semanas de hace meses, así que la palabra no era cierta: lo que se
+        // cuenta es lo que se PUBLICÓ en esa semana, viejo o no.
+        Assert.DoesNotContain("novedad", FiltrosDeSemana.Publicaciones(1) + FiltrosDeSemana.Publicaciones(3));
+    }
+
+    [Fact]
+    public void El_contador_no_decide_publicacion_en_singular_por_el_cero()
+    {
+        // El cero es plural. Es el caso que un "== 1" mal puesto convierte en
+        // "1 publicación" y queda mintiendo: no se publicó ninguna.
+        Assert.Equal("0 publicaciones", FiltrosDeSemana.Publicaciones(0));
+    }
 }
