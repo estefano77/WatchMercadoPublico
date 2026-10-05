@@ -215,22 +215,6 @@
          2. El arranque, antes de saber si la API está servible. *@
     @if (Estado is not { Servible: false })
     {
-        @* Aviso de días que aún no han llegado. Va FUERA de la cadena de
-           estados a propósito: si estuviera dentro de "hay resultados", una
-           semana vacía y a medio terminar no lo enseñaría, y es justo el caso
-           en que hace falta. No es un fallo: es que el día no ha llegado. *@
-        @if (Semana is { AFuturo: true })
-        {
-            <p class="entrada-suave rounded-2xl border border-line bg-field px-4 py-3 text-sm leading-relaxed text-ink-soft">
-                @Semana.DiasPendientes
-                @(Semana.DiasPendientes == 1
-                    ? "día hábil de esta semana todavía no ha llegado"
-                    : "días hábiles de esta semana todavía no han llegado"),
-                así que no se han consultado. Es normal: la semana aún no
-                termina. Esta pantalla se actualiza sola.
-            </p>
-        }
-
         @if (Ocupado)
         {
             @* Esqueleto en vez de un simple "cargando": el usuario ve que hay
