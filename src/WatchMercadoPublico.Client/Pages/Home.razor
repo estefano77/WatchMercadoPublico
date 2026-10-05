@@ -50,15 +50,34 @@
     @if (Estado is not { Servible: false })
     {
         <section class="rounded-2xl border border-line bg-surface p-4">
-            @* EN MÓVIL ES UNA REJILLA DE DOS COLUMNAS, y no el flex con wrap que
-               había. Con wrap, en 390 px, "Año" y "Mes" cabían juntos (151 px
-               cada uno) y la semana se quedaba con 169 px al lado del botón,
-               con "Semana 2 - 5 al 11 de" y el final cortado. Aquí la semana
-               ocupa las dos columnas, que es lo que necesita para verse entera,
-               y el botón va a lo ancho debajo, que además es mejor para el
-               dedo. A partir de sm (640 px) se vuelve el flex de antes, con
-               flex-1, porque ahí sí caben los cuatro. *@
-            <div class="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:items-end">
+            @* EN MÓVIL ES UNA REJILLA, y no el flex con wrap que había. Con wrap, en
+               390 px, "Año" y "Mes" cabían juntos (151 px cada uno) y la semana
+               se quedaba con 169 px al lado del botón, con "Semana 2 - 5 al 11
+               de" y el final cortado.
+
+               DOS COLUMNAS, Y UNA SOLA POR DEBAJO DE 350 px. Los cortes están
+               medidos con la fuente real del desplegable (14 px), no a ojo. El
+               texto más largo es "Septiembre" (80 px) en el mes y "Semana 5 -
+               28 al 30 de septiembre" (230 px) en la semana; dentro del
+               desplegable el texto dispone del ancho que queda tras el relleno
+               y la flecha, que son 44 px. En dos columnas el mes se recorta
+               desde 324 px y la semana desde 350, así que por debajo de 350 se
+               apila a una columna.
+
+               RESIDUO, DICHO CLARO. Con una sola columna el área de texto del
+               desplegable de semana es de 198 px a 320 px, y 230 px a 280 px,
+               frente a los 230 que necesita la etiqueta más larga: por debajo
+               de ~350 px se recorta el FINAL DEL RANGO. Se deja así a
+               propósito. El número de semana va al principio y es lo que
+               identifica la semana; el rango se vuelve a ver arriba, en el
+               periodo y en el encabezado de cada día; y al abrir la lista el
+               desplegable enseña el texto entero. Hacer la letra más pequeña
+               para que quepa justo en esos 40 px sería empeorar el móvil para
+               tapar un recorte que el usuario no pierde información.
+
+               A partir de sm (640 px) se vuelve el flex de antes, con flex-1,
+               porque ahí sí caben los cuatro. *@
+            <div class="grid grid-cols-1 gap-3 min-[350px]:grid-cols-2 sm:flex sm:flex-wrap sm:items-end">
 
                 <div class="min-w-0 sm:min-w-[7rem] sm:flex-1">
                     <label for="f-anio" class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted">
@@ -90,7 +109,7 @@
                     </select>
                 </div>
 
-                <div class="col-span-2 min-w-0 sm:col-span-1 sm:min-w-[9rem] sm:flex-1">
+                <div class="min-w-0 min-[350px]:col-span-2 sm:col-span-1 sm:min-w-[9rem] sm:flex-1">
                     <label for="f-semana" class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted">
                         Semana
                     </label>
@@ -103,7 +122,7 @@
                 </div>
 
                 <button type="button"
-                        class="boton-actualizar @ClaseBotonActualizar col-span-2 sm:col-span-1"
+                        class="boton-actualizar @ClaseBotonActualizar min-[350px]:col-span-2 sm:col-span-1"
                         @onclick="ActualizarAsync"
                         disabled="@Cargando">
                     @if (Cargando)
