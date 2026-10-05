@@ -46,6 +46,12 @@
     Solo crea el sitio y la configuración, sin volver a publicar. Para cuando la
     carpeta física ya está subida a mano.
 
+    OJO: reutiliza la carpeta ENTERA, incluido el web.config. Si el web.config
+    del repositorio ha cambiado, hay que publicar igualmente: con esta opcion se
+    queda el viejo y el sitio no arranca con un 500.19 que no dice por que. Pasó
+    de verdad, y por eso el paso 3 comprueba la estructura del web.config y no
+    solo que el XML cargue.
+
 .PARAMETER PuertoDePrueba
     Puerto para verificar la web antes de abrirla en el navegador. Por defecto
     uno libre.
@@ -403,6 +409,23 @@ if ($SaltarPublicacion) {
         exit 1
     }
     Write-Ok 'Se reaprovecha lo ya publicado'
+    # Aviso, porque esto es lo que mas ha costado: la carpeta reutilizada lleva
+    # SU web.config, que puede ser mas viejo que el del repositorio. El codigo no
+    # cambia al reutilizar, pero la configuracion de IIS si, y no tenerla
+    # actualizada da un 500.19 sin explicacion.
+    $webConfigRepo = Join-Path $raiz 'src\WatchMercadoPublico.Server\web.config'
+    $webConfigPublicado = Join-Path $PhysicalPath 'web.config'
+    if ((Test-Path $webConfigRepo) -and (Test-Path $webConfigPublicado)) {
+        $delRepo = ([xml][System.IO.File]::ReadAllText($webConfigRepo)).configuration.'system.webServer'
+        $delPublicado = ([xml][System.IO.File]::ReadAllText($webConfigPublicado)).configuration.'system.webServer'
+        if ($delRepo.ChildNodes.Count -ne $delPublicado.ChildNodes.Count -or
+            $delRepo.httpProtocol -ne $delPublicado.httpProtocol -or
+            $delRepo.aspNetCore.hostingModel -ne $delPublicado.aspNetCore.hostingModel) {
+            Write-Aviso 'El web.config de la carpeta publicada NO coincide con el del repositorio.'
+            Write-Aviso 'Con -SaltarPublicacion se reutiliza ese, no el del repo. Si has cambiado'
+            Write-Aviso 'el del repo, quita -SaltarPublicacion y publica de nuevo.'
+        }
+    }
 } else {
     Write-Info 'Compilando el CSS (npm run css)'
     Push-Location $raiz
@@ -526,6 +549,12 @@ if (-not (Test-Path $webConfig)) {
         }
 
         # El error concreto que ya se ha dado dos veces, comprobado uno a uno.
+        #
+        # elseif, no un if aparte: si httpProtocol esta mal colocado, tampoco
+        # se encuentra como hijo directo, y con dos "if" seguidos salia un ERROR
+        # diciendo que estaba dentro de security y acto seguido un AVISO
+        # diciendo que no estaba. Los dos eran verdad y juntos no significaban
+        # nada, que es la peor forma de avisar.
         if ($raizSw.security.httpProtocol) {
             Write-Erro '<httpProtocol> esta dentro de <security>, y no puede estarlo.'
             Write-Host '         Tiene que ser hermano de <security>. Por dentro sigue siendo' -ForegroundColor DarkGray
@@ -533,7 +562,7 @@ if (-not (Test-Path $webConfig)) {
             Write-Host '         solo lo ve IIS, cuando ya es tarde.' -ForegroundColor DarkGray
             $fallos++
         }
-        if (-not $raizSw.httpProtocol) {
+        elseif (-not $raizSw.httpProtocol) {
             Write-Aviso 'No hay <httpProtocol>. Se pierden las cabeceras de seguridad, pero el sitio funciona.'
         }
         elseif (-not $raizSw.httpProtocol.customHeaders) {
