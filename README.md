@@ -132,11 +132,42 @@ El fichero queda fuera del repositorio (está en `.gitignore`) y **no se publica
 
 ### 4. Arrancar
 
+Hay un script, y es la vía normal:
+
 ```powershell
-dotnet run --project src\WatchMercadoPublico.Server
+.\scripts\arrancar.ps1
 ```
 
-Abre <http://localhost:5xxx> y escribe el RUT de la empresa.
+Por defecto arranca en **modo demo**: datos inventados, sin gastar cupo del
+ticket y sin depender de que la API de Mercado Público esté en pie. Para trabajar
+en la interfaz es lo que hay que usar.
+
+```powershell
+.\scripts\arrancar.ps1 -Modo v1        # datos reales, consume cupo del ticket
+.\scripts\arrancar.ps1 -SinCss         # no recompila Tailwind
+.\scripts\arrancar.ps1 -Puerto 5080    # por defecto busca uno libre
+```
+
+Hace, en este orden: comprueba que estén `dotnet` y `npm`, compila el CSS,
+detiene la instancia anterior si la hay, publica, arranca y **espera a que el
+servidor responda** antes de imprimir la URL. Se cierra con el `Stop-Process -Id`
+que imprime.
+
+Tres cosas que el script hace y que conviene no perder si se toca:
+
+- **Publica, no compila.** El target `SuperponerClienteBlazor` corre solo con
+  `PublishDir` informado, y sin él la aplicación se queda en "Cargando".
+- **Arranca con la ruta de publicación como directorio de trabajo.** Sin eso el
+  proceso toma como raíz el directorio desde el que se lanzó, no encuentra el
+  `wwwroot` y todo lo que no sea `/api` responde 404. El único síntoma es un 404
+  en la raíz, que no lleva a ninguna parte.
+- **No deja el ticket puesto en la sesión.** Pone las variables de entorno,
+  arranca el proceso y las restaura. Si no, un `-Modo v1` dejaría la credencial
+  en el entorno de la terminal.
+
+El ticket **no está en el script**. En modo `v1` se lee de
+`appsettings.Development.json` y se pasa por variable de entorno, porque ese
+fichero no se publica a propósito.
 
 ### 5. Tests
 
@@ -151,23 +182,28 @@ Ver [Tests](#tests) para qué hay que leerlos antes de tocar nada.
 
 ## Probarlo sin ticket: modo demo
 
-Para ver la interfaz antes de tener el ticket (o para probar sin gastar el cupo):
+Es el modo por defecto del script de arranque, así que la forma normal de verlo
+es:
 
-```jsonc
-"MercadoPublico": { "ModoConsulta": "demo" }
+```powershell
+.\scripts\arrancar.ps1
 ```
 
-O sin tocar ficheros, con una variable de entorno:
+Y sale lo mismo que si se fuerza a mano, con una variable de entorno:
 
 ```powershell
 $env:MercadoPublico__ModoConsulta = "demo"
-dotnet run --project src\WatchMercadoPublico.Server
+.\scripts\arrancar.ps1 -Modo demo
 ```
 
-Devuelve **datos inventados** (47 licitaciones falsas, semilla fija) y un aviso
-naranja lo dice en pantalla, porque confundirlo con datos reales sería un fallo
-grave. El RUT de ejemplo es `76.123.456-0`; la pantalla lo muestra y lo rellena
-al pulsarlo.
+Devuelve **datos inventados** (semilla fija) y un aviso naranja lo dice en
+pantalla, porque confundirlo con datos reales sería un fallo grave. El RUT de
+ejemplo es `76.123.456-0`; la pantalla lo muestra y lo rellena al pulsarlo.
+
+El script le pone un **nombre de empresa falso** con la misma extensión que uno
+real, para que al ajustar la interfaz se vea cómo se parte el título y el
+subtítulo. El que trae `appsettings.json` es "EMPRESA SIN CONFIGURAR", y con ese
+texto no se puede juzgar nada del diseño.
 
 **En producción tiene que estar en `v1`.**
 
@@ -1072,6 +1108,7 @@ WatchMercadoPublico.slnx
 ├── Directory.Build.props          # compresión desactivada (los dos que se publican)
 ├── nuget.config
 ├── package.json                   # scripts de Tailwind
+├── scripts/arrancar.ps1           # compila, publica y levanta en local
 ├── secrets/                       # plantilla del ticket (fuera del repo)
 └── src
     ├── WatchMercadoPublico.Client # la SPA
