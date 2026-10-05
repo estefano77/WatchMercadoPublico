@@ -266,6 +266,20 @@ select option:checked {
     to { transform: rotate(360deg); }
 }
 
+/* Entrada de la tarjeta del esqueleto: un poco de desplazamiento hacia arriba
+   además del Fundido. Sin el desplazamiento las tarjetas aparecen sitio y se
+   ve menos que se estan formando; con el, se lee como que bajan a su sitio. */
+@keyframes entrar-esqueleto {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
 .esqueleto {
     border-radius: 0.5rem;
     background-color: var(--app-field);
@@ -371,6 +385,7 @@ select option:checked {
 
 @media (prefers-reduced-motion: reduce) {
     .esqueleto,
+    .tarjeta-esqueleto,
     .entrada-suave,
     .punto-pulsante,
     .icono-girando,
@@ -437,13 +452,46 @@ select option:checked {
     cursor: default;
 }
 
-/* Tarjeta del esqueleto de carga. */
+/* ---------------------------------------------------------------------------
+   Esqueleto de carga.
+
+   ESTE ESQUELETO COPIA LA ANATOMIA DE LA TARJETA REAL, y no por adorno: antes
+   eran tres barras iguales, y la tarjeta real tiene una pastilla de estado, un
+   titulo, un organismo, un separador y una fila de pie. Al cargar el contenido,
+   todo ello cambiaba de sitio de golpe y la pantalla daba un salto.
+
+   Mirando la ficha real y dibujando lo mismo en gris, el salto desaparece: el
+   hueco que ocupa cada cosa mientras carga es el hueco que va a ocupar cuando
+   llegue.
+
+   Tres tarjetas y no dos, porque dos parecen "dos cosas iguales" y tres ya
+   insinúan una lista. La entrada va escalonada con retardo breve para que se
+   lean como una pantalla formandose y no como un bloque que aparece de golpe.
+   --------------------------------------------------------------------------- */
+
+/* La pastilla del estado. Sus medidas NO son de gusto: se copiaron de la ficha
+   real, que se midio en el navegador. Ahi el <span> del estado mide 19,6 px de
+   alto con radio de 6 px y padding de 2 por 8. Con radio total, que es lo que
+   parece una pastilla, el esqueleto annadiria una forma que la ficha real no
+   tiene. */
+.esqueleto-pastilla {
+    border-radius: 0.375rem;
+    height: 1.225rem;
+}
+
 .tarjeta-esqueleto {
     border-radius: 1rem;
     border: 1px solid var(--app-line);
     background-color: var(--app-surface);
-    padding: 1.5rem;
+    padding: 1.25rem;
+    animation: entrar-esqueleto 0.4s ease-out both;
 }
+
+/* Escalonado por posicion, sin estilos en linea: con :nth-child no hay que
+   escribir un retardo por tarjeta en el marcado, y asi el HTML del esqueleto se
+   lee igual de limpio aunque cambien las tarjetas. */
+.tarjeta-esqueleto:nth-child(2) { animation-delay: 0.1s; }
+.tarjeta-esqueleto:nth-child(3) { animation-delay: 0.2s; }
 
 .marca-texto {
     background-image: linear-gradient(100deg,
