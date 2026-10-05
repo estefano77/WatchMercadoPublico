@@ -684,14 +684,143 @@ Test-Path publicacion\appsettings.Development.json   # debe ser False
 
 ### En IIS
 
-`web.config` incluido. Hace falta el **Hosting Bundle** de .NET, no solo el
-runtime. El ticket va en las variables de entorno de `web.config`
-(`MercadoPublico__Ticket`), no en `appsettings.json`.
+`web.config` incluido, con lo importante ya decidido dentro:
 
-Al actualizar el sitio: **detener la aplicación → subir → extraer → arrancar**.
-Extraer con el proceso en marcha falla con *"The process cannot access the
-file"*.
+| Decisión | Valor | Por qué |
+|---|---|---|
+| Modelo de hosting | **`InProcess`** | Es el **valor por defecto** en ASP.NET Core desde .NET 6. Menos saltos, menos memoria, y `HttpRequest.Protocol` da HTTP/2 de verdad (en out-of-process da HTTP/1.1, porque el salto interno a Kestrel es HTTP/1.1). Esta app no usa nada propio de Kestrel, así que no obliga a nada |
+| Timeout | `<limits activityTimeout="300">` | Ver abajo: **esto es obligatorio**, no cosmético |
+| Ticket | variable de entorno | Nunca en un fichero versionado |
 
+#### El timeout, que es lo que no se puede dejar como está
+
+Una semana son **hasta 5 días hábiles** consultados contra Mercado Público, más
+una petición de detalle por licitación, y cada petición a la API se corta a los
+`MercadoPublico:SegundosTimeout` (30 s por defecto). En el peor caso, solo los
+días son **150 s**.
+
+El límite de IIS son **120 s por defecto**. Y el atributo `requestTimeout` del
+elemento `<aspNetCore>` **no arregla nada en in-process**: la documentación de
+Microsoft dice que no aplica a ese modelo, porque el módulo espera a que la app
+termine. El límite que manda es el de IIS, y se cambia en
+`<system.webServer><limits activityTimeout="300">`.
+
+No es un detalle de adorno. La app está montada para tolerar que un día no
+responda, con reintentos y un aviso de "días sin comprobar". Si el corte lo
+provoca IIS y no la API, ese aviso pasa a mentir sobre la causa.
+
+#### Procedimiento
+
+**0. En el servidor**, PowerShell **como administrador**:
+
+```powershell
+# Instalar el Hosting Bundle de .NET 10 (incluye el módulo ANCM v2).
+# https://dotnet.microsoft.com/permalink/dotnetcore-current-windows-runtime-bundle-installer
+#
+# Si IIS ya estaba instalado ANTES del bundle, hay que REPARARLO:
+# volver a pasar el instalador. Si no, ANCM no se registra.
+
+net stop was /y
+net start w3svc
+```
+
+> El Hosting Bundle hace falta **también con publicación self-contained**.
+> Self-contained quita la dependencia del runtime de .NET, pero no la del módulo
+> de IIS: sin ANCM no hay nada que arranque la app.
+
+**1. Publicar** (en la máquina de desarrollo, con el ticket **NO**):
+
+```powershell
+npm run css
+dotnet publish .\src\WatchMercadoPublico.Server -c Release -o publicacion
+```
+
+**2. Subir `publicacion\`** al servidor, por ejemplo a
+`C:\inetpub\WatchMercadoPublico`.
+
+**3. Permisos.** La caché vive **en memoria**, así que la carpeta puede ser de
+solo lectura:
+
+```powershell
+icacls C:\inetpub\WatchMercadoPublico /grant "IIS AppPool\WatchMP":(OI)(CI)(RX)
+```
+
+**4. Crear el sitio** en el Administrador de IIS: *Add Website*, ruta física
+`C:\inetpub\WatchMercadoPublico`, binding **HTTPS** con un host name concreto.
+
+> No uses un binding de tipo `http://*:80` ni `http://+:80`. La propia Microsoft
+> advierte que los comodines de primer nivel abren la aplicación a agujeros de
+> seguridad.
+
+**5. El pool** de aplicaciones. En in-process el pool propio es **obligatorio**,
+no una recomendación: una aplicación colgada se lleva por delante el worker de
+IIS, y sin pool propio eso cae en el `DefaultAppPool`.
+
+| Ajuste | Valor | Por qué |
+|---|---|---|
+| **.NET CLR version** | **No Managed Code** | No usa el CLR de escritorio; el runtime lo arranca CoreCLR |
+| **Enable 32-Bit Applications** | **False** | La aplicación es x64 |
+| **Start Mode** | **AlwaysRunning** | Evita el primer arranque en frío |
+| **Identity** | `ApplicationPoolIdentity` | — |
+
+**6. Las cinco variables de entorno — aquí hay un hueco real.**
+
+`web.config` solo define **dos** de las cinco. Faltan `NombreEmpresa`,
+`RutEmpresa` y, sobre todo, **`CodigoProveedor`**: sin ella
+`MercadoPublicoOpciones.Servible` es `false`, la aplicación **arranca con la
+interfaz intacta y cualquier consulta a la API falla**. El arranque lo avisa por
+log, pero no por pantalla.
+
+Ponlas como variables del **pool**, no editando ficheros en disco: es lo que
+sobrevive a un redespliegue. Administrador de IIS → *Configuration Editor* →
+`system/applicationHost/applicationPools/<nombre>/environmentVariables`.
+**Requiere IIS 10 o superior.**
+
+```
+MercadoPublico__Ticket          = <el ticket>
+MercadoPublico__ModoConsulta    = v1
+MercadoPublico__NombreEmpresa   = <nombre de la empresa>
+MercadoPublico__RutEmpresa      = <rut>
+MercadoPublico__CodigoProveedor = <código en Mercado Público>
+```
+
+**7. Publicar sin cortes.** Los ficheros están bloqueados mientras la aplicación
+corre, y copiarlos encima falla con *"The process cannot access the file"*. La
+forma limpia es `app_offline.htm`, que además hace que ANCM pare la aplicación de
+forma ordenada en vez de matarla:
+
+```powershell
+New-Item C:\inetpub\WatchMercadoPublico\app_offline.htm
+# ... copiar los ficheros ...
+Remove-Item C:\inetpub\WatchMercadoPublico\app_offline.htm
+```
+
+#### Si algo falla
+
+Activar la traza en el `web.config` del servidor, con
+`stdoutLogEnabled="true"`, y mirar:
+
+```powershell
+Get-Content C:\inetpub\WatchMercadoPublico\logs\stdout_*.log -Tail 40
+```
+
+| Síntoma | Causa habitual |
+|---|---|
+| **"You must install or update .NET"** | Falta el Hosting Bundle, o se instaló **antes** que IIS y hay que repararlo |
+| **HTTP 500.19**, a veces con el error de un `web.config` mal formado | Un `web.config` invalido da 500.19, no un 500. Un `--` dentro de un comentario XML lo provoca, y es un error facil de colar sin que se note al leerlo |
+| **Blazor se queda en "Cargando"** | Casi siempre son los `.wasm` a 0 bytes. Es justo lo que motivó desactivar la compresión precompimida en `Directory.Build.props`. Se comprueba con el punto 2 de "Antes de subir nada": los `.br` y `.gz` deben seguir siendo **0** |
+| **El aviso de "días sin comprobar" sale sin que la API falle** | Corte de IIS por `activityTimeout`, no fallo de la API. Subir el timeout |
+| **"CodigoProveedor" no aparece en la cabecera** | Faltan las variables de entorno del punto 6 |
+
+#### Alternativas que se descartaron, y por qué
+
+| Alternativa | Por qué no |
+|---|---|
+| **Out-of-process** (`hostingModel="OutOfProcess"`) | Funciona, y aísla el fallo: el módulo reinicia el proceso sin tocar `w3wp`. Se descartó por rendimiento y porque añade un `requestTimeout` que hay que mantener aparte. Si alguna vez hace falta aislamiento, es un cambio de una línea |
+| **Self-contained** (`-r win-x64 --self-contained true`) | Quitaba la dependencia del runtime, pero **medido en esta máquina son 115 MB frente a 9,6 MB**, y no evita el Hosting Bundle. Tiene sentido en un servidor donde no se controla la versión del runtime |
+| **Single-file** | Incompatible con in-process |
+| **IIS como proxy inverso a un Kestrel como servicio** | Tiene sentido si el hosting **no deja instalar el Hosting Bundle**. Son el doble de piezas que mantener |
+| **Hosting estático** (GitHub Pages, S3, blob) | **Imposible, y no es una preferencia.** El ticket viaja en el servidor; si la SPA llamara a Mercado Público desde el navegador, el ticket quedaría a la vista de cualquiera que abra las herramientas de red |
 ---
 
 ## Detalles que no son evidentes
