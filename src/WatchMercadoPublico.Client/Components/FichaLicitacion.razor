@@ -24,8 +24,13 @@
                 }
                 @if (Licitacion.FechaPublicacion is { } publicada)
                 {
+                    @* Con año: "publicada 28/09/2026". Sin él, el día y el mes no dicen de qué
+                   estamos hablando, que es justo lo que pasa cuando se está
+                   mirando una semana de hace tiempo. El formato numérico corto
+                   se mantiene porque va en una etiqueta diminuta, y aquí el año
+                   ocupa tres caracteres de más sin estorbar. *@
                     <span class="text-[0.65rem] font-semibold text-muted">
-                        publicada @publicada.ToLocalTime().ToString("dd/MM")
+                        publicada @publicada.ToLocalTime().ToString("dd/MM/yyyy")
                     </span>
                 }
             </div>

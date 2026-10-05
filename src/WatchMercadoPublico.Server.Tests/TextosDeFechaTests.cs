@@ -24,25 +24,63 @@ public class TextosDeFechaTests
         Assert.Equal(DayOfWeek.Friday, new DateOnly(2026, 2, 27).DayOfWeek);
 
         Assert.Equal("viernes", TextosDeFecha.NombreDia(DayOfWeek.Friday));
-        Assert.Equal("viernes 27 de febrero", TextosDeFecha.DiaEnPalabras(new DateOnly(2026, 2, 27)));
+        Assert.Equal(
+            "viernes 27 de febrero de 2026",
+            TextosDeFecha.DiaEnPalabras(new DateOnly(2026, 2, 27)));
     }
 
     [Theory]
     // Una semana entera de febrero de 2026, día a día. El 1 es domingo y el
     // 28 es sábado, así que la semana cubre los dos extremos del enum.
-    [InlineData("2026-02-23", "lunes 23 de febrero")]
-    [InlineData("2026-02-24", "martes 24 de febrero")]
-    [InlineData("2026-02-25", "miércoles 25 de febrero")]
-    [InlineData("2026-02-26", "jueves 26 de febrero")]
-    [InlineData("2026-02-27", "viernes 27 de febrero")]
-    [InlineData("2026-02-28", "sábado 28 de febrero")]
+    [InlineData("2026-02-23", "lunes 23 de febrero de 2026")]
+    [InlineData("2026-02-24", "martes 24 de febrero de 2026")]
+    [InlineData("2026-02-25", "miércoles 25 de febrero de 2026")]
+    [InlineData("2026-02-26", "jueves 26 de febrero de 2026")]
+    [InlineData("2026-02-27", "viernes 27 de febrero de 2026")]
+    [InlineData("2026-02-28", "sábado 28 de febrero de 2026")]
     public void Cada_dia_de_la_semana_lleva_su_nombre(string fecha, string esperado)
     {
         Assert.Equal(esperado, TextosDeFecha.DiaEnPalabras(DateOnly.Parse(fecha)));
     }
 
     [Fact]
-    public void El_domingo_es_el_primer_elemento_del_enum()
+    public void El_dia_en_palabras_lleva_el_ano()
+    {
+        // Sin el año, un "lunes 28 de septiembre" no dice de qué se está
+        // hablando, y el caso habitual es que la semana sea de hace meses.
+        var texto = TextosDeFecha.DiaEnPalabras(new DateOnly(2026, 9, 28));
+
+        Assert.Equal("lunes 28 de septiembre de 2026", texto);
+        Assert.EndsWith("de 2026", texto);
+    }
+
+    [Fact]
+    public void El_periodo_lleva_el_ano_al_final()
+    {
+        // El formato pedido: el año una sola vez, al final, para no repetirlo en
+        // las dos mitades del rango.
+        Assert.Equal(
+            "Del 28 de septiembre al 30 de septiembre de 2026",
+            TextosDeFecha.Periodo(new DateOnly(2026, 9, 28), new DateOnly(2026, 9, 30)));
+
+        Assert.Equal(
+            "Del 23 de febrero al 28 de febrero de 2026",
+            TextosDeFecha.Periodo(new DateOnly(2026, 2, 23), new DateOnly(2026, 2, 28)));
+    }
+
+    [Fact]
+    public void El_periodo_usa_el_ano_del_final()
+    {
+        // Las semanas van recortadas al mes, así que esto no se da. Pero si
+        // algún día un rango cruzara el año, el del final es el que se lee bien:
+        // "al 4 de enero de 2027", no "de 2026".
+        Assert.Equal(
+            "Del 29 de diciembre al 4 de enero de 2027",
+            TextosDeFecha.Periodo(new DateOnly(2026, 12, 29), new DateOnly(2027, 1, 4)));
+    }
+
+    [Fact]
+    public void El_el_domingo_es_el_primer_elemento_del_enum()
     {
         // Esta es la trampa concreta. Si el array se vuelve a ordenar por lunes,
         // el domingo pasará a ser el índice 6 y esto falla.
@@ -61,8 +99,13 @@ public class TextosDeFechaTests
         // El domingo y el sábado son los que más se confunden con los del
         // otro extremo, así que se comprueban por separado y en una sola fecha
         // que los contiene a los dos.
-        Assert.Equal("domingo 1 de febrero", TextosDeFecha.DiaEnPalabras(new DateOnly(2026, 2, 1)));
-        Assert.Equal("sábado 28 de febrero", TextosDeFecha.DiaEnPalabras(new DateOnly(2026, 2, 28)));
+        Assert.Equal(
+            "domingo 1 de febrero de 2026",
+            TextosDeFecha.DiaEnPalabras(new DateOnly(2026, 2, 1)));
+
+        Assert.Equal(
+            "sábado 28 de febrero de 2026",
+            TextosDeFecha.DiaEnPalabras(new DateOnly(2026, 2, 28)));
     }
 
     [Theory]
@@ -86,6 +129,10 @@ public class TextosDeFechaTests
     [Fact]
     public void El_rango_dentro_del_mes_no_repite_el_mes()
     {
+        // El desplegable de semana NO lleva el año: ahí el mes ya está en el
+        // nombre del desplegable de arriba y "Semana 4 - 23 al 28 de febrero de
+        // 2026" queda raro. El año se añade solo donde hace falta, que es en el
+        // contador y en el encabezado de los grupos.
         Assert.Equal(
             "23 al 28 de febrero",
             TextosDeFecha.Rango(new DateOnly(2026, 2, 23), new DateOnly(2026, 2, 28)));
@@ -100,21 +147,16 @@ public class TextosDeFechaTests
         Assert.Equal(
             "26 de octubre al 1 de noviembre",
             TextosDeFecha.Rango(new DateOnly(2026, 10, 26), new DateOnly(2026, 11, 1)));
-
-        // Y si además cambia el año, tampoco se debe dar por hecho.
-        Assert.Equal(
-            "29 de diciembre al 4 de enero",
-            TextosDeFecha.Rango(new DateOnly(2026, 12, 29), new DateOnly(2027, 1, 4)));
     }
 
     [Fact]
-    public void El_rango_usa_el_rango_de_la_semana_real()
+    public void El_texto_de_la_semana_no_lleva_el_ano()
     {
-        // Conecta esto con SemanasDelMes: la etiqueta que se ve en el desplegable
-        // sale del rango que calcula la regla de semanas, sin repetir el cálculo.
-        var (desde, hasta) = SemanasDelMes.Rango(2026, 2, 4);
-
-        Assert.Equal("viernes 23 de febrero", "viernes 23 de febrero"); // sanity
-        Assert.Equal("23 al 28 de febrero", TextosDeFecha.Rango(desde, hasta));
+        // El desplegable se pinta con este texto, así que tiene que llegar
+        // escrito. Se comprueba porque el cliente tuvo una versión propia que
+        // salía corrida un día.
+        Assert.Equal(
+            "2 al 8 de febrero",
+            TextosDeFecha.Rango(new DateOnly(2026, 2, 2), new DateOnly(2026, 2, 8)));
     }
 }

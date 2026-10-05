@@ -50,9 +50,27 @@ public static class TextosDeFecha
     /// <summary>Fecha corta: "27 de febrero".</summary>
     public static string DiaCorto(DateOnly fecha) => $"{fecha.Day} de {NombreMes(fecha.Month)}";
 
-    /// <summary>Fecha con el día de la semana: "viernes 27 de febrero".</summary>
+    /// <summary>
+    /// El periodo completo de un rango: "Del 23 de febrero al 28 de febrero de
+    /// 2026".
+    ///
+    /// El año va SOLO al final, y se usa el de <paramref name="hasta"/>. Son lo
+    /// mismo siempre, porque las semanas van recortadas al mes: ningún rango
+    /// cruza de año. Si algún día cruzara, el año del final es el que se lee
+    /// bien: "del 29 de diciembre al 4 de enero de 2027".
+    /// </summary>
+    public static string Periodo(DateOnly desde, DateOnly hasta) =>
+        $"Del {DiaCorto(desde)} al {DiaCorto(hasta)} de {hasta.Year}";
+
+    /// <summary>
+    /// Fecha con el día de la semana y el año: "viernes 27 de febrero de 2026".
+    ///
+    /// El año va aquí y no en <see cref="DiaCorto"/> porque el rango de la semana
+    /// en el desplegable se lee sin él, y se vería raro: "Semana 4 - 23 al 28
+    /// de febrero de 2026". Cada sitio decide si lo necesita.
+    /// </summary>
     public static string DiaEnPalabras(DateOnly fecha) =>
-        $"{NombreDia(fecha.DayOfWeek)} {DiaCorto(fecha)}";
+        $"{NombreDia(fecha.DayOfWeek)} {DiaCorto(fecha)} de {fecha.Year}";
 
     /// <summary>
     /// Rango tal como se muestra en el desplegable: "23 al 28 de febrero".

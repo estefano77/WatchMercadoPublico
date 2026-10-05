@@ -413,7 +413,7 @@ public static class LicitacionesEndpoints
             items.Count,
             items.Select(AñadirDetalleCache).Select(ConTextoDePublicacion).ToList(),
             desdeCache,
-            $"Del {TextosDeFecha.DiaCorto(desde)} al {TextosDeFecha.DiaCorto(hasta)}",
+            TextosDeFecha.Periodo(desde, hasta),
             DateTimeOffset.UtcNow);
     }
 
