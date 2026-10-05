@@ -40,7 +40,7 @@ Una pantalla, cuatro estados:
 
 | Estado | Qué muestra |
 |---|---|
-| **Hay novedades** | Las licitaciones de la semana, agrupadas por día de publicación. Al hacer clic se abre el detalle. |
+| **Hay novedades** | Las licitaciones de la semana, agrupadas por día de publicación. Al hacer clic se abre el detalle. Al pie de cada tarjeta, si hay acta de adjudicación, un enlace **"Ver acta"** que la abre en otra pestaña sin pasar por el detalle. |
 | **No hay nada** | "Nada en la Semana 3 en Octubre de 2026". El nombre de la semana va porque el estado vacío no enseña ni el periodo ni la insignia, y sin él no se sabría a qué semana se refiere. |
 | **No se pudo consultar** | Un aviso explícito con botón de reintento. **Nunca** dice "no hay licitaciones" cuando lo que pasó es que no se pudo preguntar. |
 | **Los filtros no coinciden con la pantalla** | Al mover un desplegable sin pulsar "Actualizar": un aviso ámbar dice qué semana se está viendo y cuál se ha elegido, y el botón de la barra late. |
@@ -63,6 +63,7 @@ el manual.
 |---|---|
 | La pantalla consulta sola al abrir y luego cada 5 minutos | `MercadoPublico:MinutosEntreRefrescos` |
 | Ante un fallo, insiste 6 veces con esperas de 2, 4, 8, 16, 30 y 30 s (~90 s) | `IntentosPorDia` y `EsperaInicial` en `LicitacionesEndpoints` |
+| El detalle de cada licitación se pide con **3** intentos, con esperas de 2 y 4 s | `IntentosPorDetalle` y `EsperaDetalle()` en `LicitacionesEndpoints`. Menos que los días a propósito: es un dato accesorio y no puede empujar la consulta por encima de los 120 s de IIS |
 | Los datos de hoy se guardan 4 minutos en memoria | `MercadoPublico:MinutosDeCache` |
 | No se consulta nada más que el día actual | No es configurable: es el diseño |
 | La empresa vigilada es fija | `NombreEmpresa`, `RutEmpresa`, `CodigoProveedor` |
@@ -370,6 +371,27 @@ días: si un detalle falla, esa tarjeta sale sin organismo y las demás se pinta
 igual. Fallar la semana entera por un dato accesorio perdería datos que sí se
 pudieron traer.
 
+**El detalle se pide con reintentos, y antes no.** El `429` de Mercado Público es
+un límite de ritmo, y el detalle es la petición que va **justo detrás de los
+días**, o sea la que más caía. Con el `429` medido —de cada diez peticiones,
+más o menos una— el detalle se quedaba sin respuesta de vez en cuando, y encima
+caerse **no se veía**: la tarjeta salía sin la línea del organismo y sin decir
+por qué, porque esa omisión era deliberada. Abrir el detalle **sí** mostraba el
+organismo, ya que el modal pide el dato por su cuenta: una segunda petición que a
+veces sí funcionaba. Eso hacía que el fallo pareciera de la plantilla.
+
+Ahora son **tres** intentos, con esperas de 2 y 4 s y el tope de 30 s de siempre.
+Menos que los 6 de los días **a propósito**: los días son el dato principal y
+pueden esperar 90 s; el detalle es accesorio, y con los seis de los días una
+semana con varias tarjetas sin detalle se pasaría de los 120 s de IIS y se caería
+la página entera por un dato accesorio. Con tres, lo peor que se suma son **6 s
+por tarjeta**.
+
+Un detalle agotado **no** se cachea, y así se vuelve a pedir en la carga
+siguiente, que es justo cuando la API ya no está saturada. Lo que sí se cachea es
+el "no hay detalle" que devuelve la API, porque ese no es un fallo: es que la
+licitación no existe.
+
 Ejemplo real:
 
 ```
@@ -643,6 +665,16 @@ cuatro días, que sí se habían podido consultar.
 Solo se responde `502` cuando **ningún** día pudo consultarse. Es el único caso
 en que la pantalla no tiene nada que enseñar y no sería honesto devolver una
 lista vacía.
+
+`AdjuntarDetallesAsync` es el mismo caso con otros números: **3** intentos en vez
+de 6, con esperas de 2 y 4 s. La asimetría es deliberada y está explicada en
+[la sección del detalle](#3-detalle-de-una-licitaci%C3%B3n): los días pueden esperar
+90 s porque son el dato principal, y el detalle no.
+
+Lo que sí se corrigió aquí es la cancelación. El `catch` viejo se tragaba
+`OperationCanceledException`, que **incluye** `TaskCanceledException`, así que un
+timeout de petición y una orden de parar acababan en el mismo saco. Ahora solo
+se relanza si el token propio está cancelado.
 
 `/api/...` devuelve **404 en JSON** para rutas desconocidas, antes del
 `MapFallbackToFile`, o la API devolvería el `index.html` de la SPA.
@@ -950,6 +982,83 @@ devuelve 500 a la vez, mira `Program.cs` antes que los endpoints.
 `ChildContent` y sin `Mensaje`, **no pintaba nada** y parecía que la condición
 que lo rodea estuviera mal. La guarda mira las dos cosas.
 
+### Un enlace dentro de un botón no es un enlace
+
+La ficha de cada licitación fue un `<button>` entero durante semanas. Al
+meterle al pie el enlace al acta, eso dejó de valer, y por tres motivos a la vez:
+
+1. Un `<a>` dentro de un `<button>` es HTML **inválido**.
+2. El clic del enlace dispara también el del botón: se abrirían el modal y el
+   acta a la vez.
+3. Y lo que peor es, el enlace **no sería enfocable con el teclado**, porque
+   dentro de un botón solo se enfoca el botón. Habría sido inútil justo para
+   quien navega con teclado.
+
+La solución fue mover el **marco** de la tarjeta a un `<div>` y dejar dentro dos
+cosas sueltas: un `<button>` con el contenido —el camino accesible para abrir el
+detalle— y el `<a>` del acta, que es **hermano** suyo y no hijo. El `div` del pie
+lleva su propio `@onclick` para que el pie siga abriendo el detalle, y el enlace
+lleva `@onclick:stopPropagation` para que no lo abra.
+
+Comprobado en el navegador: el enlace no abre el modal, el pie y el botón sí, y
+la ficha tiene **dos** elementos enfocables, `[button, a]`.
+
+La lección que queda: **antes de meter un control interactivo dentro de otro,
+comprobar que el de fuera es un contenedor y no un control.**
+
+### El esqueleto de carga se ve como una caja vacía
+
+Antes de que la espera fuera un panel, eran tres tarjetas grises de 160 px, y
+fallaron por dos motivos que conviene no repetir.
+
+**El color.** Las barras se pintaban con `--app-field`, que es el relleno de un
+campo de formulario y por tanto se parece a la superficie. Medido sobre el fondo
+real: en tema oscuro la barra quedaba en `rgb(23,29,43)` sobre `#0b1120`, un
+**contraste de 1,12**, y en tema claro era `#ffffff` sobre `#ffffff`, un
+**contraste de 1,00**: la barra era literalmente el color de la tarjeta, y lo
+único que se veía era el destello de un 5 % pasando por encima. Ahora hay tokens
+propios, `--app-esqueleto`, y el contraste es 1,71 en oscuro y 1,48 en claro.
+
+**La forma del brillo.** El degradado iba sobre un lienzo del **doble** del
+ancho de la barra, así que la rampa ocupaba siempre la barra completa y nunca
+quedaba una parte sólida. Como además las ocho barras iban en la misma fase, el
+esqueleto entero se leía como una sola mancha de izquierda a derecha, como un
+fallo de dibujo. La banda ahora ocupa el 16 % de un lienzo de 1,5 veces el ancho.
+
+Y por debajo de todo eso, el problema de fondo: **512 px de alto para decir
+"espera"**. Ahora es un panel de **141 px**, menos de la tercera parte, con un
+aro que gira y una banda que recorre.
+
+La banda **no se completa nunca**, y a propósito: el tiempo que tarda Mercado
+Público no se sabe de antemano, así que una barra que se llenara estaría
+mintiendo. El contador de segundos es lo que sí es real.
+
+### El proxy del navegador puede tumbar Blazor entero
+
+Síntoma: la pantalla dice **"Se ha producido un error inesperado. Recargar"** y
+en la consola hay `net::ERR_PROXY_CONNECTION_FAILED` al bajar un
+`_framework/*.wasm`. No es de la aplicación: es el proxy del navegador, y el
+archivo que falta es siempre un `.wasm` del framework. **Recargar lo arregla.**
+Apareció una vez en desarrollo y volvió a aparecer al día siguiente.
+
+Un `.wasm` que no baja **no** es el mismo fallo que un `404` por recursos de una
+build anterior, que se arregla con `Ctrl+F5`. Son cosas distintas y las dos
+terminan en la misma pantalla de error.
+
+### Las siete propiedades de compresión, y por qué la última manda
+
+`Directory.Build.props` desactiva la compresión en un grupo de **siete**
+propiedades, no dos ni cinco: `BlazorEnableCompression`,
+`EnableDefaultCompressedItems`, `CompressDiscoveredAssetsDuringBuild`,
+`DisableBuildCompression`, `EnableDefaultCompressionFormats`,
+`BuildCompressionFormats` y `PublishCompressionFormats`.
+
+`BlazorEnableCompression=false` **solo no basta** en .NET 10: el SDK de assets
+estáticos comprime **durante la compilación** y esos ficheros se copian igual a
+la publicación. Las dos últimas son las que deciden, porque con su valor por
+defecto el SDK rellena `BuildCompressionFormats=gzip` y
+`PublishCompressionFormats=gzip;brotli` y comprime igualmente.
+
 ### ⚠️ Asignar un campo NO repinta: el "Consultando" no salía en un minuto
 
 El más traicionero de todos, y eran **tres fallos encadenados** que se tapaban:
@@ -1080,12 +1189,14 @@ Por **síntoma**, no por causa interna:
 | Al mover un desplegable no cambia nada | Correcto: los datos llegan al pulsar "Actualizar", y sale un aviso ámbar diciéndolo. Si el aviso **no** sale, revisar que se comparen año, mes y semana: comparar solo el número de semana deja pasar los cambios de mes y de año, porque el número se repite en todos los periodos. |
 | Un día sale con el nombre de otro | El array de días del cliente indexado por `DayOfWeek`, que en .NET empieza por **domingo**. Esa lógica se movió al servidor (`TextosDeFecha`) precisamente por eso. Si alguien la reintroduce, el primer síntoma es "un viernes que pone sábado". |
 | Al abrir la página, la cabecera y nada debajo | Estado muerto: `Semana` a null sin error ni consulta en vuelo. Hay una rama `else` que lo evita, así que si aparece, hay que mirar la consola del navegador. |
-|---|---|
 | Se queda en "Cargando" tras publicar | Falta el target `SuperponerClienteBlazor`, o el `index.html` publicado sin sustituir. |
 | Cabecera y título, y debajo un hueco vacío durante un minuto | Estado muerto en el render: el panel no se pintaba porque `Estado` aún era `null` y `Estado is { Servible: true }` no se cumplía. Ver [el aviso que no se veía](#%EF%B8%8F-asignar-un-campo-no-repinta-el-consultando-no-sal%C3%ADa-en-un-minuto). |
 | `404` en `/_framework/*.wasm` | Recursos de una build anterior, cacheados un año. `Ctrl+F5`. |
-| `Failed to find a valid digest … 47DEQpj8HBSa+` | Variante comprimida vacía: se colaron `.br`/`.gz`. Revisa las cinco propiedades de `Directory.Build.props`. |
+| `Failed to find a valid digest … 47DEQpj8HBSa+` | Variante comprimida vacía: se colaron `.br`/`.gz`. Revisa las **siete** propiedades de compresión de `Directory.Build.props`. |
 | La pantalla dice "No se pudo consultar" | Mercado Público está rechazando. Se intentó 6 veces durante un minuto y no respondió. **No** significa que no haya nada hoy. Se reintenta solo cada 5 min. |
+| **Una tarjeta sale sin el nombre del organismo, y al abrir el detalle sí está** | El detalle de esa licitación se pidió y falló. Ocurría mucho: el detalle es la petición que va detrás de los días, o sea la que más gana el `429`, y se pedía **una sola vez sin reintentos**. La pista es que el modal sí lo muestra, porque pide el dato por su cuenta. Ya reintenta 3 veces; si vuelve a pasar, mira el aviso `Se agotaron ... intentos para el detalle de` en el log. |
+| Una tarjeta sale sin el nombre del organismo y el detalle tampoco lo tiene | La API devolvió el `Listado` vacío para ese código. Eso **sí** se cachea, porque no es un fallo: es que la licitación no existe en la API. |
+| La pantalla dice "Se ha producido un error inesperado. Recargar" | Casi siempre es el **proxy del navegador** fallen un `_framework/*.wasm`: `net::ERR_PROXY_CONNECTION_FAILED` en la consola. Recargar lo arregla. No es de la aplicación. |
 | Los 6 intentos salen con `500` y `Codigo 10300` | Casi siempre es **nuestro**, no de la API: se queja de lo que le mandamos. El mensaje concreto ahora llega a pantalla y al log, así que léelo antes de culpar a Mercado Público. |
 | Falla solo entre el día 1 y el 9 de cada mes | El día sin relleno a la izquierda en la fecha: `dMMyyyy` en vez de `ddMMyyyy`. Ver [`fecha` con los DOS campos rellenos](#%EF%B8%8F-fecha-con-los-dos-campos-rellenos-o-no-funciona). |
 | La lista sale vacía | Consulta real y de verdad no hay nada publicado en esa semana. La pantalla lo dice como "Nada en la Semana 3 en Octubre de 2026", no como error. |
@@ -1256,7 +1367,7 @@ Iconos de [Lucide](https://lucide.dev) (licencia ISC). Tipografía
 dotnet test
 ```
 
-**104 tests** (80 del servidor, 24 del cliente), todos en verde. **No hay que
+**134 tests** (91 del servidor, 43 del cliente), todos en verde. **No hay que
 tener ticket, ni red, ni la API en pie.** Eso no es una comodidad: es lo que hace
 posible testear. Un método que hace una petición no se puede comprobar sin
 pedirla, y para la aplicación casi todo lo que se rompió no necesitaba la API para
@@ -1278,6 +1389,13 @@ Todos nacieron de bugs que estuvieron en producción:
 | `SemanasDelMesTests.cs` | La regla de lunes a domingo, recortada al mes, y que ninguna semana se quede sin días hábiles |
 | `TextosDeFechaTests.cs` | Los nombres de día y de mes, y que `DayOfWeek.Sunday` siga siendo 0 |
 | `PeriodosDisponiblesTests.cs` | Que no se ofrezcan meses ni semanas que aún no han ocurrido |
+| `ReintentosDeDetalleTests.cs` | Que el detalle se pida **más de una vez**, que sean menos intentos que los días, que la espera se doble, que tenga tope, y que el peor caso quepa en el reloj de IIS |
+| `FiltrosDeSemanaTests.cs` | Que un filtro se detecte como cambiado, y las dos regresiones que cazaron: el día indexado por `DayOfWeek` y la comparación por número de semana |
+| `FormatoTests.cs` | La fecha numérica, la fecha corta, y que `RemoveDiacritics` no exista sin querer |
+
+Los tests de `ReintentosDeDetalleTests` se validaron **reintroduciendo el bug**,
+que es la única forma de saber que un test sirve: con un solo intento fallan 3
+pruebas, con la espera fija sin doblar fallan 4, y sin tope de espera falla 1.
 
 ### Lo que los tests no cubren
 
@@ -1307,6 +1425,15 @@ tests para el cliente, y alcanza a todo lo que son funciones puras: `Formato`,
 componente es lo que de verdad necesita Blazor —el render, el temporizador del
 refresco, el estado de "cargando"—, y eso sigue sin cobertura. Para cerrarlo
 haría falta bUnit.
+
+**Y hay un agujero conocido en el servidor, del mismo tipo.** `MercadoPublicoCliente`
+es `sealed` y **no implementa ninguna interfaz**, así que no hay forma de
+inyectarle un cliente falso: `AdjuntarDetallesAsync` no se puede probar con un
+`429` simulado. Lo que sí está probado es la **política** de reintentos —cuántos
+intentos, cómo crece la espera, el tope y el peor caso—, pero **el bucle en sí
+solo está verificado por compilación y revisión**. Cubrirlo pediría extraer una
+interfaz, que es un refactor que no se ha hecho. Conviene decirlo, porque
+"hay 8 pruebas del reintento" suena a más cobertura de la que hay.
 
 Lo que NO se hizo fue moverlo todo por gusto. Se movió una sola cosa, por un
 motivo concreto: `HaySemanaPendiente` y `SemanaEnPalabras` son las dos funciones
@@ -1369,7 +1496,7 @@ cultura no gregoriana.
 
 ```
 WatchMercadoPublico.slnx
-├── Directory.Build.props          # compresión desactivada (los dos que se publican)
+├── Directory.Build.props          # compresión desactivada (las siete propiedades)
 ├── nuget.config
 ├── package.json                   # scripts de Tailwind
 ├── scripts/arrancar.ps1           # compila, publica y levanta en local
