@@ -215,68 +215,31 @@
          2. El arranque, antes de saber si la API está servible. *@
     @if (Estado is not { Servible: false })
     {
-@if (Ocupado)
+        @if (Ocupado)
         {
-            @* Esqueleto en vez de un simple "cargando": el usuario ve que hay
-               una pantalla formándose, no una página muerta.
+            @* Overlay de consulta. Antes eran tres tarjetas esqueleto de 160 px,
+               512 px de alto en total, y ademas las barras se parecian a un
+               fallo de dibujo. Esto ocupa algo mas de 130 px: menos de la
+               cuarta parte, y se lee que hay algo en marcha.
 
-               Cada tarjeta dibuja LA ANATOMÍA DE LA FICHA REAL: pastilla de
-               estado y fecha de publicación, título, organismo, separador y
-               fila de pie con cierre, días restantes y código. No es decoración:
-               con las tres barras iguales de antes, el contenido saltaba de
-               sitio al llegar, porque ocupaba una zona distinta a la que después
-               ocupa. Con la misma anatomía el hueco es el mismo y no hay salto.
+               Hay dos movimientos y van a la vez y en el mismo sentido: el aro
+               gira y la banda de abajo recorre. Con los dos a la vez se lee
+               como una sola cosa avanzando, no como dos adornos.
 
-               UNA sola línea de título, y con las medidas COPIADAS de la ficha
-               real, no elegidas a ojo. Se middieron en el navegador, contra la
-               licitación real que hay desplegada:
-
-                 pastilla   19,6 px, radio 6      (la real: 19,6 y 6)
-                 fecha      10 px                 (texto de 10,4 real)
-                 título     21 px,  margen 8      (la real: 20,9 y 8)
-                 organismo  16,5 px, margen 6     (la real: 16,5 y 6)
-                 pie        16 px,  31 px alto    (la real: 16 y 31)
-                 padding    20 px
-
-               Con eso el hueco mide 160 px, que es lo mismo que mide la ficha
-               real, y al llegar el contenido no mueve nada.
-
-               UNA línea y no dos porque el nombre real de una licitación de
-               Mercado Público son 68 caracteres y aun así cabe en una sola línea
-               a 1446 px, que es donde se miró. En un teléfono se parte en tres y
-               el hueco queda corto: es el sentido en que conviene equivocarse,
-               porque el texto que llega crece hacia abajo, como crece siempre. *@
-            <div class="space-y-4">
-                @foreach (var _ in new[] { 0, 1, 2 })
-                {
-                    <div class="tarjeta-esqueleto">
-                        <div class="flex flex-wrap items-start justify-between gap-3">
-                            <div class="min-w-0 flex-1">
-                                <div class="flex flex-wrap items-center gap-2">
-                                    <div class="esqueleto esqueleto-pastilla w-20"></div>
-                                    <div class="esqueleto h-2.5 w-24"></div>
-                                </div>
-                                <div class="esqueleto mt-2 h-[1.3125rem] w-11/12"></div>
-                                <div class="esqueleto mt-1.5 h-[1.03125rem] w-3/5"></div>
-                            </div>
-                            <div class="esqueleto h-2.5 w-16 shrink-0"></div>
-                        </div>
-                        <div class="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-line pt-3.5">
-                            <div class="esqueleto h-4 w-20"></div>
-                            <div class="esqueleto h-4 w-16"></div>
-                            <div class="esqueleto ml-auto h-4 w-16"></div>
-                        </div>
-                    </div>
-                }
-
-                <div class="flex items-center justify-center gap-2.5 pt-1 text-sm text-ink-soft">
-                    <span class="punto-pulsante"></span>
-                    <span>Consultando a Mercado Público…</span>
+               La banda NO tiene final ni se completa nunca, porque el tiempo que
+               tarda Mercado Publico no se sabe de antemano. Es una barra
+               indeterminada, no un porcentaje inventado: el contador de
+               segundos de al lado si es real. *@
+            <div class="capa-consulta">
+                <div class="panel-consulta">
+                    <span class="aro-consulta" aria-hidden="true"></span>
+                    <p class="min-w-0 text-sm font-semibold text-ink">Consultando a Mercado Público…</p>
                     @if (SegundosEsperando > 4)
                     {
-                        <span class="tabular-nums text-muted">@SegundosEsperando s</span>
+                        <span class="segundos-consulta tabular-nums">@SegundosEsperando s</span>
                     }
                 </div>
+                <div class="banda-consulta" aria-hidden="true"><span></span></div>
             </div>
         }
         else if (ErrorConsulta is not null)
