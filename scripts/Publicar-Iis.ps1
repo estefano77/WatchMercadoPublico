@@ -502,6 +502,46 @@ if (-not (Test-Path $webConfig)) {
         Write-Host '         IIS devolveria HTTP 500.19 (error de configuracion).' -ForegroundColor DarkGray
         $fallos++
     }
+
+    # 3.6 La estructura, y no solo que el XML cargue. Este es el control que
+    #     faltaba y que habria evitado un despliegue roto.
+    #
+    #     IIS NO solo pide XML bien formado: valida ademas contra su ESQUEMA, y un
+    #     elemento colocado donde no toca da 500.19 con codigo 0x8007000d y sin
+    #     decir donde esta mal. Pasó de verdad: <httpProtocol> estaba dentro de
+    #     <security>, cuando tiene que ser hermano suyo, hijo directo de
+    #     <system.webServer>. Un [xml] lo acepta y una lectura a ojo tambien.
+    $raizSw = $xml.configuration.'system.webServer'
+    if (-not $raizSw) {
+        Write-Erro 'web.config no tiene <system.webServer>'
+        $fallos++
+    } else {
+        $hijos = @($raizSw.ChildNodes | Where-Object { $_.NodeType -eq 'Element' } | ForEach-Object { $_.Name })
+        $esperados = @('handlers', 'aspNetCore', 'limits', 'security', 'httpProtocol', 'httpErrors')
+        $inesperados = @($hijos | Where-Object { $esperados -notcontains $_ })
+        if ($inesperados.Count -gt 0) {
+            Write-Erro "Hijo inesperado dentro de <system.webServer>: $($inesperados -join ', ')"
+            Write-Host '         IIS lo rechazara con 500.19 y sin decir cual es el problema.' -ForegroundColor DarkGray
+            $fallos++
+        }
+
+        # El error concreto que ya se ha dado dos veces, comprobado uno a uno.
+        if ($raizSw.security.httpProtocol) {
+            Write-Erro '<httpProtocol> esta dentro de <security>, y no puede estarlo.'
+            Write-Host '         Tiene que ser hermano de <security>. Por dentro sigue siendo' -ForegroundColor DarkGray
+            Write-Host '         XML valido, asi que esto no lo ve ni [xml] ni una lectura a ojo;' -ForegroundColor DarkGray
+            Write-Host '         solo lo ve IIS, cuando ya es tarde.' -ForegroundColor DarkGray
+            $fallos++
+        }
+        if (-not $raizSw.httpProtocol) {
+            Write-Aviso 'No hay <httpProtocol>. Se pierden las cabeceras de seguridad, pero el sitio funciona.'
+        }
+        elseif (-not $raizSw.httpProtocol.customHeaders) {
+            Write-Aviso 'No hay <customHeaders> dentro de <httpProtocol>. Sin cabeceras de seguridad.'
+        }
+
+        Write-Ok "Estructura de <system.webServer>: $($hijos -join ', ')"
+    }
 }
 
 if ($fallos -gt 0) {
@@ -747,6 +787,71 @@ try {
 }
 
 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+
+# ---------------------------------------------------------------------------
+# 7 bis. PREGUNTARLE A IIS, NO SOLO A LA APLICACION
+#
+# Lo de arriba levanta la publicacion como un proceso normal en un puerto
+# suelto. Eso demuestra que la APLICACION esta bien, y no dice NADA de que IIS
+# acepte la configuracion del sitio.
+#
+# Son dos capas distintas: la validacion del esquema del web.config la hace IIS
+# antes de arrancar nada, y un 500.19 por un elemento mal colocado sale aunque la
+# aplicacion sea impecable. Asi que falta la pregunta obvia: ¿responde el sitio
+# de verdad?
+#
+# Es la comprobacion que habria parado este despliegue en el paso 4 y no en el
+# navegador del usuario.
+# ---------------------------------------------------------------------------
+Write-Step '7 bis. El sitio responde en IIS'
+
+$url = "http://localhost:$Port/"
+Write-Info "Peticion a $url"
+
+# Un arranque en frio con el grupo recien creado puede tardar. Se reintenta.
+$respuesta = $null
+for ($intento = 1; $intento -le 6; $intento++) {
+    try {
+        $respuesta = Invoke-WebRequest $url -UseBasicParsing -TimeoutSec 20
+        break
+    }
+    catch {
+        $codigoHttp = $null
+        try { $codigoHttp = [int]$_.Exception.Response.StatusCode } catch { }
+        # Un 503 es el grupo arrancando. Cualquier otro codigo ya es la respuesta
+        # definitiva de IIS y hay que mirarla.
+        if ($codigoHttp -and $codigoHttp -ne 503) { $respuesta = $_.Exception.Response }
+        Start-Sleep -Seconds 3
+    }
+}
+
+if ($respuesta -and $respuesta.StatusCode -eq 200) {
+    Write-Ok "El sitio responde HTTP 200 en $url"
+    Write-Host ''
+    Write-Host '  Ya esta desplegado. Para verlo:' -ForegroundColor Gray
+    Write-Host "    Start-Process '$url'" -ForegroundColor White
+}
+elseif ($respuesta) {
+    $codigo = $respuesta.StatusCode
+    Write-Erro "El sitio responde HTTP $codigo"
+    if ($codigo -eq 500) {
+        Write-Host ''
+        Write-Host '  500.19 con 0x8007000d es CONFIGURACION INVALIDA: el web.config es' -ForegroundColor Yellow
+        Write-Host '  XML valido pero no lo es para el esquema de IIS. Mira el paso 3.6' -ForegroundColor Yellow
+        Write-Host "  y revisa los hijos de <system.webServer> en $webConfig" -ForegroundColor Yellow
+    }
+    if ($codigo -eq 503) {
+        Write-Host '  El grupo de aplicaciones no arranca. Con stdoutLogEnabled="true" en el' -ForegroundColor Yellow
+        Write-Host "  web.config, el log esta en $PhysicalPath\logs" -ForegroundColor Yellow
+    }
+    Write-Host ''
+    Write-Host '  La publicacion en disco puede estar bien: lo que falla es IIS. El paso 7' -ForegroundColor DarkGray
+    Write-Host '  levanta la app FUERA de IIS y si respondio, asi que no dice nada de esto.' -ForegroundColor DarkGray
+}
+else {
+    Write-Aviso "El sitio no respondio en $url tras varios intentos."
+    Write-Aviso 'Comprueba que el grupo este arrancado y que el puerto sea el correcto.'
+}
 
 # ---------------------------------------------------------------------------
 # 8. Resumen
