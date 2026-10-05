@@ -45,6 +45,32 @@ public static class LicitacionesEndpoints
     /// <summary>Tope de la espera entre reintentos.</summary>
     private static readonly TimeSpan EsperaMaxima = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// Cuántos intentos se hacen al pedir el detalle de UNA licitación, contando
+    /// el primero.
+    ///
+    /// SON MENOS QUE <see cref="IntentosPorDia"/> A PROPÓSITO, y el motivo es el
+    /// reloj. Los días son el dato principal y pueden esperar 90 s; el detalle es
+    /// un dato acessorio que solo va en la tarjeta. Con seis intentos y esperas
+    /// de 2, 4, 8, 16, 30 y 30 s, una semana con varias tarjetas sin detalle se
+    /// pasaría de los 120 s de IIS y se caería la página entera por un dato
+    /// acessorio. Con tres intentos la espera máxima son 6 s por tarjeta.
+    ///
+    /// Antes de esto el detalle se pedía UNA vez y sin más. Como el 429 es un
+    /// límite de ritmo y el detalle es la petición que va detrás de los días, es
+    /// justo la que más cae: de cada diez detalles, más o menos uno se quedaba
+    /// sin respuesta y la tarjeta salía sin organismo sin decir nada.
+    /// </summary>
+    public const int IntentosPorDetalle = 3;
+
+    /// <summary>
+    /// Espera antes del reintento número <paramref name="intento"/> del detalle.
+    /// Doble cada vez, igual que los días, y con el mismo tope.
+    /// </summary>
+    public static TimeSpan EsperaDetalle(int intento) => TimeSpan.FromSeconds(Math.Min(
+        EsperaInicial.TotalSeconds * Math.Pow(2, intento - 1),
+        EsperaMaxima.TotalSeconds));
+
     public static IEndpointRouteBuilder MapLicitacionesEndpoints(this IEndpointRouteBuilder rutas)
     {
         var grupo = rutas.MapGroup("/api").WithTags("Mercado Público");
@@ -380,6 +406,19 @@ public static class LicitacionesEndpoints
     /// igual. La alternativa —fallar la semana entera— perdería datos que sí se
     /// pudieron traer, y sería mentir por un dato acessorio.
     ///
+    /// INSISTE, y antes no lo hacía. El detalle se pedía una sola vez, sin
+    /// reintentos, mientras que los días insisten hasta seis. Con el 429 medido
+    /// —de cada diez peticiones, más o menos una— el detalle era la petición con
+    /// más probabilidades de caerse, porque es la que va detrás de los días, y
+    /// encima caerse no se veía: la tarjeta salía sin la línea del organismo y
+    /// sin decir por qué. Ahora son <see cref="IntentosPorDetalle"/> intentos con
+    /// espera creciente.
+    ///
+    /// Lo que NO se reintenta es la cancelación: si el navegador se fue o el
+    /// servidor se para, no tiene sentido seguir. Un <c>TaskCanceledException</c>
+    /// con el token propio sin cancelar sí se reintenta, porque ese es el
+    /// timeout de la petición y no una orden de parar.
+    ///
     /// Se pide de uno en uno, sin paralelismo: pedirlos a la vez dispara el
     /// límite de ritmo, que es el <c>429</c> del que ya se habla en el README.
     /// </summary>
@@ -403,24 +442,48 @@ public static class LicitacionesEndpoints
                 continue;
             }
 
-            try
+            for (var intento = 1; ; intento++)
             {
-                var detalle = config.Modo == "demo"
-                    ? DatosDemo.Detalle(item.CodigoExterno)
-                    : await api.ObtenerDetalleAsync(item.CodigoExterno, ct);
+                try
+                {
+                    var detalle = config.Modo == "demo"
+                        ? DatosDemo.Detalle(item.CodigoExterno)
+                        : await api.ObtenerDetalleAsync(item.CodigoExterno, ct);
 
-                // Se cachea también el "no hay detalle": si la API dice que no
-                // existe, no se vuelve a preguntar en cada carga.
-                cache.GuardarDetalle(item.CodigoExterno, detalle);
-                item.Detalle = detalle;
-            }
-            catch (Exception ex) when (ex is MercadoPublicoException or TaskCanceledException
-                                           or HttpRequestException or OperationCanceledException)
-            {
-                log.LogWarning(
-                    ex,
-                    "No se pudo traer el detalle de {Codigo}; la tarjeta saldrá sin organismo",
-                    item.CodigoExterno);
+                    // Se cachea también el "no hay detalle": si la API dice que no
+                    // existe, no se vuelve a preguntar en cada carga.
+                    cache.GuardarDetalle(item.CodigoExterno, detalle);
+                    item.Detalle = detalle;
+                    break;
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    // El navegador se fue o el servidor se para: no se reintenta.
+                    throw;
+                }
+                catch (Exception ex) when (ex is MercadoPublicoException
+                                           or TaskCanceledException
+                                           or HttpRequestException)
+                {
+                    if (intento >= IntentosPorDetalle)
+                    {
+                        log.LogWarning(
+                            ex,
+                            "Se agotaron {Intentos} intentos para el detalle de {Codigo}; " +
+                            "la tarjeta saldrá sin organismo: {Motivo}",
+                            IntentosPorDetalle, item.CodigoExterno, ex.Message);
+                        break;
+                    }
+
+                    var espera = EsperaDetalle(intento);
+
+                    log.LogInformation(
+                        "Detalle de {Codigo} intento {Intento} de {Total} fallido ({Motivo}). " +
+                        "Reintento en {Espera:F0} s.",
+                        item.CodigoExterno, intento, IntentosPorDetalle, ex.Message, espera.TotalSeconds);
+
+                    await Task.Delay(espera, ct);
+                }
             }
         }
     }
