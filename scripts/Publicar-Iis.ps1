@@ -584,7 +584,7 @@ if (-not (Test-Path $webConfig)) {
         $fallos++
     } else {
         $hijos = @($raizSw.ChildNodes | Where-Object { $_.NodeType -eq 'Element' } | ForEach-Object { $_.Name })
-        $esperados = @('handlers', 'aspNetCore', 'limits', 'security', 'httpProtocol', 'httpErrors')
+        $esperados = @('handlers', 'aspNetCore', 'security', 'httpProtocol')
         $inesperados = @($hijos | Where-Object { $esperados -notcontains $_ })
         if ($inesperados.Count -gt 0) {
             Write-Erro "Hijo inesperado dentro de <system.webServer>: $($inesperados -join ', ')"
@@ -592,8 +592,19 @@ if (-not (Test-Path $webConfig)) {
             $fallos++
         }
 
-        # El error concreto que ya se ha dado dos veces, comprobado uno a uno.
-        #
+        # Las cuatro diferencias con el web.config que SI levanta. Con cualquiera
+        # de ellas, IIS dio 500.19 con 0x8007000d y sin numero de linea. Nunca se
+        # llego a aislar cual era, asi que se quitaron todas. Si alguna vuelve a
+        # aparecer aqui, el sitio no levantara.
+        if ($raizSw.limits) {
+            Write-Erro 'Hay <limits>. Fue una de las cuatro diferencias que tumbaron el sitio.'
+            $fallos++
+        }
+        if ($raizSw.httpErrors) {
+            Write-Erro 'Hay <httpErrors>. Fue una de las cuatro diferencias que tumbaron el sitio.'
+            $fallos++
+        }
+
         # elseif, no un if aparte: si httpProtocol esta mal colocado, tampoco
         # se encuentra como hijo directo, y con dos "if" seguidos salia un ERROR
         # diciendo que estaba dentro de security y acto seguido un AVISO
@@ -611,6 +622,15 @@ if (-not (Test-Path $webConfig)) {
         }
         elseif (-not $raizSw.httpProtocol.customHeaders) {
             Write-Aviso 'No hay <customHeaders> dentro de <httpProtocol>. Sin cabeceras de seguridad.'
+        }
+
+        # El <remove name="X-Powered-By"> tambien fue una de las cuatro. No es
+        # error: es una cabecera duplicada si la server la pone. Solo se avisa.
+        if ($raizSw.httpProtocol.customHeaders) {
+            $tieneRemove = @($raizSw.httpProtocol.customHeaders.add | Where-Object { $_.name -eq 'X-Powered-By' }).Count -gt 0
+            if ($tieneRemove) {
+                Write-Aviso 'Hay <remove name="X-Powered-By">. Fue una de las cuatro diferencias.'
+            }
         }
 
         Write-Ok "Estructura de <system.webServer>: $($hijos -join ', ')"
