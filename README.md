@@ -1234,8 +1234,10 @@ Todos nacieron de bugs que estuvieron en producción:
 
 ### Lo que los tests no cubren
 
-**El cliente no tiene proyecto de pruebas.** Todo lo anterior vive en el
-servidor. Es una decisión con consecuencias, y hay que conocerlas:
+**Este apartado lo escribió alguien que después se equivocó, y se conserva a
+propósito.** Entonces el cliente no tenía proyecto de pruebas: todo lo anterior
+vivía en el servidor. Hoy `WatchMercadoPublico.Client.Tests` existe, con 43
+pruebas. El error es la razón de que el proyecto exista.
 
 Los tres bugs de fechas que hicieron falta arreglar estaban **en el cliente**,
 no en el servidor: el array de días ordenado por lunes pero indexado por
@@ -1244,16 +1246,13 @@ no en el servidor: el array de días ordenado por lunes pero indexado por
 
 La reacción fue mover el texto de las fechas al servidor, donde sí se prueba
 (`TextosDeFecha`), y después sacar de `Home.razor` la otra mitad, la que depende
-de los filtros, a `FiltrosDeSemana`, que sí se puede probar. Ver "Lo que los
-tests no cubren", más abajo, para lo que queda.
+de los filtros, a `FiltrosDeSemana`, que sí se puede probar.
 
 El último bug fue de la misma familia y **tampoco lo cazó ningún test**:
 comparar solo el número de semana para saber si los filtros habían cambiado.
 Como el número de semana se repite en todos los periodos, cambiar de mes o de
 año no disparaba el aviso. Era una línea, y estaba a dos líneas de otra que sí
 comparaba las tres cosas.
-
-### Lo que los tests no cubren
 
 **El `code-behind` de `Home.razor` sigue sin poder probarse.** Hay proyecto de
 tests para el cliente, y alcanza a todo lo que son funciones puras: `Formato`,
@@ -1276,14 +1275,6 @@ mano después de tocar el componente.
 Lo que sí hacen los tests, y está medido: **metiendo los bugs de vuelta, saltan.**
 No es una cifra de los tests: se comprobó una por una, quitando cada bug de la
 clase y viendo cuál test lo cazaba.
-
-Conviene tener presente el historial, porque explica por qué el hueco importa:
-
-Los **tres** bugs de fechas estaban **en el cliente**, y ninguno pudo ser visto
-por un test, porque no había ninguno que mirara. El más caro de todos, el array
-de días ordenado por lunes pero indexado por `DayOfWeek`, que en .NET empieza por
-domingo, y por eso un viernes salía como "sábado" en pantalla. La reacción
-inmediata fue mover el texto de las fechas al servidor, donde sí se prueba.
 
 Y el proyecto de tests del cliente, cuando se creó, **encontró un bug real a la
 primera**: `Formato.SinAcentos` bajaba a minúscula solo los caracteres a los que
