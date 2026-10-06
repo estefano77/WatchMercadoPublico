@@ -769,7 +769,7 @@ Test-Path publicacion\appsettings.Development.json   # debe ser False
 |---|---|---|
 | Modelo de hosting | **`inprocess`** | Es el **valor por defecto** en ASP.NET Core desde .NET 6. Menos saltos, menos memoria, y `HttpRequest.Protocol` da HTTP/2 de verdad (en out-of-process da HTTP/1.1, porque el salto interno a Kestrel es HTTP/1.1). Esta app no usa nada propio de Kestrel, así que no obliga a nada |
 | Estructura | **copia del `web.config` de un sitio que funciona** | Ver "Por qué este web.config es una copia", que es la parte que costó el despliegue |
-| Ticket y los otros cuatro | variables de entorno, en el `web.config` publicado | Nunca en un fichero versionado |
+| Ticket y los otros cuatro | **variables de entorno del hosting** | Nunca en un fichero versionado. Ver "Quién pone las variables", que es donde está lo que rompió MonsterASP |
 | Timeout | **fuera a propósito** | Ver "El timeout, que es una deuda declarada" |
 
 #### Por qué este `web.config` es una copia
@@ -795,6 +795,43 @@ haber encontrado el bug**, y queda escrito para que no se perda.
 La lección está en el historial: el `web.config` que funcionaba estaba a
 `C:\inetpub\GestorArchivos\web.config`, **en el mismo disco y a un comando de
 distancia**, y se leyó tarde.
+
+#### Quién pone las variables, y por qué el `web.config` NO las trae
+
+El `web.config` **del repositorio no lleva `<environmentVariables>`**, y es a
+propósito. Las cinco las pone **el hosting**, cada uno donde puede:
+
+| Hosting | Dónde van |
+|---|---|
+| **IIS, este equipo** | `scripts/Publicar-Iis.ps1` las escribe en el `web.config` de la **carpeta publicada**, y las relee después para comprobar que quedaron |
+| **MonsterASP** | Panel de la aplicación → *Environment variables* del application pool |
+
+Antes el `web.config` del repositorio traía el bloque con marcadores de posición
+(`value="PEGAR-AQUI-EL-TICKET"`). En IIS no molestaba, porque el script los
+reescribe. **En MonsterASP sí, y se comprobó**: el módulo ANCM escribe esas
+variables en el proceso **después** de arrancar el application pool, así que
+**ganan** a las del panel. Medido en `watchmerpub.runasp.net` con las cinco bien
+puestas en el panel:
+
+```
+servible   true                              <- el marcador no está vacío
+empresa    PEGAR-NOMBRE-EMPRESA
+ticket     PEGAR-AQUI-EL-TICKET
+```
+
+O sea: la aplicación **se creía configurada** con una credencial que es texto, y
+toda consulta a la API iba a fallar **sin ningún aviso en pantalla**. Eso es peor
+que no configurar nada, que sí avisa.
+
+Dos cosas que hizo falta cambiar para quitar el bloque sin romper IIS:
+
+1. `Set-VariableEnWebConfig` **crea** el nodo si no está, en vez de salir con
+   error. Antes exigía que existiera, porque el repositorio lo traía.
+2. `Publicar-Iis.ps1` sigue verificando después que las cinco quedaron escritas.
+
+Comprobado sobre una copia, sin permisos de administrador: crea el bloque, escribe
+las tres que se le pidieron, **no duplica** al reejecutar con la misma clave, deja
+el **BOM** puesto —que es lo que exige IIS— y el XML sigue siendo válido.
 
 #### El timeout, que es una deuda declarada
 

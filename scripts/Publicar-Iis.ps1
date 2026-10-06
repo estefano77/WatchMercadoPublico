@@ -116,8 +116,20 @@ function Set-VariableEnWebConfig {
 
         $nodo = $xml.SelectSingleNode('/configuration/system.webServer/aspNetCore/environmentVariables')
         if (-not $nodo) {
-            Write-Erro 'El web.config no tiene el nodo aspNetCore/environmentVariables'
-            return 1
+            # Se CREA si no esta. Antes esto era un error de salida, porque el
+            # web.config del repositorio traia el bloque con marcadores de
+            # posicion. Ya no lo trae, y hacia falta quitarlo: en MonsterASP el
+            # modulo ANCM escribe estas variables en el proceso DESPUES de
+            # arrancar, o sea que pisan a las que se ponen en el panel del
+            # application pool. Con marcadores en el fichero, la aplicacion leia
+            # "PEGAR-AQUI-EL-TICKET" y se creia configurada. Medido en
+            # watchmerpub.runasp.net: servible=true y empresa='PEGAR-NOMBRE-EMPRESA'.
+            #
+            # Asi el fichero no inyecta nada, cada hosting pone sus variables donde
+            # puede, y este script las sigue escribiendo en la carpeta publicada.
+            Write-Aviso 'El web.config no traia el nodo aspNetCore/environmentVariables; se crea'
+            $nodo = $xml.CreateElement('environmentVariables')
+            $xml.SelectSingleNode('/configuration/system.webServer/aspNetCore').AppendChild($nodo) | Out-Null
         }
 
         # Quitar la entrada con ese nombre si ya estaba, para no duplicarla al
