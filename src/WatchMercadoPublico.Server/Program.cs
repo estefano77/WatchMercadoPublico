@@ -103,6 +103,42 @@ else if (opciones.Modo == "c2")
 }
 
 // ---------------------------------------------------------------------------
+// Que los buscadores no se enteren de que esto existe
+//
+// Esta herramienta es INTERNA de SMC. No hay nada aqui que deba indexarse, y el
+// nombre de la empresa que se vigila tampoco es asunto publico.
+//
+// Van tres capas, porque cada buscador se lee una y ninguna sirve sola:
+//
+//   robots.txt    el que va a por el fichero antes de mirar nada mas
+//   meta robots   dentro del HTML, para el que ya esta dentro
+//   X-Robots-Tag  cabecera, que es la que respetan los que comparten enlaces
+//
+// OJO CON LO QUE NO ES ESTO: aqui no se toca Cache-Control. "Que no se cacheen"
+// en este caso quiere decir que no se INDEXEN ni se saquen capturas, no que el
+// navegador no guarde los assets. Los modulos de _framework llevan huella en el
+// nombre y van immutable a proposito; poner no-store encima haria que la
+// aplicacion los descargara enteros en cada visita, que es justo lo que el
+// cache de mas abajo evita.
+//
+// La cabecera va aqui, en middleware, y no en el <customHeaders> del web.config
+// porque ese solo sirve si el hosting respeta el fichero: en MonsterASP, que
+// gestiona su propia configuracion, no es una apuesta segura. En el codigo si,
+// porque el codigo lo ejecuta la aplicacion.
+// ---------------------------------------------------------------------------
+
+app.Use(async (context, siguiente) =>
+{
+    context.Response.OnStarting(() =>
+    {
+        context.Response.Headers["X-Robots-Tag"] = "noindex, nofollow, noarchive, nosnippet";
+        return Task.CompletedTask;
+    });
+
+    await siguiente();
+});
+
+// ---------------------------------------------------------------------------
 // Caché: qué se cachea y qué no
 //
 //  1. El HTML de la SPA lleva no-store. Si el navegador guardara un index.html

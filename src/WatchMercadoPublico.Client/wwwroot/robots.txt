@@ -1,0 +1,13 @@
+# Esta herramienta es interna de SMC y no debe aparecer en ningun buscador.
+#
+# No hay nada aqui que deba indexarse, y el nombre de la empresa vigilada
+# tampoco es asunto publico.
+#
+# Este fichero lo respeta el buscador que va a por el antes de mirar nada mas.
+# Los que ya estan dentro del sitio necesitan ademas el meta robots del
+# index.html, y los que funcionan con la cabecera, el X-Robots-Tag.
+#
+# Los tres van puestos a proposito. Con uno solo, hay buscadores que pasan.
+
+User-agent: *
+Disallow: /

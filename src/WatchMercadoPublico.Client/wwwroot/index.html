@@ -6,6 +6,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="description"
           content="WatchMerPub: consulta las licitaciones activas de una empresa en Mercado Público a partir de su RUT." />
+    <!--
+      Esta herramienta es interna de SMC y no debe indexarse. Esta es la segunda
+      de las tres capas: el meta robots, para el buscador que ya ha entrado y lee
+      el HTML. Las otras dos son robots.txt y la cabecera X-Robots-Tag.
+
+      Va en el index.html y no solo en el 404 porque el 404 se sirve con este
+      mismo fichero: los dos quedan cubiertos con una sola linea.
+    -->
+    <meta name="robots" content="noindex, nofollow, noarchive, nosnippet" />
+    <meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet" />
     <meta name="theme-color" content="#050a1a" />
     <title>WatchMerPub · Licitaciones por empresa</title>
     <base href="/" />

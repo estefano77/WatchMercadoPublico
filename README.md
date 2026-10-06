@@ -1058,7 +1058,47 @@ devuelve 500 a la vez, mira `Program.cs` antes que los endpoints.
 `ChildContent` y sin `Mensaje`, **no pintaba nada** y parecía que la condición
 que lo rodea estuviera mal. La guarda mira las dos cosas.
 
-### Un enlace dentro de un botón no es un enlace
+### Que los buscadores no indexen nada
+
+Es una herramienta **interna de SMC**: no hay nada aquí que deba aparecer en un
+buscador, y el nombre de la empresa vigilada tampoco es asunto público.
+
+Van **tres capas**, porque cada buscador se lee una y ninguna sirve sola:
+
+| Capa | Dónde | Quién la usa |
+|---|---|---|
+| `robots.txt` con `Disallow: /` | `wwwroot/robots.txt`, se sirve como fichero estático | El que va a por el fichero antes de mirar nada más |
+| `<meta name="robots">` | `index.html` | El que ya está dentro y lee el HTML |
+| `X-Robots-Tag` | Middleware en `Program.cs` | El que comparte enlaces, y es la única que no depende del hosting |
+
+Las dos primeras cubren también el 404, porque esa página se sirve con el mismo
+`index.html`.
+
+**La cabecera va en middleware y no en `<customHeaders>` del `web.config`** a
+propósito: ese bloque solo sirve si el hosting respeta el fichero, y en MonsterASP
+—que gestiona su propia configuración— no es una apuesta segura. En el código sí,
+porque lo ejecuta la aplicación.
+
+#### Lo que esto **no** es: `Cache-Control`
+
+"`no-store`" y "`noindex`" se parecen y no son lo mismo. Esto impide que el sitio
+se **indexe** y se saquen **capturas**, no que el navegador guarde los ficheros.
+
+Los módulos de `_framework/` llevan la huella del contenido en el nombre y se
+sirven con `immutable` a propósito, para no descargarlos en cada visita. Poner
+`no-store` encima obligaría a la aplicación a bajar los módulos de Blazor enteros
+cada vez que se abriera. Los dos comportamientos conviven: comprobado que la
+cabecera nueva sale en `/`, en `/css/app.css` y en un 404, y que los
+`Cache-Control` de antes siguen exactamente como estaban.
+
+#### Un matiz que conviene saber
+
+`robots.txt` con `Disallow` **impide rastrear**, así que un buscador que ya tivesse
+indexado el sitio **no volvería a entrar a ver el `noindex`**. Para un dominio
+nuevo —`watchmerpub.runasp.net` lo es— no hay nada que retirar y da igual. Si
+alguna vez hubiera que desindexar algo ya indexado, el orden es el contrario:
+primero se permite el rastreo para que el buscador vea el `noindex`, y solo
+después se bloquea.
 
 La ficha de cada licitación fue un `<button>` entero durante semanas. Al
 meterle al pie el enlace al acta, eso dejó de valer, y por tres motivos a la vez:
