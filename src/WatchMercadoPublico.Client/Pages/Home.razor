@@ -182,6 +182,22 @@
    dentro del bloque de resultados: es la primera respuesta a "por qué se ve
    distinto de como la dejé", así que tiene que estar donde se lee sin
    desplazar nada. *@
+    @* Aviso de espera abandonada. Va con los otros y no con los errores: no fue
+   un fallo, fue una decisión del usuario, y pintarlo en rojo sería gritarle por
+   algo que hizo a propósito. *@
+    @if (esperaCancelada && Semana is not null)
+    {
+        <div class="mt-5">
+            <Aviso Tipo="info" Titulo="Dejaste de esperar" Cerrable="true" OnCerrado="CerrarAvisoEspera">
+                <p class="mt-2 text-sm leading-relaxed text-ink-soft">
+                    La consulta sigue adelante en el servidor y el resultado queda guardado,
+                    así que el próximo intento sale rápido. Lo que ves es de la última consulta
+                    que sí terminó.
+                </p>
+            </Aviso>
+        </div>
+    }
+
     @if (minutosAvisoVuelta is int minutos)
     {
         <div class="mt-5">
@@ -257,6 +273,19 @@
                         <span class="segundos-consulta tabular-nums">@SegundosEsperando s</span>
                     }
                 </div>
+                @* Botón de salida. Antes la pantalla de espera era un callejón:
+                   el botón de Actualizar quedaba deshabilitado mientras consulta,
+                   así que si la consulta no acababa no había NADA que pulsar. Se
+                   vio con una semana pasada sin caché, que son hasta cinco días
+                   consultados en serie, y en un móvil donde además el navegador
+                   puede parar la página. Que pueda tardar mucho no quita
+                   que la espera tenga que tener final. *@
+                <div class="panel-consulta flex justify-center">
+                    <button type="button" @onclick="DejarDeEsperarAsync"
+                            class="rounded-md px-3 py-1.5 text-[0.7rem] font-semibold text-muted transition hover:bg-hover hover:text-ink">
+                        Dejar de esperar
+                    </button>
+                </div>
                 <div class="banda-consulta" aria-hidden="true"><span></span></div>
             </div>
         }
@@ -298,6 +327,33 @@
                     Se consultaron @TextoDiasConsultados y no hay ninguna licitación
                     para este período.
                 </p>
+            </div>
+        }
+        else if (esperaCancelada)
+        {
+            @* Se canceló la espera y no había ninguna consulta anterior que
+               mostrar, así que no hay nada en pantalla. Sin esto la zona se
+               quedaba en blanco y el usuario no sabría si se consultó o no.
+
+               El texto NO dice que no haya licitaciones, porque no se comprobó:
+               es lo mismo que dice la caja de error y por el mismo motivo. *@
+            <div class="entrada-suave rounded-2xl border border-dashed border-line bg-surface px-6 py-12 text-center">
+                <span class="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-field text-muted">
+                    <Icon Name="reloj" Size="26" />
+                </span>
+                <p class="mt-4 text-base font-bold text-ink">
+                    No se terminó de consultar esta semana
+                </p>
+                <p class="mx-auto mt-1.5 max-w-lg text-sm leading-relaxed text-muted">
+                    Dejaste de esperar antes de que terminara. Esto
+                    <strong class="font-semibold text-ink">no</strong> significa que no haya nada
+                    publicado esa semana: significa que no se llegó a comprobar.
+                </p>
+                <button type="button" @onclick="ActualizarAsync" disabled="@Cargando"
+                        class="boton-actualizar mt-5">
+                    <Icon Name="recargar" Size="17" />
+                    Consultar ahora
+                </button>
             </div>
         }
         else if (Semana is not null)
@@ -428,6 +484,16 @@
     /// <summary>Segundos que lleva esperando la respuesta, para el contador.</summary>
     private int SegundosEsperando { get; set; }
 
+    /// <summary>
+    /// Instante en que empezó la espera, para medirla con el reloj.
+    ///
+    /// Es un reloj y no un contador porque el fallo que motiva esto es que el
+    /// navegador puede parar la página: con un contador, los segundos que no
+    /// llega ningún tick no se cuentan, y el contador queda diciendo un número
+    /// pequeño cuando en realidad lleva mucho rato esperando.
+    /// </summary>
+    private DateTimeOffset? inicioEspera;
+
     // Selección
     // Selección. NO se dejan en 0 a propósito: el primer render ocurre antes de
     // que GetEstadoAsync responda, y con Mes = 0 la cabecera pedía el nombre del
@@ -440,6 +506,22 @@
 
     private System.Timers.Timer? temporizador;
     private System.Timers.Timer? reloj;
+
+    /// <summary>
+    /// Token de la espera en curso, para que el usuario pueda dejarla. Vive aquí
+    /// y no se pasa por parámetro a propósito: <c>CargarAsync</c> se llama desde
+    /// cuatro sitios y el botón tiene que poder llegar a la que está corriendo.
+    /// </summary>
+    private CancellationTokenSource? cancelarEspera;
+
+    /// <summary>
+    /// Si la última espera se cortó porque el usuario lo pidió, y no por un fallo.
+    ///
+    /// Es un estado aparte y no un <c>ErrorConsulta</c> porque lo que pasó no fue
+    /// un error: se intentó, tardó demasiado y el usuario prefirió no seguir
+    /// esperando. Pintarlo con la caja roja sería gritarle por una decisión suya.
+    /// </summary>
+    private bool esperaCancelada;
 
     // --- Aviso de vuelta a la pestaña ---
     //
@@ -782,6 +864,9 @@
     /// </summary>
     private void CerrarAvisoVuelta() => minutosAvisoVuelta = null;
 
+    /// <summary>Cierra el aviso de espera abandonada.</summary>
+    private void CerrarAvisoEspera() => esperaCancelada = false;
+
     /// <summary>
     /// Si la última consulta fue de verdad a Mercado Público y no una lectura de
     /// caché. El aviso de vuelta dice "se consultó ahora", y eso solo es cierto
@@ -826,6 +911,11 @@
         {
             Anio = n;
             await RecargarSemanasAsync();
+
+            // Rearma o cancela el refresco. Sin esta línea el temporizador seguía
+            // con la cuenta atrás de antes y se disparaba igual, consultando la
+            // semana del desplegable por la espalda.
+            ProgramarRefresco();
         }
     }
 
@@ -835,6 +925,10 @@
         {
             Mes = n;
             await RecargarSemanasAsync();
+
+            // Como en CambiarAnio: el temporizador se decide con los valores del
+            // desplegable, así que hay que volver a decidirlo aquí.
+            ProgramarRefresco();
         }
     }
 
@@ -858,6 +952,19 @@
         if (int.TryParse(e.Value?.ToString(), out var n) && n >= 1 && n != NumeroSemana)
         {
             NumeroSemana = n;
+
+            // ESTA LÍNEA FALTABA, y es la causa de lo que pasó. El comentario de
+            // arriba decía que el desplegable cambia al instante sin consultar
+            // nada, y es cierto: no se toca <c>Semana</c>. Pero el temporizador
+            // del refresco automático consultaba el desplegable, así que sin
+            // rearmarlo seguía pendiente con la cuenta atrás del arranque.
+            //
+            // Al llegar a cero, <c>CargarAsync</c> consultaba la semana ELEGIDA,
+            // que no era la que estaba en pantalla ni la que el usuario había
+            // pedido todavía. Con una semana pasada y sin caché, eso son hasta
+            // cinco días en serie: el contador de segundos subiendo y sin salida,
+            // porque el botón queda deshabilitado mientras consulta.
+            ProgramarRefresco();
         }
     }
 
@@ -899,6 +1006,28 @@
     /// <summary>Botón "Actualizar".</summary>
     private Task ActualizarAsync() => CargarAsync(refrescar: true);
 
+    /// <summary>
+    /// Deja de esperar la consulta en curso, a petición del usuario.
+    ///
+    /// NO cancela nada en el servidor. La petición ya está hecha y allí sigue su
+    /// curso hasta el final, guardando el día en la caché; esto solo corta la
+    /// espera del navegador. Es el mismo criterio de siempre: el trabajo del
+    /// servidor no se tira por no aguantar la espera, y por eso el siguiente
+    /// intento sale rápido.
+    ///
+    /// Sin esto, la pantalla de consulta era un callejón sin salida: el botón de
+    /// actualizar queda deshabilitado mientras dura, así que si la consulta no
+    /// terminaba no había nada que pulsar. Solo quedaba recargar la página.
+    /// </summary>
+    private async Task DejarDeEsperarAsync()
+    {
+        var espera = cancelarEspera;
+
+        if (espera is null || espera.IsCancellationRequested) return;
+
+        await espera.CancelAsync();
+    }
+
     // ------------------------------------------------------------------
     // Consulta
     // ------------------------------------------------------------------
@@ -919,6 +1048,7 @@
 
         Cargando = true;
         ErrorConsulta = null;
+        esperaCancelada = false;
 
         // Se limpia ANTES de consultar, no después. Antes conservaba el valor
         // del intento anterior, y si este fallaba, el aviso de vuelta diciendo
@@ -929,9 +1059,15 @@
 
         IniciarReloj();
 
+        // El token va aquí y solo sirve para que el usuario pueda dejar de
+        // esperar. No hay tope de tiempo en este lado: ese lo pone el
+        // HttpClient, y son dos cosas distintas con dos mensajes distintos.
+        using var espera = new CancellationTokenSource();
+        cancelarEspera = espera;
+
         try
         {
-            var (resultado, error) = await Api.GetSemanaAsync(Anio, Mes, NumeroSemana, refrescar);
+            var (resultado, error) = await Api.GetSemanaAsync(Anio, Mes, NumeroSemana, refrescar, espera.Token);
 
             if (error is not null)
             {
@@ -968,6 +1104,22 @@
             // el servidor, que es quien sabe si consultó de verdad.
             consultoDeVerdad = resultado.DesdeCache is not true;
         }
+        catch (OperationCanceledException)
+        {
+            // Solo entra por aquí si el usuario pulsó "Dejar de esperar". Un corte
+            // por tiempo NO llega por esta puerta: el cliente lo traduce a error
+            // antes, porque para la pantalla son dos cosas distintas.
+            esperaCancelada = true;
+
+            // NO se pone ErrorConsulta. Cancelar no es un fallo, y la caja roja
+            // es para fallos: si el usuario decide dejar de esperar, gritarle
+            // en rojo sería gritarle por algo que hizo a propósito.
+            //
+            // Se deja en pantalla lo que hubiera. Si no había nada, la zona de
+            // resultados se queda en blanco, que es peor que un aviso, y por eso
+            // el marcado tiene un caso propio para eso, que no dice que no haya
+            // nada porque no se comprobó.
+        }
         catch (Exception ex)
         {
             // Cinturón y tirantes. GetSemanaAsync devuelve el error en la tupla y
@@ -984,6 +1136,7 @@
         }
         finally
         {
+            cancelarEspera = null;
             Cargando = false;
             PararReloj();
         }
@@ -993,6 +1146,7 @@
     private void IniciarReloj()
     {
         SegundosEsperando = 0;
+        inicioEspera = DateTimeOffset.Now;
 
         reloj?.Dispose();
         reloj = new System.Timers.Timer(1000) { AutoReset = true };
@@ -1008,7 +1162,18 @@
                 // pantalla congelada sin explicación.
                 VigilarAsync(InvokeAsync(() =>
                 {
-                    SegundosEsperando++;
+                    // SE MIDE EL TIEMPO, NO SE CUENTA LOS TICKS. Antes era
+                    // SegundosEsperando++, o sea un tick por segundo. Si el
+                    // navegador para la página, los ticks dejan de llegar y el
+                    // número se queda donde estaba: se vio marcando 10 s con la
+                    // consulta parada desde hacía minutos, o sea mintiendo sobre
+                    // lo único que el contador tenía que decir.
+                    //
+                    // Ahora se lee el reloj. El temporizador sigue estando para
+                    // forzar el repintado, que es lo que Blazor no hace solo, pero
+                    // el número sale de la hora real, así que ni se queda corto
+                    // ni se salta.
+                    SegundosEsperando = (int)(DateTimeOffset.Now - inicioEspera.Value).TotalSeconds;
 
                     // Repintar a mano: al no haber ningún await en curso, Blazor solo
                     // repintaría cuando terminara la consulta, y el contador se
@@ -1059,8 +1224,17 @@
     /// Refresco automático, SOLO si se está mirando la semana en curso.
     ///
     /// Una semana pasada no va a cambiar: repreguntarla gastaría cuota para
-    /// devolver exactamente lo mismo. Por eso el temporizador se rearma al
-    /// cambiar de semana y no se programa en absoluto para las antiguas.
+    /// devolver exactamente lo mismo. Por eso no se programa para las antiguas.
+    ///
+    /// Y hay un segundo motivo para no programarlo, que salió de un fallo real:
+    /// el temporizador dispara <see cref="CargarAsync"/>, que consulta los
+    /// valores del DESPLEGABLE, no los de lo que hay en pantalla. Así que con un
+    /// cambio sin traer, el temporizador arrancaba solo una consulta de una
+    /// semana distinta de la que el usuario estaba mirando, y el aviso de
+    /// "pulsa Actualizar para traerla" se volvía mentira a los cinco minutos: el
+    /// usuario iba a septiembre, sin pulsar nada, y se le lanzaba una consulta de
+    /// septiembre, de una semana pasada y sin caché, que son hasta cinco días
+    /// consultados uno detrás de otro.
     /// </summary>
     private void ProgramarRefresco()
     {
@@ -1069,6 +1243,11 @@
         temporizador = null;
 
         if (MinutosRefresco <= 0 || !EsSemanaActual) return;
+
+        // Con un cambio pendiente de traer, no se programa. Es el mismo motivo
+        // de arriba escrito como condición: si hay algo sin traer, el refresco
+        // no puede traerlo, solo contradecirlo.
+        if (HaySemanaPendiente) return;
 
         temporizador = new System.Timers.Timer
         {

@@ -90,14 +90,15 @@ public sealed class MercadoPublicoApi(HttpClient http)
     /// de hoy; los días pasados ya están cacheados porque no cambian.
     /// </summary>
     public async Task<(SemanaLicitaciones? Data, string? Error)> GetSemanaAsync(
-        int anio, int mes, int semana, bool refrescar = false)
+        int anio, int mes, int semana, bool refrescar = false,
+        CancellationToken ct = default)
     {
         try
         {
             var url =
                 $"api/semana?anio={anio}&mes={mes}&semana={semana}&refrescar={(refrescar ? "true" : "false")}";
 
-            using var respuesta = await http.GetAsync(url);
+            using var respuesta = await http.GetAsync(url, ct);
             var cuerpo = await respuesta.Content.ReadAsStringAsync();
 
             if (respuesta.IsSuccessStatusCode)
@@ -110,13 +111,12 @@ public sealed class MercadoPublicoApi(HttpClient http)
 
             return (null, ExtraerError(cuerpo) ?? "No se pudieron cargar las licitaciones de esa semana.");
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            // Aquí no hay token que cancelar, así que lo único que puede haber
-            // cortado la espera es el tiempo del cliente. Va antes del filtro de
-            // abajo porque OperationCanceledException no es HttpRequestException:
-            // sin esta línea el corte salía como excepción sin manejar, la pantalla
-            // se quedaba en "Consultando" para siempre y no se veía ningún error.
+            // El corte por tiempo se convierte en error, pero una cancelación
+            // pedida NO: esa sube como excepción, que es lo que espera quien llama
+            // y lo que le permite distinguir "no aguanté más" de "el servidor no
+            // respondió". El filtro con el token es lo que separa los dos casos.
             return (null,
                 "El servidor tardó demasiado en responder y la consulta se cortó. " +
                 "Puede que siga buscando en Mercado Público: inténtalo otra vez en un rato.");
