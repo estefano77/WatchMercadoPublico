@@ -2,10 +2,10 @@
     Símbolo + rótulo de la aplicación.
 
     El símbolo (la "M" en zigzag sobre el degradado azul-violeta-rojo) y el
-    nombre WatchMercadoPublico son una marca PROPIA, dibujada para este
-    proyecto. No reproduce ni fusiona los logotipos de Mercado Público /
-    ChileCompra, que son marcas registradas de terceros: copiar su arte en una
-    marca nueva es infracción de marca, no solo de copyright.
+    nombre WatchMerPub son una marca PROPIA, dibujada para este proyecto. No
+    reproduce ni fusiona los logotipos de Mercado Público / ChileCompra, que son
+    marcas registradas de terceros: copiar su arte en una marca nueva es
+    infracción de marca, no solo de copyright.
 
     El logotipo de SMC va aparte, en LogoSmc.razor y en la cabecera: se muestra
     porque esta herramienta es INTERNA de SMC, no porque su marca sea parte de
@@ -39,18 +39,25 @@
     {
         @* Sin subtítulo: solo el nombre, más grande.
 
-           EL UMBRAL ESTÁ MEDIDO, NO SACADO A OJO. Con el rótulo a 1.15rem la
-           cabecera necesita 477 px: 32 de padding, 36 del icono, 12 de hueco,
-           246 del rótulo, 12 de hueco y 139 del logo de SMC con el botón de
-           tema. Antes el umbral estaba en 380 px, y en un iPhone 13 (390 px)
-           el nombre salía a medias: "WatchMercadoPub" pegado al logo de SMC,
-           cortado dentro de la palabra.
+           EL UMBRAL ESTÁ MEDIDO, NO SACADO A OJO, y se volvió a medir cuando el
+           nombre pasó de "WatchMercadoPublico" a "WatchMerPub".
+
+           Con el nombre viejo, de 246 px a 1.15rem, la cabecera necesitaba 477 px
+           y el umbral quedó en 480. Con el nombre nuevo el rótulo mide 124 px a
+           1.15rem y 140 px a 1.3rem, así que la cabecera necesita unos 360 px.
+           Medido en el navegador forzando el rótulo visible: no se solapa con el
+           logo de SMC hasta 390 px, y a 375 px ya se monta sobre él. Por eso el
+           umbral bajó a 390.
+
+           OJO al cambiar el nombre otra vez: este número es una medida, no una
+           costumbre. Con el nombre viejo, a 390 px el nombre salía a medias,
+           "WatchMercadoPub" pegado al logo de SMC.
 
            Que no quepa el nombre no es una pérdida: el icono ya identifica la
            aplicación, y el logo de SMC sí se queda, que es lo que el usuario
-           pidió que se viera. Por debajo de 480 px va solo el icono. *@
-        <span class="hidden text-[1.15rem] leading-none font-extrabold tracking-tight min-[480px]:inline sm:text-[1.3rem]">
-            Watch<span class="marca-texto">MercadoPublico</span>
+           pidió que se viera. *@
+        <span class="hidden text-[1.15rem] leading-none font-extrabold tracking-tight min-[390px]:inline sm:text-[1.3rem]">
+            Watch<span class="marca-texto">MerPub</span>
         </span>
     }
 </span>

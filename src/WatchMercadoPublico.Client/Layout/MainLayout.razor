@@ -60,10 +60,11 @@
            Ojo al añadir más nombres de terceros aquí: el pie se llena enseguida
            de rótulos que parecen piezas de la aplicación cuando no lo son. *@
         <div class="mx-auto flex max-w-6xl flex-col items-center gap-4 px-4 text-center text-xs text-muted">
-            <p>© @DateTime.Now.Year WatchMercadoPublico</p>
-
+            @* Una sola línea, y encima del logo. Antes eran dos: el copyright y
+               la autoría. Se juntaron para que el pie se lea como una frase y no
+               como dos rótulos sueltos. *@
             <p>
-                Desarrollado por
+                © @DateTime.Now.Year WatchMerPub es Desarrollado por
                 <a href="https://smc.cl/" target="_blank" rel="noopener noreferrer"
                    class="font-semibold text-ink-soft transition hover:text-marca-b">SMC Spa</a>
             </p>

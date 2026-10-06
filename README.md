@@ -1213,7 +1213,7 @@ Hay **tres marcas** en pantalla, y conviene no confundirlas:
 
 | Marca | De quién es | Dónde sale |
 |---|---|---|
-| La *M* en zigzag + `WatchMercadoPublico` | **Propia**, dibujada para este proyecto | Símbolo y nombre de la herramienta |
+| La *M* en zigzag + `WatchMerPub` | **Propia**, dibujada para este proyecto | Símbolo y nombre de la herramienta |
 | El rótulo `SMC` | **De SMC**, la empresa para la que es la herramienta | Logotipo en la cabecera, a la derecha |
 | El logo de **Dirección ChileCompra** | **De ChileCompra**, el organismo que publica los datos | Logotipo en el pie |
 
@@ -1227,8 +1227,10 @@ en mitad del hueco.
 
 El logo de ChileCompra se pone por lo contrario: los datos que se muestran **son
 suyos**, y decir de dónde salen es lo mínimo que corresponde. Va en el pie, y
-además de pie lleva el crédito de autoría: "Desarrollado por **SMC Spa**", con
-enlace a `smc.cl`.
+encima lleva una única línea con el copyright y el crédito de autoría juntos:
+"© 2026 WatchMerPub es Desarrollado por **SMC Spa**", con el enlace a `smc.cl`.
+Son **una** línea y no dos para que el pie se lea como una frase: como dos
+rótulos sueltos, el segundo parecía un pie de página y el primero no.
 
 Lo que **no** se hace, en ningún caso: reproducir, combinar ni fusionar el
 logotipo de Mercado Público / ChileCompra con la marca propia. Es una marca
@@ -1311,13 +1313,12 @@ comprobación de cabecera mira el ``maskImage`` ya resuelto.
 
 | Dónde | Qué sale | Por qué |
 |---|---|---|
-| Cabecera, izquierda | Símbolo propio + `WatchMercadoPublico` | Identidad de la herramienta |
+| Cabecera, izquierda | Símbolo propio + `WatchMerPub` | Identidad de la herramienta |
 | Cabecera, derecha | Logotipo de **SMC** | Identifica al propietario: herramienta interna suya |
 | Encabezado de la página | "Novedades en **Mercado Público**" | Uso nominativo: describe la plataforma de la que salen los datos |
 | Encabezado, a la derecha | "Ir a **Mercado Público**" → la URL de `UrlMercadoPublico` | Salida a la plataforma. La URL viene de la configuración, no del marcado |
 | Ficha, al abrirla | "Ir a **Mercado Público**", la misma `UrlMercadoPublico` | El buscador del portal |
-| Pie | "© WatchMercadoPublico" | Autoría del producto |
-| Pie | "Desarrollado por **SMC Spa**" → `smc.cl` | Crédito de autoría. Se queda aunque no haya salida a internet |
+| Pie | "© 2026 WatchMerPub **es Desarrollado por SMC Spa**" → `smc.cl` | Una sola línea, encima del logo. El copyright y la autoría se juntaron para que el pie se lea como una frase y no como dos rótulos sueltos. El enlace se queda aunque no haya salida a internet |
 | Pie | Logotipo de **ChileCompra** | Los datos son suyos: atribución |
 | Aviso de demo | "No se está llamando a **Mercado Público**" | Uso nominativo |
 | Ficha de una licitación | Nombre del organismo y su RUT | Son los datos de la plataforma, no un atributo nuestro |
