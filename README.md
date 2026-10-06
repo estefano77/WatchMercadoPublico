@@ -1,4 +1,4 @@
-# WatchMercadoPublico
+# WatchMerPub
 
 Aplicación Blazor WebAssembly + ASP.NET Core que muestra **las licitaciones
 publicadas en Mercado Público para una empresa fija**, dentro del periodo que
