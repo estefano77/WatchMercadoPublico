@@ -700,6 +700,45 @@ pide `_framework/blazor.webassembly`, recibe un 404 y la aplicación **se queda 
 
 Para regenerar el `index.html` a mano hay que publicar primero el cliente.
 
+#### Cómo llama el target al cliente: con la tarea `MSBuild`, no con un `Exec`
+
+El target llama al `Publish` del cliente con la **tarea `MSBuild`**, que lo ejecuta
+**en el mismo proceso**:
+
+```xml
+<MSBuild Projects="$(_ProyectoCliente)"
+         Targets="Publish"
+         Properties="Configuration=$(Configuration);PublishDir=$(_SalidaClienteAbs)" />
+```
+
+Antes era un `Exec` que lanzaba `dotnet publish` **por separado**, y eso funciona
+en un equipo normal pero **falla en MonsterASP**, cuyo agente de compilación tiene
+una política de grupo que **prohíbe lanzar procesos hijos**:
+
+```
+Superponiendo la publicacion de Blazor WebAssembly...
+This program is blocked by group policy. For more information, contact your system administrator.
+...csproj(58,5): error MSB3073: The command "dotnet publish ..." exited with code 1.
+```
+
+Lo que despistaba es que **el `dotnet publish` de fuera sí pasaba** — el servidor
+llegaba a publicarse en `D:\Deploy\...\publish\`— y solo moría el de dentro. Con
+eso delante, el error parecía del SDK o del `.csproj`, y no lo era: el SDK estaba
+bien y el proyecto estaba bien. Lo que no se podía era lanzar un `dotnet` desde
+dentro de MSBuild.
+
+Con la tarea `MSBuild` no hay proceso hijo que esa política pueda bloquear, y el
+resultado es idéntico: la misma carpeta de salida, con el `index.html` ya
+sustituido y el `importmap` relleno.
+
+El `PublishDir` que se le pasa al cliente tiene que ser **absoluto y terminar en
+separador**. `Publish` sin separador final toma el último tramo como nombre de
+fichero en vez de carpeta, y ahí el fallo es aún más difícil de leer.
+
+Comprobado en local: publicación del servidor con **0 errores**, `index.html` con
+el token sustituido, `importmap` con datos, `_framework/blazor.webassembly.<huella>.js`
+sirviéndose con HTTP 200 y la API respondiendo.
+
 ### Antes de subir nada, comprueba
 
 ```powershell
@@ -1190,6 +1229,7 @@ Por **síntoma**, no por causa interna:
 | Un día sale con el nombre de otro | El array de días del cliente indexado por `DayOfWeek`, que en .NET empieza por **domingo**. Esa lógica se movió al servidor (`TextosDeFecha`) precisamente por eso. Si alguien la reintroduce, el primer síntoma es "un viernes que pone sábado". |
 | Al abrir la página, la cabecera y nada debajo | Estado muerto: `Semana` a null sin error ni consulta en vuelo. Hay una rama `else` que lo evita, así que si aparece, hay que mirar la consola del navegador. |
 | Se queda en "Cargando" tras publicar | Falta el target `SuperponerClienteBlazor`, o el `index.html` publicado sin sustituir. |
+| `MSB3073` y "This program is blocked by group policy" al publicar | **MonsterASP**: el agente no permite lanzar procesos hijos, y el target lanzaba un `dotnet publish` anidado. Ya no lo hace: usa la tarea `MSBuild`, que va en el mismo proceso. Ver "Cómo llama el target al cliente", en la sección de Publicación. |
 | Cabecera y título, y debajo un hueco vacío durante un minuto | Estado muerto en el render: el panel no se pintaba porque `Estado` aún era `null` y `Estado is { Servible: true }` no se cumplía. Ver [el aviso que no se veía](#%EF%B8%8F-asignar-un-campo-no-repinta-el-consultando-no-sal%C3%ADa-en-un-minuto). |
 | `404` en `/_framework/*.wasm` | Recursos de una build anterior, cacheados un año. `Ctrl+F5`. |
 | `Failed to find a valid digest … 47DEQpj8HBSa+` | Variante comprimida vacía: se colaron `.br`/`.gz`. Revisa las **siete** propiedades de compresión de `Directory.Build.props`. |

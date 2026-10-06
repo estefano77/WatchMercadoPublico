@@ -52,10 +52,28 @@
     <PropertyGroup>
       <_SalidaCliente>$([MSBuild]::NormalizeDirectory('$(BaseIntermediateOutputPath)', 'client-publish'))</_SalidaCliente>
       <_ProyectoCliente>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '..', 'WatchMercadoPublico.Client', 'WatchMercadoPublico.Client.csproj'))</_ProyectoCliente>
+      <!-- El PublishDir que se le pasa al cliente tiene que ser ABSOLUTO y
+           terminar en separador: el Publish sin separador final toma el ultimo
+           tramo como nombre de fichero, no de carpeta. -->
+      <_SalidaClienteAbs>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(_SalidaCliente)'))</_SalidaClienteAbs>
     </PropertyGroup>
 
     <Message Importance="high" Text="Superponiendo la publicacion de Blazor WebAssembly..." />
-    <Exec Command="dotnet publish &quot;$(_ProyectoCliente)&quot; -c $(Configuration) -o &quot;$(_SalidaCliente.TrimEnd('\').TrimEnd('/'))&quot; -v quiet --nologo" />
+
+    <!--
+      Se llama al target Publish del cliente con la TAREA MSBUILD, no con un Exec
+      que lance "dotnet publish" por separado. Es por MonsterASP: su agente de
+      compilacion tiene una politica de grupo que prohibe lanzar procesos hijos, y
+      ahi el publish anidado moria con "This program is blocked by group policy" y
+      MSB3073. El publish externo si pasaba, y por eso el fallo parecia del SDK.
+
+      La tarea MSBuild ejecuta el Publish del cliente EN EL MISMO PROCESO: no hay
+      proceso hijo que esa politica pueda bloquear. Y el resultado es el mismo que
+      daba el Exec: la misma carpeta de salida, con el index.html ya sustituido.
+    -->
+    <MSBuild Projects="$(_ProyectoCliente)"
+             Targets="Publish"
+             Properties="Configuration=$(Configuration);PublishDir=$(_SalidaClienteAbs)" />
 
     <ItemGroup>
       <_WwwRootCliente Include="$(_SalidaCliente)wwwroot\**\*" />
