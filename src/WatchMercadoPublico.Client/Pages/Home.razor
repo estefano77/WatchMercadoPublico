@@ -268,7 +268,7 @@
                 <div class="panel-consulta">
                     <span class="aro-consulta" aria-hidden="true"></span>
                     <p class="min-w-0 text-sm font-semibold text-ink">Consultando a Mercado Público…</p>
-                    @if (SegundosEsperando > 4)
+                    @if (SegundosEsperando > 0)
                     {
                         <span class="segundos-consulta tabular-nums">@SegundosEsperando s</span>
                     }
@@ -522,6 +522,16 @@
     /// esperando. Pintarlo con la caja roja sería gritarle por una decisión suya.
     /// </summary>
     private bool esperaCancelada;
+
+    /// <summary>
+    /// Si la espera se cortó por plazo y no porque el usuario lo pidiera.
+    ///
+    /// Los dos caminos llegan por la misma puerta, <c>OperationCanceledException</c>,
+    /// y necesitan mensajes distintos. Si el usuario no pulsó nada, decir "dejaste
+    /// de esperar" es mentira, y además taparía que lo que falló fue el navegador
+    /// parando la página.
+    /// </summary>
+    private bool cortePorPlazo;
 
     // --- Aviso de vuelta a la pestaña ---
     //
@@ -781,6 +791,19 @@
 
         await InvokeAsync(async () =>
         {
+            // PRIMERO, una consulta que se quedó colgada.
+            //
+            // Cuando el navegador para la página se paran a la vez el reloj de
+            // segundos y el corte de espera del cliente, porque los dos son
+            // temporizadores. Al volver, lo primero que se hace es mirar si había
+            // una consulta en vuelo y si ya rebasó el plazo: si lo rebasó, se
+            // cierra y se dice, en vez de dejar un número clavado para siempre.
+            //
+            // Va antes que lo demás porque es lo único que hay que hacer aunque
+            // los datos estén fresquísimos: si la consulta está colgada no hay
+            // datos frescos que enseñar.
+            await RescatarConsultaColgadaAsync();
+
             var minutos = MinutosFuera;
 
             // Sin este caso, volver a la pestaña después de dos segundos
@@ -838,6 +861,49 @@
             minutosAvisoVuelta = minutos;
             StateHasChanged();
         }
+    }
+
+    /// <summary>
+    /// Cierra una consulta que se quedó colgada mientras la página estaba parada.
+    ///
+    /// <para>
+    /// El caso que resuelve: el contador se queda clavado en un número y no avanza.
+    /// Pasa porque el navegador paró la página, y entonces se paran a la vez el
+    /// reloj de segundos y el corte de espera del cliente, que son los dos
+    /// temporizadores. Al volver, nada de eso reanuda solo.
+    /// </para>
+    ///
+    /// <para>
+    /// Aquí no se puede hacer nada mientras la página está parada: sin
+    /// temporizadores no hay forma de detectarlo. Lo que sí llega cuando la
+    /// pestaña vuelve a verse es el evento de visibilidad, y es lo que se usa.
+    /// </para>
+    ///
+    /// <para>
+    /// El plazo que se mira es el del cliente, que es el más agarrable: si la
+    /// consulta ya lo rebasó, el navegador tiene la culpa y no la API, y decirlo
+    /// así es lo único honesto.
+    /// </para>
+    /// </summary>
+    private async Task RescatarConsultaColgadaAsync()
+    {
+        if (!Cargando || inicioEspera is not DateTimeOffset inicio) return;
+
+        var transcurrido = DateTimeOffset.Now - inicio;
+
+        if (transcurrido < TimeSpan.FromSeconds(MercadoPublicoApi.SegundosEspera)) return;
+
+        // El contador se queda en lo que iba, y se anota que el corte fue por
+        // plazo y no porque el usuario lo pidiera: los dos mensajes son distintos
+        // y decir "dejaste de esperar" sería mentira.
+        SegundosEsperando = (int)transcurrido.TotalSeconds;
+
+        cortePorPlazo = true;
+
+        var espera = cancelarEspera;
+
+        if (espera is not null && !espera.IsCancellationRequested)
+            await espera.CancelAsync();
     }
 
     /// <summary>Minutos que se anuncian en el aviso, o null si no toca.</summary>
@@ -1057,6 +1123,7 @@
         Cargando = true;
         ErrorConsulta = null;
         esperaCancelada = false;
+        cortePorPlazo = false;
 
         // Se limpia ANTES de consultar, no después. Antes conservaba el valor
         // del intento anterior, y si este fallaba, el aviso de vuelta diciendo
@@ -1115,14 +1182,28 @@
         }
         catch (OperationCanceledException)
         {
-            // Solo entra por aquí si el usuario pulsó "Dejar de esperar". Un corte
-            // por tiempo NO llega por esta puerta: el cliente lo traduce a error
-            // antes, porque para la pantalla son dos cosas distintas.
-            esperaCancelada = true;
+            if (cortePorPlazo)
+            {
+                // Cortada porque la página estuvo parada más rato del plazo. Se dice
+                // lo que pasó, que es lo único que sirve: no es que Mercado Público
+                // no respondió, es que el navegador dejó de responder mientras
+                // le esperábamos.
+                ErrorConsulta =
+                    "La página estuvo en segundo plano más rato del previsto y el navegador " +
+                    "dejó de responder. La consulta se cerró al volver. Puede que Mercado Público " +
+                    "la siga terminar: inténtalo otra vez en un momento.";
+            }
+            else
+            {
+                // Solo entra por aquí si el usuario pulsó "Dejar de esperar". Un corte
+                // por tiempo NO llega por esta puerta: el cliente lo traduce a error
+                // antes, porque para la pantalla son dos cosas distintas.
+                esperaCancelada = true;
+            }
 
-            // NO se pone ErrorConsulta. Cancelar no es un fallo, y la caja roja
-            // es para fallos: si el usuario decide dejar de esperar, gritarle
-            // en rojo sería gritarle por algo que hizo a propósito.
+            // NO se pone ErrorConsulta en el caso del usuario. Cancelar no es un
+            // fallo, y la caja roja es para fallos: si el usuario decide dejar de
+            // esperar, gritarle en rojo sería gritarle por algo que hizo a propósito.
             //
             // Se deja en pantalla lo que hubiera. Si no había nada, la zona de
             // resultados se queda en blanco, que es peor que un aviso, y por eso
