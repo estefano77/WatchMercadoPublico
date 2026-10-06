@@ -23,11 +23,30 @@ jobs:
         with:
           dotnet-version: '10.x'
 
-      - name: Build with dotnet
-        run: dotnet build --configuration Release
-
+      # El publish apunta al proyecto del SERVIDOR, no a la solución. La plantilla
+      # de Azure lo deja sin proyecto, y aquí eso rompe por dos cosas a la vez:
+      #
+      #   1. Publica los cuatro proyectos en la misma carpeta, incluidos los dos de
+      #      pruebas, que acabarían dentro de la aplicación publicada. Azure avisa
+      #      de esto con NETSDK1194, que sale en el log del despliegue fallido.
+      #   2. El cliente Blazor se publica DOS VECES a la vez: una por estar en la
+      #      solución, y otra porque el target SuperponerClienteBlazor del
+      #      servidor vuelve a publicar el cliente con la tarea MSBuild. Las dos
+      #      se pisan en obj\...\wasm\for-publish\runtime-icall-table.h y el
+      #      despliegue muere con:
+      #
+      #        error MSB4018: The "ManagedToNativeGenerator" task failed
+      #        The process cannot access the file ... because it is being used
+      #        by another process.
+      #
+      # Es el mismo comando que ya usan MonsterASP y scripts\arrancar.ps1, así que
+      # es un camino probado con este proyecto y no uno nuevo.
+      #
+      # No se deja un "dotnet build" antes: publicar ya compila, y el build
+      # aparte solo servía para compilar también los proyectos de pruebas, que
+      # aquí no se publican.
       - name: dotnet publish
-        run: dotnet publish -c Release -o "${{env.DOTNET_ROOT}}/myapp"
+        run: dotnet publish src/WatchMercadoPublico.Server -c Release -o "${{env.DOTNET_ROOT}}/myapp"
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
