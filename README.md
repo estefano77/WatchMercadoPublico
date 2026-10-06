@@ -1345,7 +1345,7 @@ solo consigue más `429`.
 ### Peticiones en paralelo → `429`, y también SIN `429`
 
 `Task.WhenAll` con los 7 días dispara el límite de peticiones en milisegundos, y
-un `429` no se cachea. Van **uno a uno, con ~800 ms de pausa**.
+un `429` no se cachea. Van **uno a uno**.
 
 Y hay un segundo motivo, más fuerte, que se midió en 2026 y que no es un `429`:
 **Mercado Público se limita callando**. Dos consultas a la vez desde la misma
@@ -1363,6 +1363,39 @@ y por eso los días de una semana van en serie.
 Se llegó a cambiar el candado a uno por semana, pensando que el problema era que
 una semana bloqueara a otra, y la medición salió al revés. Está revertido, y hay
 un test que lo fija: `UnaSemanaOcupadaRetieneAOtra`.
+
+### El ritmo también se dispara sin paralelismo
+
+Fijados los días en serie, quedaba un `429` que no venía de paralelismo. De un log
+real de MonsterASP, una semana de cinco días:
+
+| Día | Respuesta |
+|---|---|
+| 1 | 200 en 1570 ms |
+| 2 | 200 en 1370 ms |
+| 3 | 200 en 1008 ms |
+| 4 | 200 en 612 ms |
+| 5 | **429** en 280 ms |
+
+Código 10500: *"Hemos detectado que existen peticiones simultáneas"*. Los días ya
+iban de uno en uno, así que lo que se disparaba era el **ritmo**: cinco peticiones
+en menos de cinco segundos.
+
+Este README decía antes que los días iban *"uno a uno, con ~800 ms de pausa"*, y
+**esa pausa no estaba en el código**. Documentaba algo que nadie implementó, que
+es peor que no documentarlo.
+
+La pausa que hay ahora es **adaptativa**, y esa es la decisión:
+
+- Si un día entró al primer intento, **no se pausa nada**.
+- Si un día necesitó reintentar, se espera 800 ms antes del siguiente.
+
+Una pausa fija entre todos los días costaría más de 3 s en cada semana en frío, para
+un `429` que solo ocurre de vez en cuando. Con la adaptativa se paga únicamente
+cuando hay un 429 de por medio, que es cuando de verdad hace falta.
+
+Está en los **dos** bucles: los días y los detalles. El de detalles es el que más
+se encadena, porque una semana puede traer más licitaciones que días.
 
 Lo que sí era un problema real, y está arreglado, es lo que pasaba **alrededor** del
 candado:

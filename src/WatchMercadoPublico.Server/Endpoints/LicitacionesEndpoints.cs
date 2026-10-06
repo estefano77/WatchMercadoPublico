@@ -65,6 +65,40 @@ public static class LicitacionesEndpoints
     /// </summary>
     public const int IntentosPorDiaEnSegundoPlano = 3;
 
+    /// <summary>
+    /// Pausa entre peticiones cuando Mercado Público acaba de limitar el ritmo.
+    ///
+    /// <para>
+    /// Sale de un log real de MonsterASP, del 6 de octubre de 2026. Una semana de
+    /// cinco días va bien al principio y el QUINTO día responde:
+    /// </para>
+    ///
+    /// <list type="bullet">
+    /// <item>200 en 1570 ms</item>
+    /// <item>200 en 1370 ms</item>
+    /// <item>200 en 1008 ms</item>
+    /// <item>200 en 612 ms</item>
+    /// <item><b>429</b> en 280 ms: "Hemos detectado que existen peticiones
+    /// simultáneas", código 10500</item>
+    /// </list>
+    ///
+    /// <para>
+    /// Los días ya iban de uno en uno, no en paralelo: lo que se disparaba era el
+    /// RITMO, cinco peticiones en menos de cinco segundos. Por eso la pausa no es
+    /// fija sino <b>adaptativa</b>: si un día entró al primer intento, no se pausa
+    /// nada y la semana se consulta tan rápido como siempre. Si un día necesitó
+    /// reintentar, es que la API está pidiendo más calma, y se espera antes del
+    /// siguiente.
+    /// </para>
+    ///
+    /// <para>
+    /// Una pausa fija entre todos los días costaría más de 3 s en cada semana en
+    /// frío, para algo que solo pasa de vez en cuando. Así se paga únicamente
+    /// cuando hay un 429 de por medio, que es cuando de verdad hace falta.
+    /// </para>
+    /// </summary>
+    private static readonly TimeSpan PausaTrasLimite = TimeSpan.FromMilliseconds(800);
+
     /// <summary>Espera del primer reintento. Las siguientes son el doble, con tope.</summary>
     private static readonly TimeSpan EsperaInicial = TimeSpan.FromSeconds(2);
 
@@ -391,11 +425,20 @@ public static class LicitacionesEndpoints
 
                     var lote = forzarConsulta ? null : cache.ObtenerDia(config.CodigoProveedor, dia);
 
+                    // 1 significa "entró al primer intento", o sea que este día vino de caché y no
+                    // hubo ninguna petición que enviar. La pausa adaptativa de más
+                    // abajo lo lee, y por eso vive fuera del if.
+                    var intentosDia = 1;
+
                     if (lote is null)
                     {
                         desdeCache = false;
 
-                        lote = await ConsultarDiaAsync(config, api, cache, dia, log, intentos, ct);
+                        var (loteDia, intentosUsados) =
+                            await ConsultarDiaAsync(config, api, cache, dia, log, intentos, ct);
+
+                        lote = loteDia;
+                        intentosDia = intentosUsados;
 
                         if (lote is null)
                         {
@@ -409,6 +452,13 @@ public static class LicitacionesEndpoints
                     }
 
                     todas.AddRange(lote);
+
+                    // Pausa ADAPTATIVA entre días. Si este día entró al primer
+                    // intento, no se pausa nada. Si necesitó reintentar, es que la
+                    // API acaba de decir que el ritmo va rápido, y el siguiente
+                    // día espera un poco. Solo si queda otro día por delante.
+                    if (intentosDia > 1 && dia != consultables[^1])
+                        await Task.Delay(PausaTrasLimite, ct);
                 }
 
                 // Si NO se pudo comprobar ningún día que existiera, sí es un fallo entero: no
@@ -514,6 +564,13 @@ public static class LicitacionesEndpoints
                     // existe, no se vuelve a preguntar en cada carga.
                     cache.GuardarDetalle(item.CodigoExterno, detalle);
                     item.Detalle = detalle;
+
+                    // Misma pausa adaptativa que en los días. Una semana puede
+                    // traer más licitaciones que días, así que aquí es donde más
+                    // veces se encadena una petición detrás de otra, y donde más
+                    // fácil es que la API conteste con un 429.
+                    if (intento > 1) await Task.Delay(PausaTrasLimite, ct);
+
                     break;
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -716,7 +773,7 @@ public static class LicitacionesEndpoints
     /// hay hasta cinco en una semana, y por eso devuelve null en vez de Fallar:
     /// un día sin respuesta no puede ser motivo para perder los otros cuatro.
     /// </summary>
-    private static async Task<List<Licitacion>?> ConsultarDiaAsync(
+    private static async Task<(List<Licitacion>? Datos, int Intentos)> ConsultarDiaAsync(
         MercadoPublicoOpciones config,
         MercadoPublicoCliente api,
         CacheMercadoPublico cache,
@@ -736,7 +793,7 @@ public static class LicitacionesEndpoints
                     : await api.ListarLicitacionesDelDiaAsync(config.CodigoProveedor, dia, ct);
 
                 cache.GuardarDia(config.CodigoProveedor, dia, lote);
-                return lote;
+                return (lote, intento);
             }
             catch (OperationCanceledException)
             {
@@ -750,7 +807,7 @@ public static class LicitacionesEndpoints
                     log.LogWarning(
                         "Se agotaron {Intentos} intentos para el {Dia}: {Motivo}",
                         intentos, $"{dia:yyyy-MM-dd}", ex.Message);
-                    return null;
+                    return (null, intento);
                 }
 
                 log.LogInformation(
