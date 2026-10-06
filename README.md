@@ -837,8 +837,23 @@ el **BOM** puesto —que es lo que exige IIS— y el XML sigue siendo válido.
 
 Una semana son **hasta 5 días hábiles** consultados contra Mercado Público, más
 una petición de detalle por licitación, y cada petición a la API se corta a los
-`MercadoPublico:SegundosTimeout` (30 s por defecto). En el peor caso, solo los
-días son **150 s**.
+`MercadoPublico:SegundosTimeout` (30 s por defecto).
+
+El peor caso hay que decirlo bien, porque hay tres y no son lo mismo. Antes aquí
+decía "150 s", y eso no era cierto: contaba solo el tiempo de las peticiones y se
+olvidaba de las esperas entre reintentos, y de que los días van **uno detrás de
+otro**.
+
+| Caso | Cálculo | Total |
+|---|---|---|
+| Un día que falla entero | 6 × 30 s de peticiones + 2, 4, 8, 16 y 30 s de esperas | **240 s** |
+| Una semana pasada sin nada en caché | 5 días, en serie | **1200 s** |
+| La semana en curso recién abierta | 2 días como mucho, en serie | **480 s** |
+
+El tercero es el que se ve, y es el caso normal tras un reinicio: el refresco
+automático solo se rearma para la semana en curso, y de los días hábiles solo se
+consultan los que ya llegaron. Por eso se puede estar **ocho minutos** con el
+contador corriendo delante de los ojos.
 
 El límite de IIS son **120 s por defecto**. Y el atributo `requestTimeout` del
 elemento `<aspNetCore>` **no arregla nada en in-process**: la documentación de
@@ -863,6 +878,47 @@ sigue levantando.
 No es cosmético: la app está montada para tolerar que un día no responda, con
 reintentos y un aviso de "días sin comprobar". Si el corte lo provoca IIS y no la
 API, ese aviso pasa a mentir sobre la causa.
+
+#### El timeout del cliente, y por qué ahora se nota
+
+La cadena de esperas tenía **tres** números y faltaba el tercero. Está el del
+servidor a Mercado Público (30 s), el de IIS (120 s) y, por fuera de todo, el del
+**navegador contra el servidor**, que era el valor por defecto de `HttpClient`:
+**100 s**, por accidente y sin que nadie lo supiera.
+
+Con esos tres números, el cliente siempre abandona antes: 100 s contra los 240 s
+de un solo día malo. Y ahí está lo que importaba, porque **abandonar no era lo
+malo**. Lo malo era qué pasaba al abandonar:
+
+- `HttpClient` lanza `TaskCanceledException`, que **no** es `HttpRequestException`,
+  así que pasaba por debajo del filtro `ex is HttpRequestException or
+  JsonException or NotSupportedException` de las cuatro llamadas.
+- La excepción salía sin manejar. El `finally` de `CargarAsync` apagaba el reloj
+  y ponía `Cargando` a false, pero **nadie repintaba**, porque Blazor solo repinta
+  cuando el manejador termina bien.
+- El contador de segundos se quedaba **clavado en el último número pintado** y la
+  pantalla de "Consultando" sin irse, sin error en ninguna parte.
+
+Ahora el corte es explícito (`MercadoPublicoApi.SegundosEspera`, 150 s), y sobre
+todo **siempre se convierte en un error que la pantalla muestra**. No cubre el
+peor caso del servidor, y a propósito: nadie mira un contador ocho minutos, y
+cortar no gasta nada, porque la petición no lleva token de cancelación, el
+servidor sigue su curso y guarda el día en la caché. El siguiente intento sale a
+la primera.
+
+Las tres cosas que se tapaban con el fallo, y que ahora tienen arreglo:
+
+| Se tapaba | Cómo |
+|---|---|
+| El corte se veía como pantalla congelada | `OperationCanceledException` se captura y vuelve como error visible, con "Intentar ahora" |
+| Un fallo mataba el refresco automático **para el resto de la sesión** | El rearme del temporizador está en un `finally`, así que pasa igual haya fallo |
+| Ningún rastro en producción | Las cuatro rutas escriben en la consola del navegador, y el manejador del reloj ya no suelta la tarea sin mirarla |
+
+Queda un caso que la app **no** puede arreglar, porque no es suyo: si el
+navegador congela o limita la pestaña en segundo plano, el temporizador de .NET se
+detiene y no hay nada que hacer desde aquí. Cuando la pestaña vuelve a estar
+visible el corte se reanuda solo y, con lo de arriba, el usuario ve un error en
+lugar de un número parado.
 
 #### Procedimiento
 

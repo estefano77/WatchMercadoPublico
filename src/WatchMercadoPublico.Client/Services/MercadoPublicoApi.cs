@@ -22,6 +22,32 @@ public sealed class MercadoPublicoApi(HttpClient http)
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     /// <summary>
+    /// Cuánto se espera al servidor antes de cortar, en segundos.
+    ///
+    /// ESTE NÚMERO ESTÁ MEDIDO, NO ELEGIDO POR GUSTO. El servidor reintenta seis
+    /// veces cada día y cada intento a Mercado Público puede tardar 30 s, así que
+    /// un día que va mal se queda 6 x 30 s de peticiones más 2, 4, 8, 16 y 30 s de
+    /// esperas: unos cuatro minutos por día, y los días van uno tras otro.
+    ///
+    /// Por eso el corte del cliente NO cubre el peor caso del servidor, y a
+    /// propósito. Ningún usuario mira un contador cuatro minutos. Y cortar no
+    /// gasta nada: la petición no lleva token de cancelación, así que el servidor
+    /// sigue su curso y guarda el día en la caché, de modo que el siguiente
+    /// intento sale a la primera.
+    ///
+    /// Antes de esto el corte no existía: era el valor por defecto de .NET,
+    /// 100 s, por casualidad y sin que nadie lo supiera. Y el problema no era el
+    /// corte, sino lo que pasaba al dar: <see cref="OperationCanceledException"/>
+    /// NO es <see cref="HttpRequestException"/>, así que se colaba por debajo del
+    /// filtro de más abajo y salía como excepción sin manejar. La pantalla ponía
+    /// Cargando a false, pero nadie repintaba, así que el usuario veía el contador
+    /// congelado en el último número pintado y ningún error por ninguna parte.
+    ///
+    /// Lo que se arregla con esto es lo segundo, no el número.
+    /// </summary>
+    public const int SegundosEspera = 150;
+
+    /// <summary>
     /// Configuración del servidor: qué empresa se mira, si hay ticket y cada
     /// cuánto se refresca.
     /// </summary>
@@ -37,6 +63,12 @@ public sealed class MercadoPublicoApi(HttpClient http)
 
             var estado = await http.GetFromJsonAsync<EstadoApi>(url, Json, ct);
             return estado is null ? (null, "El servidor no devolvió el estado.") : (estado, null);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // Sin esta línea, un corte por tiempo de espera caería en el filtro de
+            // más abajo, no encajaría en él, y saldría como excepción sin manejar.
+            return (null, "El servidor tardó demasiado en responder.");
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or NotSupportedException)
         {
@@ -78,6 +110,17 @@ public sealed class MercadoPublicoApi(HttpClient http)
 
             return (null, ExtraerError(cuerpo) ?? "No se pudieron cargar las licitaciones de esa semana.");
         }
+        catch (OperationCanceledException)
+        {
+            // Aquí no hay token que cancelar, así que lo único que puede haber
+            // cortado la espera es el tiempo del cliente. Va antes del filtro de
+            // abajo porque OperationCanceledException no es HttpRequestException:
+            // sin esta línea el corte salía como excepción sin manejar, la pantalla
+            // se quedaba en "Consultando" para siempre y no se veía ningún error.
+            return (null,
+                "El servidor tardó demasiado en responder y la consulta se cortó. " +
+                "Puede que siga buscando en Mercado Público: inténtalo otra vez en un rato.");
+        }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or NotSupportedException)
         {
             return (null, "No se pudo conectar con el servidor.");
@@ -105,6 +148,14 @@ public sealed class MercadoPublicoApi(HttpClient http)
 
             return (envoltura.Detalle, envoltura.DesdeCache, null);
         }
+        catch (OperationCanceledException)
+        {
+            // Mismo caso que en la semana, y con la misma consecuencia si se
+            // deja pasar: el modal se quedaba cargando para siempre.
+            return (null, false,
+                "El detalle tardó demasiado en llegar y la consulta se cortó. " +
+                "Vuelve a abrir la ficha en un rato.");
+        }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or NotSupportedException)
         {
             return (null, false, "No se pudo conectar con el servidor.");
@@ -121,6 +172,10 @@ public sealed class MercadoPublicoApi(HttpClient http)
 
             return ExtraerError(await respuesta.Content.ReadAsStringAsync())
                    ?? "No se pudo vaciar la caché del servidor.";
+        }
+        catch (OperationCanceledException)
+        {
+            return "El servidor tardó demasiado en responder y la caché no se vació.";
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or NotSupportedException)
         {

@@ -717,6 +717,20 @@
 
             Semana = resultado;
         }
+        catch (Exception ex)
+        {
+            // Cinturón y tirantes. GetSemanaAsync devuelve el error en la tupla y
+            // no debería lanzar, pero si algo se escapa esta línea es la que
+            // impide el congelamiento: sin ella, el finally de abajo apagaba el
+            // reloj y ponía Cargando a false, pero NADIE repintaba, así que la
+            // pantalla se quedaba con el contador clavado en el último número
+            // pintado y sin un solo error a la vista.
+            //
+            // Que además se escriba en la consola del navegador es lo que hace
+            // falta para que exista un rastro cuando esto pasa en producción.
+            Console.Error.WriteLine($"La carga de la semana falló: {ex}");
+            ErrorConsulta = "No se pudo cargar la semana.";
+        }
         finally
         {
             Cargando = false;
@@ -732,17 +746,54 @@
         reloj?.Dispose();
         reloj = new System.Timers.Timer(1000) { AutoReset = true };
 
-        reloj.Elapsed += (_, _) => InvokeAsync(() =>
+        reloj.Elapsed += (_, _) =>
         {
-            SegundosEsperando++;
+            try
+            {
+                // Antes era: reloj.Elapsed += (_, _) => InvokeAsync(...)
+                // devolviendo el valor y SOLTÁNDOLO. Así, si algo fallaba dentro,
+                // la excepción se quedaba en una tarea que nadie leía nunca, y el
+                // contador se paraba en seco sin error en ninguna parte: la
+                // pantalla congelada sin explicación.
+                VigilarAsync(InvokeAsync(() =>
+                {
+                    SegundosEsperando++;
 
-            // Repintar a mano: al no haber ningún await en curso, Blazor solo
-            // repintaría cuando terminara la consulta, y el contador se
-            // quedaría en 0 durante los 30 s.
-            StateHasChanged();
-        });
+                    // Repintar a mano: al no haber ningún await en curso, Blazor solo
+                    // repintaría cuando terminara la consulta, y el contador se
+                    // quedaría en 0 durante los 30 s.
+                    StateHasChanged();
+                }));
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"El contador de segundos no pudo arrancar: {ex}");
+            }
+        };
 
         reloj.Start();
+    }
+
+    /// <summary>
+    /// Vigila una tarea en vez de soltarla.
+    ///
+    /// Una tarea sin mirar que falla no rompe nada y no avisa de nada: la excepción
+    /// se pierde. En un temporizador eso es peor que un fallo visible, porque la
+    /// pantalla sigue ahí, con el número que alcanzó a pintarse, dando la impresión
+    /// de que la aplicación está pensando.
+    /// </summary>
+    private static async void VigilarAsync(Task tarea)
+    {
+        try
+        {
+            await tarea;
+        }
+        catch (Exception ex)
+        {
+            // La consola del navegador es el único sitio donde puede verse esto en
+            // un despliegue real, así que se escribe.
+            Console.Error.WriteLine($"El contador de segundos falló: {ex}");
+        }
     }
 
     /// <summary>Para el contador de segundos.</summary>
@@ -779,11 +830,38 @@
         // terminó y no se solapan.
         temporizador.Elapsed += async (_, _) =>
         {
-            await InvokeAsync(async () =>
+            try
             {
-                await CargarAsync();
-                ProgramarRefresco();
-            });
+                await InvokeAsync(async () =>
+                {
+                    try
+                    {
+                        await CargarAsync();
+                    }
+                    finally
+                    {
+                        // SE REARMA SIEMPRE. Antes esta llamada iba después del
+                        // await y sin try: si CargarAsync lanzaba, no se llegaba
+                        // a ejecutar, el temporizador quedaba sin rearme y el
+                        // refresco automático moría en silencio para el resto de
+                        // la sesión, sin aviso en ninguna parte. Con un fallo, eso
+                        // es lo que más se nota, porque la página sigue abierta y
+                        // simplemente nunca más se actualiza sola.
+                        ProgramarRefresco();
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                // Solo se llega aquí si falla el InvokeAsync de entrada, o sea,
+                // si ya no hay a quién repintar. EN ESE CASO NO SE REARMA A PROPÓSITO:
+                // si el componente ya no existe, rearmar dejaría un temporizador
+                // llamando a una pantalla desaparecida, para siempre.
+                //
+                // Antes esta excepción no se registraba en ninguna parte. Ahora
+                // queda en la consola del navegador.
+                Console.Error.WriteLine($"El refresco automático no pudo arrancar: {ex}");
+            }
         };
 
         temporizador.Start();
@@ -813,7 +891,22 @@
             return;
         }
 
-        var (detalle, desdeCache, error) = await Api.GetDetalleAsync(licitacion.CodigoExterno);
+        DetalleLicitacion? detalle = null;
+        bool desdeCache = false;
+        string? error = null;
+
+        try
+        {
+            (detalle, desdeCache, error) = await Api.GetDetalleAsync(licitacion.CodigoExterno);
+        }
+        catch (Exception ex)
+        {
+            // Lo mismo que en la carga de la semana: la API devuelve el error en la
+            // tupla, pero si algo se escapa el modal se quedaba girando para
+            // siempre, que es la forma más confusa de fallar que hay.
+            Console.Error.WriteLine($"El detalle de {licitacion.CodigoExterno} falló: {ex}");
+            error = "No se pudo cargar el detalle de esta licitación.";
+        }
 
         // Si el modal se cerró mientras esperaba, el resultado se descarta.
         if (abierta?.CodigoExterno != licitacion.CodigoExterno) return;

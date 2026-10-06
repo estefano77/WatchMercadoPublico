@@ -13,7 +13,12 @@ builder.RootComponents.Add<HeadOutlet>("head::after");
 // WebAssembly se descarga entero y el ticket sería legible dentro del .dll.
 builder.Services.AddScoped(_ => new HttpClient
 {
-    BaseAddress = new Uri(builder.HostEnvironment.BaseAddress)
+    BaseAddress = new Uri(builder.HostEnvironment.BaseAddress),
+
+    // Sin esto se usaba el valor por defecto de .NET, 100 s, por accidente y sin
+    // que nadie lo supiera. El número y su relación con los reintentos del
+    // servidor están explicados en MercadoPublicoApi.SegundosEspera.
+    Timeout = TimeSpan.FromSeconds(MercadoPublicoApi.SegundosEspera),
 });
 
 builder.Services.AddScoped<MercadoPublicoApi>();
