@@ -91,12 +91,13 @@ public sealed class MercadoPublicoApi(HttpClient http)
     /// </summary>
     public async Task<(SemanaLicitaciones? Data, string? Error)> GetSemanaAsync(
         int anio, int mes, int semana, bool refrescar = false,
-        CancellationToken ct = default)
+        CancellationToken ct = default, bool enSegundoPlano = false)
     {
         try
         {
             var url =
-                $"api/semana?anio={anio}&mes={mes}&semana={semana}&refrescar={(refrescar ? "true" : "false")}";
+                $"api/semana?anio={anio}&mes={mes}&semana={semana}&refrescar={(refrescar ? "true" : "false")}" +
+                $"&fondo={(enSegundoPlano ? "true" : "false")}";
 
             using var respuesta = await http.GetAsync(url, ct);
             var cuerpo = await respuesta.Content.ReadAsStringAsync();

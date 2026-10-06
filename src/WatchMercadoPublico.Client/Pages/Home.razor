@@ -1040,7 +1040,15 @@
     /// (junto con el cupo). El botón queda bloqueado mientras tanto, así que
     /// no se solapan peticiones.
     /// </summary>
-    private async Task CargarAsync(bool refrescar = false)
+    /// <param name="refrescar">Vaciar la caché del día de hoy, para el botón
+    /// "Actualizar" de verdad.</param>
+    /// <param name="enSegundoPlano">
+    /// Que nadie está mirando: solo el refresco automático. El servidor se
+    /// conforma con menos reintentos cuando se le dice que sí, porque retener la
+    /// semana cuatro minutos invisible le cuesta dinero a quien sí la está
+    /// mirando.
+    /// </param>
+    private async Task CargarAsync(bool refrescar = false, bool enSegundoPlano = false)
     {
         // El guard salta en la recarga del temporizador mientras aún no ha
         // terminado la anterior.
@@ -1067,7 +1075,8 @@
 
         try
         {
-            var (resultado, error) = await Api.GetSemanaAsync(Anio, Mes, NumeroSemana, refrescar, espera.Token);
+            var (resultado, error) = await Api.GetSemanaAsync(
+                Anio, Mes, NumeroSemana, refrescar, espera.Token, enSegundoPlano);
 
             if (error is not null)
             {
@@ -1139,6 +1148,19 @@
             cancelarEspera = null;
             Cargando = false;
             PararReloj();
+
+            // Rearma el refresco automático al terminar CUALQUIER carga, no solo
+            // al arrancar. Faltaba este rearme y era el mismo fallo que se corrigió
+            // esta mañana en los filtros, por el otro lado: al cambiar el desplegable
+            // se cancelaba el temporizador, pero al traer esa semana a pantalla
+            // con "Actualizar" NO se volvía a programar. Resultado: pulsar
+            // "Actualizar" dejaba la página sin refresco automático hasta
+            // recargarla.
+            //
+            // Va en el finally y no en el try porque también tiene que rearme
+            // cuando la carga falla: tras un error la pantalla sigue mostrando la
+            // semana en curso, y esa es justo la que debe seguir refrescando sola.
+            ProgramarRefresco();
         }
     }
 
@@ -1266,7 +1288,10 @@
                 {
                     try
                     {
-                        await CargarAsync();
+                        // En segundo plano: es el temporizador, no hay nadie
+                        // mirando. El servidor se conforma con menos reintentos
+                        // porque así no retiene la semana mientras nadie la mira.
+                        await CargarAsync(enSegundoPlano: true);
                     }
                     finally
                     {

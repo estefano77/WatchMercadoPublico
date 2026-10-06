@@ -37,7 +37,33 @@ public static class LicitacionesEndpoints
     /// esperas de 2, 4, 8, 16, 30 y 30 s son ~90 s en el peor caso, y en una
     /// semana son cinco peticiones seguidas donde alguna caerá.
     /// </summary>
-    private const int IntentosPorDia = 6;
+    public const int IntentosPorDia = 6;
+
+    /// <summary>
+    /// Reintentos cuando la consulta NO la pidió nadie: el refresco automático.
+    ///
+    /// <para>
+    /// Es menos a propósito, y por un motivo que se midió: una consulta en segundo
+    /// plano retiene el candado de la semana mientras reintenta. Con seis
+    /// intentos y esperas de 2 a 30 s, un día que falla puede retenerlo cuatro
+    /// minutos, y quien esté mirando esa misma semana se queda esperando detrás
+    /// sin poder ni cancelar.
+    /// </para>
+    ///
+    /// <para>
+    /// La diferencia entre las dos situaciones es que en una hay alguien mirando
+    /// y en la otra no. Un refresco que falla no le cuesta nada a nadie: se pierde
+    /// hasta el siguiente, cinco minutos después. En cambio, quitarle reintentos a
+    /// quien PULSÓ "Actualizar" sí se nota, y ese es el que se los queda.
+    /// </para>
+    ///
+    /// <para>
+    /// Con tres intentos la espera máxima son 6 s por día, y el peor caso de una
+    /// semana pasa de unos 20 minutos a unos 8. Sigue siendo historia para un
+    /// proceso que nadie está mirando.
+    /// </para>
+    /// </summary>
+    public const int IntentosPorDiaEnSegundoPlano = 3;
 
     /// <summary>Espera del primer reintento. Las siguientes son el doble, con tope.</summary>
     private static readonly TimeSpan EsperaInicial = TimeSpan.FromSeconds(2);
@@ -271,7 +297,8 @@ public static class LicitacionesEndpoints
         [FromQuery] int anio,
         [FromQuery] int mes,
         [FromQuery] int semana,
-        [FromQuery] bool refrescar = false)
+        [FromQuery] bool refrescar = false,
+        [FromQuery] bool fondo = false)
     {
         var config = opciones.Value;
         var log = registros.CreateLogger("Semana");
@@ -315,15 +342,48 @@ public static class LicitacionesEndpoints
 
         try
         {
-            // El candado evita que dos pestañas consulten lo mismo a la vez. Con
-            // reintentos de hasta un minuto, esperar aquí es preferible a
-            // machacar la API entre las dos.
-            await cache.Candado.WaitAsync(ct);
+            // El candado es único y sigue siéndolo. Se probó ponerlo por semana,
+            // para que dos personas mirando semanas distintas no se estorbaran, y
+            // la medición salió al revés: dos consultas en paralelo tardaron 23,5 s
+            // donde en serie tardan 13,2 s. Mercado Público no avisa con un 429,
+            // se limita callando. Ver el comentario del campo en la caché.
+
+            // Cuánto se espera por el candado antes de rendirse. Antes se esperaba
+            // sin límite, y el que llegaba segundo se quedaba ahí sin explicación
+            // hasta que el primero acababa: hasta dos minutos de pantalla quieta,
+            // contando como si fuera una consulta lenta.
+            //
+            // El límite es de 30 s, que es más que una semana en frío medida desde
+            // MonsterASP (13 s para cinco días). Pasado ese tiempo, mejor un
+            // mensaje claro que un silencio.
+            var esperaCandidata = TimeSpan.FromSeconds(30);
+
+            if (!await cache.Candado.WaitAsync(esperaCandidata, ct))
+            {
+                log.LogInformation(
+                    "La semana {Anio}-{Mes:00}-{Semana} ya se estaba consultando y no se esperó",
+                    anio, mes, semana);
+
+                return Results.Json(
+                    new
+                    {
+                        error = "Esa misma semana se está consultando ahora mismo. " +
+                                "Espera unos segundos y vuelve a intentarlo.",
+                        anio, mes, semana,
+                    },
+                    statusCode: StatusCodes.Status409Conflict);
+            }
+
             try
             {
                 var todas = new List<Licitacion>();
                 var sinRespuesta = new List<string>();
                 var desdeCache = true;
+
+                // El refresco automático se conforma con menos reintentos. Ver
+                // IntentosPorDiaEnSegundoPlano: en segundo plano no hay nadie
+                // esperando, y retener el candado cuatro minutos sí se nota.
+                var intentos = fondo ? IntentosPorDiaEnSegundoPlano : IntentosPorDia;
 
                 foreach (var dia in consultables)
                 {
@@ -335,7 +395,7 @@ public static class LicitacionesEndpoints
                     {
                         desdeCache = false;
 
-                        lote = await ConsultarDiaAsync(config, api, cache, dia, log, ct);
+                        lote = await ConsultarDiaAsync(config, api, cache, dia, log, intentos, ct);
 
                         if (lote is null)
                         {
@@ -662,6 +722,7 @@ public static class LicitacionesEndpoints
         CacheMercadoPublico cache,
         DateOnly dia,
         ILogger log,
+        int intentos,
         CancellationToken ct)
     {
         var espera = EsperaInicial;
@@ -684,17 +745,17 @@ public static class LicitacionesEndpoints
             }
             catch (MercadoPublicoException ex)
             {
-                if (intento >= IntentosPorDia)
+                if (intento >= intentos)
                 {
                     log.LogWarning(
                         "Se agotaron {Intentos} intentos para el {Dia}: {Motivo}",
-                        IntentosPorDia, $"{dia:yyyy-MM-dd}", ex.Message);
+                        intentos, $"{dia:yyyy-MM-dd}", ex.Message);
                     return null;
                 }
 
                 log.LogInformation(
                     "{Dia} intento {Intento} de {Total} fallido ({Motivo}). Reintento en {Espera:F0} s.",
-                    $"{dia:yyyy-MM-dd}", intento, IntentosPorDia, ex.Message, espera.TotalSeconds);
+                    $"{dia:yyyy-MM-dd}", intento, intentos, ex.Message, espera.TotalSeconds);
 
                 await Task.Delay(espera, ct);
 

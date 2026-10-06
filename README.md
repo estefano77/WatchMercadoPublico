@@ -1342,10 +1342,59 @@ pierden los 6 días buenos y el usuario no puede ni reintentar. Cada día se aí
 si falla, se avisa en el log y se sigue. Con `429` sí se corta, porque insistir
 solo consigue más `429`.
 
-### Peticiones en paralelo → `429`
+### Peticiones en paralelo → `429`, y también SIN `429`
 
 `Task.WhenAll` con los 7 días dispara el límite de peticiones en milisegundos, y
 un `429` no se cachea. Van **uno a uno, con ~800 ms de pausa**.
+
+Y hay un segundo motivo, más fuerte, que se midió en 2026 y que no es un `429`:
+**Mercado Público se limita callando**. Dos consultas a la vez desde la misma
+conexión no dan error; simplemente cada llamada tarda mucho más:
+
+| | |
+|---|---|
+| Una semana en frío, sola | **6,5 s** |
+| Dos semanas, una detrás de otra | **13,2 s** (la suma exacta) |
+| Dos semanas, **en paralelo** | **23,5 s** |
+
+En paralelo se tarda **más que sumarlas**. Por eso el candado de la caché es único
+y por eso los días de una semana van en serie.
+
+Se llegó a cambiar el candado a uno por semana, pensando que el problema era que
+una semana bloqueara a otra, y la medición salió al revés. Está revertido, y hay
+un test que lo fija: `UnaSemanaOcupadaRetieneAOtra`.
+
+Lo que sí era un problema real, y está arreglado, es lo que pasaba **alrededor** del
+candado:
+
+- Se esperaba en él **sin límite y sin decir nada**. Ahora son 30 s y luego un
+  mensaje claro con código `409`.
+- El refresco automático lo retenía **mientras reintentaba**. Con seis intentos
+  eran hasta cuatro minutos de candado tomado por un proceso que nadie mira. El
+  refresco de fondo ahora usa 3 intentos (`fondo=true`); el botón "Actualizar"
+  sigue con 6.
+
+---
+
+## Qué tan rápido es, medido
+
+En MonsterASP, con la aplicación desplegada, el 6 de octubre de 2026:
+
+| | MonsterASP | Local |
+|---|---|---|
+| HTML de la página | 0,29 s | — |
+| `/api/estado` | 0,46 s | 0,06 s |
+| Semana en curso en frío (2 días) | 4,21 s | — |
+| Semana pasada en frío (3 días) | 8,21 s | **2,62 s** |
+| Semana ya cacheada | 0,26 – 5,12 s | — |
+
+**Por día hábil: 2,74 s en MonsterASP contra 0,87 s en local.** El hosting gratuito
+cuesta unas tres veces, y eso es real. Pero esos 2,74 s son la latencia de Mercado
+Público desde sus servidores, no un defecto nuestro: la misma llamada desde el
+equipo del usuario tarda 0,87 s.
+
+La variación de la respuesta cacheada (de 0,26 a 5,12 s) no es del hosting: es el
+candado. Una petición que llega mientras otra tiene la semana la espera.
 
 ---
 
@@ -1359,6 +1408,11 @@ Por **síntoma**, no por causa interna:
 | La semana sale "incompleta" | `diasFallidos` > 0. Son días que se intentaron y no respondieron; `diasSinRespuesta` dice cuáles. Los días que **no han llegado** van aparte, en `diasPendientes`, y no son un fallo. |
 | Los desplegables salen vacíos | `/api/estado` no llegó, o no devolvió `aniosDisponibles` y `mesesDisponibles`. Un mes futuro sale vacío **a propósito**: no se ofrecen periodos que no han ocurrido. |
 | Al mover un desplegable no cambia nada | Correcto: los datos llegan al pulsar "Actualizar", y sale un aviso ámbar diciéndolo. Si el aviso **no** sale, revisar que se comparen año, mes y semana: comparar solo el número de semana deja pasar los cambios de mes y de año, porque el número se repite en todos los periodos. |
+| **La página se consulta sola una semana que no elegiste** | El temporizador del refresco automático dispara `CargarAsync`, que lee el **desplegable**, no lo que está en pantalla. Si no se rearma al cambiar los filtros, a los 5 minutos consulta la semana elegida y el aviso de "pulsa Actualizar" se vuelve mentira. Se rearma en `CambiarSemana`, `CambiarAnio`, `CambiarMes` y al terminar cualquier `CargarAsync`. |
+| **El refresco automático deja de funcionar hasta recargar** | `CargarAsync` sin rearmar al final. El temporizador solo se reprogramaba al arrancar y desde su propio disparo, así que traer una semana con "Actualizar" lo dejaba muerto. Ya se rearma en el `finally`. |
+| El contador de segundos se queda en un número bajo mientras la espera es larga | Cuenta ticks, no tiempo. Si el navegador para la página, los ticks dejan de llegar y el número miente. Debe leer el reloj: `DateTimeOffset.Now - inicioEspera`. |
+| "Esa misma semana se está consultando ahora mismo" | Código `409`. El candado lo tenía otra petición y no se esperó más de 30 s. Es a propósito: antes se esperaba sin límite y sin decir nada. |
+| Todo va lento en MonsterASP y no en local | Esperado: ~3 veces por llamada a la API (2,74 s contra 0,87 s por día hábil). Ver "Qué tan rápido es, medido". Lo que NO es normal es que dos consultas en paralelo sean más lentas que en serie: eso significaría que se rompió el candado único. |
 | Un día sale con el nombre de otro | El array de días del cliente indexado por `DayOfWeek`, que en .NET empieza por **domingo**. Esa lógica se movió al servidor (`TextosDeFecha`) precisamente por eso. Si alguien la reintroduce, el primer síntoma es "un viernes que pone sábado". |
 | Al abrir la página, la cabecera y nada debajo | Estado muerto: `Semana` a null sin error ni consulta en vuelo. Hay una rama `else` que lo evita, así que si aparece, hay que mirar la consola del navegador. |
 | Se queda en "Cargando" tras publicar | Falta el target `SuperponerClienteBlazor`, o el `index.html` publicado sin sustituir. |

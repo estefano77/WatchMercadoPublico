@@ -32,6 +32,38 @@ public sealed class CacheMercadoPublico
 
     private readonly Dictionary<string, EntradaDia> porDia = new(StringComparer.Ordinal);
     private readonly Dictionary<string, EntradaDetalle> porDetalle = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// UN candado para toda la aplicación, a propósito, y con la medición que lo
+    /// justifica.
+    ///
+    /// <para>
+    /// Se probó la contraria: un candado por semana, para que dos personas
+    /// mirando semanas distintas no se estorbaran. Con ese cambio, en esta misma
+    /// máquina:
+    /// </para>
+    ///
+    /// <list type="bullet">
+    /// <item>Una semana en frío: <b>6,5 s</b></item>
+    /// <item>Dos semanas, una detrás de otra: <b>13,2 s</b>, o sea la suma exacta</item>
+    /// <item>Dos semanas, en paralelo: <b>23,5 s</b></item>
+    /// </list>
+    ///
+    /// <para>
+    /// Es decir: mandar dos consultas a la vez a Mercado Público desde la misma
+    /// conexión es más de tres veces peor que hacerlas seguidas. La API no lo
+    /// dice con un 429, se limita callando: cada llamada tarda mucho más, y el
+    /// total sube por encima de la suma. Por eso los días de una semana van en
+    /// serie, y por eso el candado es único.
+    /// </para>
+    ///
+    /// <para>
+    /// Entonces lo que había que arreglar NO era el candado, sino dos cosas
+    /// alrededor: que se esperaba en él sin límite y sin decir nada, y que lo
+    /// retuviera el refresco automático mientras reintentaba. Eso sí está
+    /// arreglado, y sin tocar el candado.
+    /// </para>
+    /// </summary>
     private readonly SemaphoreSlim candado = new(1, 1);
     private readonly TimeSpan caducidad;
     private readonly TimeSpan caducidadHistorica;
@@ -141,6 +173,9 @@ public sealed class CacheMercadoPublico
         porDetalle.Clear();
     }
 
+    /// Candado único de la aplicación. Ver el comentario del campo: hay
+    /// medición detrás de que no se parta por semanas.
+    /// </summary>
     public SemaphoreSlim Candado => candado;
 }
 
