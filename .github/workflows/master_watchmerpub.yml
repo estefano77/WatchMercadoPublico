@@ -64,6 +64,38 @@ jobs:
         with:
           name: .net-app
       
+      # El deploy entra con azure/login, no con un perfil de publicacion.
+      #
+      # El perfil se intento tres veces y fallo de tres maneras distintas, todas
+      # por lo mismo: el fichero que entrega Azure para esta app no trae el elemento
+      # <MSDeploy publishUrl="..."/>, que es de donde la accion saca la direccion de
+      # despliegue. Con el perfil, el error es:
+      #
+      #   Publish profile does not contain kudu URL
+      #
+      # Ademas Microsoft va retirando los perfiles de publicacion, asi que el
+      # camino se esta cerrando solo. Con azure/login no hay XML que pegar: la
+      # accion pide un token, y el token no caduca en un fichero que alguien copia
+      # a mano.
+      #
+      # Lo que hay que tener puesto en GitHub, todo como secretos:
+      #
+      #   AZURE_TENANT_ID
+      #   AZURE_CLIENT_ID
+      #   AZURE_SUBSCRIPTION_ID
+      #   AZURE_CLIENT_SECRET
+      #
+      # El principal de servicio necesita un rol sobre la app. Contributor sobre
+      # ese recurso es lo que basta, y conviene NO darle Contributor en la
+      # suscripcion entera: con acceso solo a watchmerpub, si algun dia el secreto
+      # se filtra, lo unico que se puede tocar es esta aplicacion.
+      - name: Iniciar sesion en Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
       - name: Deploy to Azure Web App
         id: deploy-to-webapp
         uses: azure/webapps-deploy@v3
@@ -71,4 +103,4 @@ jobs:
           app-name: 'watchmerpub'
           slot-name: 'Production'
           package: .
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_F040FFD1F7A84313AA3ACD1B2565A7A0 }}
+          # Sin publish-profile: el deploy entra con el token de azure/login.
