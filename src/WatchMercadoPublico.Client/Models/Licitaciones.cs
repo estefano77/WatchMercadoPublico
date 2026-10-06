@@ -35,6 +35,16 @@ public sealed class Licitacion
     /// <summary>¿Sigue abierta? 5 Publicada es el único estado con ofertas en curso.</summary>
     public bool Activa => CodigoEstado is null or 5;
 
+    /// <summary>
+    /// ¿Se adjudicó? Estado 8. Es el único que lleva una decisión y un
+    /// documento que la respalda, que es el acta: por eso lleva insignia propia
+    /// en vez de compartir la gris de los estados cerrados.
+    ///
+    /// Se decide por el código y no por el texto de <see cref="EstadoLegible"/>,
+    /// que es una cadena localizada y podría cambiar sin que nadie se entere.
+    /// </summary>
+    public bool EsAdjudicada => CodigoEstado is 8;
+
     /// <summary>Texto del estado, con un nombre legible si la API no lo manda.</summary>
     public string EstadoLegible => CodigoEstado switch
     {
