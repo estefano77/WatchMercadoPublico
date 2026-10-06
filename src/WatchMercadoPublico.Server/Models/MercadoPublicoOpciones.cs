@@ -83,6 +83,27 @@ public sealed class MercadoPublicoOpciones
     public int SegundosTimeout { get; set; } = 30;
 
     /// <summary>
+    /// Intervalo mínimo entre el principio de dos peticiones a la API.
+    ///
+    /// <para>
+    /// MEDIDO, no elegido. Doce peticiones seguidas contra la API dan
+    /// <c>203 429 203 429 203 429 429…</c>: una de cada tres. Con pausas de 400 ms
+    /// casi todas fallan, de 800 ms la mitad, y de 1500 ms diez de doce pasan.
+    /// La API admite del orden de una petición cada 1,5 s, y lo dice con un
+    /// rechazo rápido de unos 280 ms: es un cupo de ráfaga, no un límite de
+    /// duración.
+    /// </para>
+    ///
+    /// <para>
+    /// Se mide entre principios, no como espera después de cada respuesta. Contra
+    /// la API de verdad las respuestas tardan 1,4 a 1,6 s, así que el intervalo se
+    /// cumple solo y no se espera nada. Aquí solo se paga cuando algo vuelve más
+    /// rápido de lo debido.
+    /// </para>
+    /// </summary>
+    public int SegundosEntreLlamadas { get; set; } = 2;
+
+    /// <summary>
     /// Cada cuánto refresca la pantalla sola mientras está abierta.
     ///
     /// El intervalo se justificó en su día diciendo que "con la API caída casi

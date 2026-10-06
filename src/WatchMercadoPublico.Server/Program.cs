@@ -32,6 +32,11 @@ builder.Services.AddCacheMercadoPublico(builder.Configuration);
 // llamada a AddScoped que falta, y tumba TODAS las rutas, incluida la SPA.
 builder.Services.AddScoped<MercadoPublicoCliente>();
 
+// Singleton A PROPÓSITO: el ritmo hacia la API tiene que ser el mismo para todas
+// las peticiones del proceso. Si fuera scoped, cada petición HTTP tendría el suyo
+// y dos a la vez no se limitarían entre sí, que es el 429 que se quiere evitar.
+builder.Services.AddSingleton<RitmoDeLlamadas>();
+
 builder.Services.ConfigureHttpJsonOptions(opciones =>
 {
     // El cliente Blazor usa los mismos nombres en C# y en el JSON, así que la

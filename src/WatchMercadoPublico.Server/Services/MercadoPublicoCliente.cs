@@ -33,14 +33,23 @@ public sealed class MercadoPublicoCliente
     private readonly MercadoPublicoOpciones opciones;
     private readonly ILogger<MercadoPublicoCliente> log;
 
+    /// <summary>
+    /// El ritmo de salida a la API. Vive en un singleton aparte porque si estuviera
+    /// aquí, que es de ámbito por petición, cada petición HTTP tendría el suyo y
+    /// dos a la vez no se limitarían entre sí. Ver <see cref="RitmoDeLlamadas"/>.
+    /// </summary>
+    private readonly RitmoDeLlamadas ritmo;
+
     public MercadoPublicoCliente(
         IHttpClientFactory factory,
         IOptions<MercadoPublicoOpciones> opciones,
-        ILogger<MercadoPublicoCliente> log)
+        ILogger<MercadoPublicoCliente> log,
+        RitmoDeLlamadas ritmo)
     {
         this.http = factory.CreateClient("mercadopublico");
         this.opciones = opciones.Value;
         this.log = log;
+        this.ritmo = ritmo;
 
         this.http.BaseAddress = new Uri(Base + "/");
         this.http.Timeout = TimeSpan.FromSeconds(Math.Max(5, opciones.Value.SegundosTimeout));
@@ -305,23 +314,72 @@ public sealed class MercadoPublicoCliente
     // Lectura del JSON y errores
     // =====================================================================
 
-    private async Task<JsonDocument> LeerJsonAsync(string urlRelativa, CancellationToken ct)
+    /// <summary>
+/// Acompasa las peticiones a la API de Mercado Público.
+///
+/// <para>
+/// Sale de medir el límite de verdad, con peticiones sin ticket para no gastar
+/// cupo. Doce seguidas, con la aplicación sin espera propia:
+///
+/// </para>
+///
+/// <list type="bullet">
+/// <item>Sin pausa: <c>203 429 203 429 203 429 429…</c>, o sea una de cada
+/// tres</item>
+/// <item>400 ms: casi todas 429</item>
+/// <item>800 ms: la mitad 429</item>
+/// <item>1500 ms: diez de doce bien</item>
+/// </list>
+///
+/// <para>
+/// Traducido: la API admite del orden de <b>una petición cada 1,5 s</b>. Antes no
+/// había nada que la gobernara, y una semana son cinco días más los detalles de
+/// cada licitación, todos seguidos. De ahí los 429 de los logs.
+/// </para>
+///
+/// <para>
+/// Lo que se mide es el intervalo entre el <b>principio</b> de una petición y el
+/// principio de la siguiente, y no una espera después de cada respuesta. La
+/// diferencia importa: contra la API de verdad las respuestas tardan 1,4 a 1,6 s,
+/// así que el intervalo ya se cumple solo y la espera sale a coste cero. Solo se
+/// paga cuando una respuesta vuelve más rápida de lo debido.
+/// </para>
+///
+/// <para>
+/// Va aquí y no en los bucles de días y de detalles por dos razones: hay un solo
+/// sitio por el que sale todo, y así ningún bucle nuevo puede olvidarse de la
+/// pausa.
+/// </para>
+/// </para>
+/// </summary>
+private async Task<JsonDocument> LeerJsonAsync(string urlRelativa, CancellationToken ct)
     {
-        using var respuesta = await http.GetAsync(urlRelativa, ct);
-        var cuerpo = await respuesta.Content.ReadAsStringAsync(ct);
-
-        if (!respuesta.IsSuccessStatusCode)
-            throw ConstruirError(respuesta.StatusCode, cuerpo, log);
+        await ritmo.PedirTurnoAsync(ct);
 
         try
         {
-            return JsonDocument.Parse(cuerpo);
+            using var respuesta = await http.GetAsync(urlRelativa, ct);
+            var cuerpo = await respuesta.Content.ReadAsStringAsync(ct);
+
+            if (!respuesta.IsSuccessStatusCode)
+                throw ConstruirError(respuesta.StatusCode, cuerpo, log);
+
+            try
+            {
+                return JsonDocument.Parse(cuerpo);
+            }
+            catch (JsonException ex)
+            {
+                log.LogError("Mercado Público devolvió un JSON ilegible: {Error}", ex.Message);
+                throw new MercadoPublicoException(
+                    "Mercado Público devolvió una respuesta que no se pudo leer.", ex, 502);
+            }
         }
-        catch (JsonException ex)
+        finally
         {
-            log.LogError("Mercado Público devolvió un JSON ilegible: {Error}", ex.Message);
-            throw new MercadoPublicoException(
-                "Mercado Público devolvió una respuesta que no se pudo leer.", ex, 502);
+            // Siempre: si la respuesta falla, el turno se queda bloqueado para
+            // siempre y ninguna petición más sale nunca.
+            ritmo.Liberar();
         }
     }
 

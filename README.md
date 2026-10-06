@@ -1378,24 +1378,44 @@ real de MonsterASP, una semana de cinco días:
 | 5 | **429** en 280 ms |
 
 Código 10500: *"Hemos detectado que existen peticiones simultáneas"*. Los días ya
-iban de uno en uno, así que lo que se disparaba era el **ritmo**: cinco peticiones
-en menos de cinco segundos.
+iban de uno en uno, así que lo que se disparaba era el **ritmo**.
+
+El límite se midió, con peticiones sin ticket para no gastar cupo. Doce seguidas:
+
+| Espera entre peticiones | Resultado |
+|---|---|
+| 0 ms | `203 429 203 429 203 429 429 429…` |
+| 400 ms | casi todas 429 |
+| 800 ms | la mitad 429 |
+| 1500 ms | 10 de 12 pasan |
+
+La API admite del orden de **una petición cada 1,5 s**, y lo dice con un rechazo
+rápido: un `429` que vuelve en 280 ms es un **cupo de ráfaga**, no un límite de
+duración.
 
 Este README decía antes que los días iban *"uno a uno, con ~800 ms de pausa"*, y
 **esa pausa no estaba en el código**. Documentaba algo que nadie implementó, que
 es peor que no documentarlo.
 
-La pausa que hay ahora es **adaptativa**, y esa es la decisión:
+Ahora el ritmo lo gobierna `RitmoDeLlamadas`, un **singleton** que espera lo que
+falte antes de cada salida a la API:
 
-- Si un día entró al primer intento, **no se pausa nada**.
-- Si un día necesitó reintentar, se espera 800 ms antes del siguiente.
+- Se mide entre el **principio** de una petición y el principio de la siguiente,
+  **no** como espera después de cada respuesta. La diferencia es todo: contra la
+  API de verdad las respuestas tardan 1,4 a 1,6 s, así que el intervalo se cumple
+  solo y no se espera nada. Solo se paga cuando algo vuelve más rápido de lo debido.
+- Va en el único sitio por el que sale todo, `LeerJsonAsync`, para que ningún
+  bucle nuevo pueda olvidarse. Cubre días **y** detalles, que es donde más se
+  encadena: una semana puede traer más licitaciones que días.
+- Es singleton **a propósito**. Si estuviera en `MercadoPublicoCliente`, que es de
+  ámbito por petición, cada petición HTTP tendría el suyo y dos a la vez no se
+  limitarían entre sí, que es el `429` que se quiere evitar.
+- El intervalo sale de `MercadoPublico:SegundosEntreLlamadas` (2 s), con suelo de
+  1 s: ponerlo a 0 desactivaría el ritmo y el error se pagaría en semanas
+  perdidas.
 
-Una pausa fija entre todos los días costaría más de 3 s en cada semana en frío, para
-un `429` que solo ocurre de vez en cuando. Con la adaptativa se paga únicamente
-cuando hay un 429 de por medio, que es cuando de verdad hace falta.
-
-Está en los **dos** bucles: los días y los detalles. El de detalles es el que más
-se encadena, porque una semana puede traer más licitaciones que días.
+Comprobado: tres semanas de cinco días en frío, una detrás de otra, **cero `429`**.
+Antes salía uno por semana sin excepción.
 
 Lo que sí era un problema real, y está arreglado, es lo que pasaba **alrededor** del
 candado:
