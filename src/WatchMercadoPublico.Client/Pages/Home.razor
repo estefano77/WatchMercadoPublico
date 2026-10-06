@@ -1,6 +1,8 @@
 @page "/"
-@implements IDisposable
+@implements IAsyncDisposable
+@using Microsoft.JSInterop
 @inject MercadoPublicoApi Api
+@inject IJSRuntime JS
 
 <PageTitle>WatchMerPub · Licitaciones de la semana</PageTitle>
 
@@ -176,6 +178,22 @@
     @* ------------------------------------------------------------------ *@
     @* El aviso de demo va APARTE de la cadena de errores: en un 'else if' se
        comía todos los errores y en modo demo nunca se veía un fallo real. *@
+    @* Aviso de vuelta a la pestaña. Va ANTES de los otros, arriba del todo, y no
+   dentro del bloque de resultados: es la primera respuesta a "por qué se ve
+   distinto de como la dejé", así que tiene que estar donde se lee sin
+   desplazar nada. *@
+    @if (minutosAvisoVuelta is int minutos)
+    {
+        <div class="mt-5">
+            <Aviso Tipo="info" Titulo="@TextoAvisoVuelta" Cerrable="true" OnCerrado="CerrarAvisoVuelta">
+                <p class="mt-2 text-sm leading-relaxed text-ink-soft">
+                    Esta página estuvo @TextoMinutosEstuvo en segundo plano. Lo que ves se consultó
+                    ahora, no antes.
+                </p>
+            </Aviso>
+        </div>
+    }
+
     @if (Estado is { EsDemo: true })
     {
         <Aviso Tipo="aviso" Titulo="Modo demo: los datos son inventados" Cerrable="false">
@@ -423,6 +441,42 @@
     private System.Timers.Timer? temporizador;
     private System.Timers.Timer? reloj;
 
+    // --- Aviso de vuelta a la pestaña ---
+    //
+    // Minutos que los datos pueden envejecer antes de considerar que hay que
+    // volver a traerlos. Un minuto, no cero: mirar un correo y volver NO es una
+    // consulta, y llenarle la pantalla al usuario con un aviso por eso sería
+    // hacer que el aviso se vuelva ignorable.
+    private static readonly TimeSpan AntiguedadParaAvisar = TimeSpan.FromMinutes(1);
+
+    /// <summary>
+    /// Cuándo se consultó por última vez, en reloj de pared. Ojo: es un
+    /// <see cref="DateTimeOffset"/> y NO un temporizador, porque el fallo que
+    /// motiva esto viene justamente de los temporizadores: si la pestaña se
+    /// congela, el temporizador se detiene con ella, y al volver hay que poder
+    /// preguntarse cuánto pasó de verdad. Un reloj sigue corriendo aunque el
+    /// navegador congele la pestaña.
+    /// </summary>
+    private DateTimeOffset? ultimaConsultaOk;
+
+    /// <summary>
+    /// Cuándo se salió de la pestaña, para poder decir "estuvo 12 minutos".
+    /// Es distinto de <see cref="ultimaConsultaOk"/> a propósito: una cosa es
+    /// cuándo se consultó y otra cuánto estuvo fuera. Con solo una de las dos el
+    /// mensaje mentiría en la mitad de los casos.
+    /// </summary>
+    private DateTimeOffset? seFueDeLaPestana;
+
+    /// <summary>
+    /// Minutos que estuvo la pestaña en segundo plano, ya redondeados para el
+    /// texto. Null cuando aún no se ha ido nunca, o cuando la caducidad se
+    /// cumple en menos de un minuto, en cuyo caso el texto sería "0 minutos" y
+    /// suena a error.
+    /// </summary>
+    private int? MinutosFuera => seFueDeLaPestana is null
+        ? null
+        : Math.Max(1, (int)Math.Round((DateTimeOffset.Now - seFueDeLaPestana.Value).TotalMinutes));
+
     // Detalle abierto
     private Licitacion? abierta { get; set; }
     private DetalleLicitacion? detalleAbierto { get; set; }
@@ -574,6 +628,168 @@
 
     /// <summary>
 
+    /// <summary>
+    /// Se engancha al evento de visibilidad del navegador.
+    ///
+    /// Es la pieza que cierra el agujero del refresco congelado. Antes, con la
+    /// pestaña en segundo plano, el temporizador de cinco minutos se detenía
+    /// junto con la pestaña: al volver, la página seguía mostrando datos viejos
+    /// y sin ninguna señal de que fueran viejos, y el usuario no tenía forma
+    /// de saberlo.
+    ///
+    /// Se registra con AddOnAfterRenderAsync y no en el constructor porque en el
+    /// primero Blazor todavía no hay un DOM al que engancharse.
+    /// </summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        // Va por el interop porque leer document.hidden es cosa de JavaScript.
+        // El módulo tiene nombre fijo en wwwroot/js a propósito: si estuviera
+        // dentro del proyecto, Blazor lo empaquetaría con un nombre que cambia
+        // en cada compilación y este import se quedaría apuntando a un archivo
+        // que ya no existe tras el siguiente despliegue.
+        _interopVisibilidad = await JS.InvokeAsync<IJSObjectReference>("import", "./js/visibilidad.js");
+
+        // La referencia al objeto de .NET se guarda para poder soltarla después.
+        // Sin guardarla, Dispose no podría deshacer la suscripción.
+        _refVisibilidad = DotNetObjectReference.Create(this);
+
+        await _interopVisibilidad.InvokeVoidAsync("observar", _refVisibilidad, IdPantalla);
+
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Identificador de esta pantalla para el módulo de JavaScript. Es una
+    /// cadena fija porque solo hay una: no se necesita un GUID por pantalla.
+    /// </summary>
+    private const string IdPantalla = "home";
+
+    private IJSObjectReference? _interopVisibilidad;
+    private DotNetObjectReference<Home>? _refVisibilidad;
+
+    /// <summary>
+    /// Lo llama el navegador cuando la pestaña se ve o se esconde.
+    ///
+    /// Se invoca desde JavaScript, así que puede venir de un hilo que no es el
+    /// de la interfaz: todo lo que toca el estado pasa por InvokeAsync, que es
+    /// lo único que garantiza que Blazor pueda repintar.
+    /// </summary>
+    [JSInvokable]
+    public async Task AlCambiarVisibilidad()
+    {
+        var oculto = await _interopVisibilidad!.InvokeAsync<bool>("oculto");
+
+        // Se pregunta el estado ANTES de InvokeAsync, no dentro: leerlo es una
+        // llamada asíncrona a JavaScript, y si se hiciera dentro, otra cosa
+        // podría haber cambiado la visibilidad mientras se esperaba.
+        if (oculto)
+        {
+            await InvokeAsync(() =>
+            {
+                // Guardar el instante de la salida es lo que permite después
+                // decir "estuvo 12 minutos" en vez de un texto sin número.
+                seFueDeLaPestana = DateTimeOffset.Now;
+                return Task.CompletedTask;
+            });
+
+            return;
+        }
+
+        await InvokeAsync(async () =>
+        {
+            var minutos = MinutosFuera;
+
+            // Sin este caso, volver a la pestaña después de dos segundos
+            // dispararía una consulta por mirar un correo.
+            if (minutos is null) return;
+
+            var caducada = ultimaConsultaOk is null ||
+                DateTimeOffset.Now - ultimaConsultaOk.Value >= AntiguedadParaAvisar;
+
+            if (!caducada)
+            {
+                // Volvió pronto y los datos son del momento: no hay nada que
+                // decir ni que traer.
+                seFueDeLaPestana = null;
+                return;
+            }
+
+            await VolverDeLaPestana(minutos.Value);
+        });
+    }
+
+    /// <summary>
+    /// Trae los datos al volver, y avisa de que lo hizo.
+    ///
+    /// El aviso va DESPUÉS de la consulta y solo si salió bien. Ponerlo antes
+    /// obligaría a una de dos cosas malas: o decir "actualizado" cuando la
+    /// consulta falla, o tener que desvanecer un aviso que ya se vio.
+    ///
+    /// Y si la consulta no aporta nada nuevo porque venía de la caché, no se
+    /// dice nada: el aviso habla de que se consultó, y si no se consultó,
+    /// mentimos.
+    ///
+    /// Igual con el fallo: si la consulta falla, los datos que quedan son los de
+    /// antes y la caja de error ya lo dice con todas las letras. Añadir un aviso
+    /// de "actualizado" ahí sería mentir dos veces, porque el usuario leería que
+    /// los datos son nuevos cuando son justamente los viejos.
+    /// </summary>
+    private async Task VolverDeLaPestana(int minutos)
+    {
+        await CargarAsync(refrescar: false);
+
+        if (ErrorConsulta is not null)
+        {
+            // Falló. Los datos en pantalla son los de antes y el error ya lo
+            // dice con su caja: un aviso de "actualizado" aquí sería falso.
+            seFueDeLaPestana = null;
+            return;
+        }
+
+        var consultadaAhora = consultoDeVerdad;
+        seFueDeLaPestana = null;
+
+        if (consultadaAhora)
+        {
+            minutosAvisoVuelta = minutos;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>Minutos que se anuncian en el aviso, o null si no toca.</summary>
+    private int? minutosAvisoVuelta;
+
+    /// <summary>
+    /// Textos del aviso de vuelta. Están en propiedades y no en el marcado
+    /// porque el plural tiene dos formas y escribirlas con una condición dentro
+    /// del HTML se lee peor que leerlas aquí.
+    /// </summary>
+    private string TextoAvisoVuelta => "Datos actualizados al volver";
+
+    private string TextoMinutosEstuvo => minutosAvisoVuelta == 1
+        ? "1 minuto"
+        : $"{minutosAvisoVuelta} minutos";
+
+    /// <summary>
+    /// Cierra el aviso a petición del usuario.
+    ///
+    /// No basta con poner <c>minutosAvisoVuelta</c> a null: el componente Aviso
+    /// ya se cerró por su cuenta, pero si el usuario vuelve a mirar la pestaña
+    /// más tarde y los datos están viejos otra vez, el aviso reaparece. Eso es
+    /// lo correcto, porque para entonces habrá datos nuevos de verdad.
+    /// </summary>
+    private void CerrarAvisoVuelta() => minutosAvisoVuelta = null;
+
+    /// <summary>
+    /// Si la última consulta fue de verdad a Mercado Público y no una lectura de
+    /// caché. El aviso de vuelta dice "se consultó ahora", y eso solo es cierto
+    /// en el primer caso: si vino de la caché, el usuario no recibió nada
+    /// nuevo y anunciarlo sería hacer ruido para no decir nada.
+    /// </summary>
+    private bool consultoDeVerdad;
+
     protected override async Task OnInitializedAsync()
     {
         var (estado, error) = await Api.GetEstadoAsync();
@@ -703,6 +919,14 @@
 
         Cargando = true;
         ErrorConsulta = null;
+
+        // Se limpia ANTES de consultar, no después. Antes conservaba el valor
+        // del intento anterior, y si este fallaba, el aviso de vuelta diciendo
+        // "se consultó ahora" con un valor viejo: el servidor caído, la pantalla
+        // diciendo que se acababa de consultar. Es el mismo error del que huyen
+        // este proyecto y la casa, y salió justo al probar el camino de fallo.
+        consultoDeVerdad = false;
+
         IniciarReloj();
 
         try
@@ -715,7 +939,34 @@
                 return;
             }
 
+            // Sin datos y sin error es una combinación que no debería existir, y
+            // antes de comprobarla, una semana nula se pintaba como una
+            // pantalla vacía. Para el usuario eso es indistinguible de "esta
+            // semana no hay nada", que es justo lo que este proyecto no dice
+            // nunca sin estar seguro.
+            if (resultado is null)
+            {
+                ErrorConsulta = "El servidor no devolvió la semana.";
+                return;
+            }
+
             Semana = resultado;
+
+            // Solo cuenta como fresco si vino de verdad. La marca se pone
+            // después de comprobar que no hay error, no antes: si la consulta
+            // falla, los datos que quedan en pantalla son los de antes, y
+            // decir "se consultó ahora" sobre una pantalla con datos viejos
+            // sería justo la mentira que este proyecto no quiere contar.
+            // Solo si la consulta salió bien: si falló, los datos en pantalla son los de
+            // antes y marcarlos como frescos sería mentir. Va aquí y no en el
+            // catch a propósito.
+            ultimaConsultaOk = DateTimeOffset.Now;
+
+            // Y otra cosa distinta: si el servidor tuvo que ir a Mercado Público
+            // o si solo leyó su caché. El aviso de vuelta dice "se consultó
+            // ahora", así que solo puede mostrarse en el primer caso. Lo decide
+            // el servidor, que es quien sabe si consultó de verdad.
+            consultoDeVerdad = resultado.DesdeCache is not true;
         }
         catch (Exception ex)
         {
@@ -932,7 +1183,7 @@
         errorDetalle = null;
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         // Sin esto el temporizador seguiría consultando en segundo plano con la
         // pantalla cerrada.
@@ -942,5 +1193,29 @@
         // El reloj también: si no, seguiría pidiendo repintados sobre un
         // componente ya descartado, que en Blazor lanza.
         PararReloj();
+
+        // Y la escucha de visibilidad hay que soltarla a mano. El módulo de
+        // JavaScript la tiene en una tabla y, sin esta llamada, seguiría
+        // escuchando y llamaría a un componente destruido: en Blazor eso lanza y
+        // deja un error en la consola del navegador cada vez que se cambia de
+        // pestaña.
+        if (_interopVisibilidad is not null)
+        {
+            try
+            {
+                await _interopVisibilidad.InvokeVoidAsync("soltar", IdPantalla);
+                await _interopVisibilidad.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // El navegador ya no está. No hay nada que soltar.
+            }
+            catch (ObjectDisposedException)
+            {
+                // Igual: la conexión se cerró antes de que llegara esta llamada.
+            }
+        }
+
+        _refVisibilidad?.Dispose();
     }
 }
