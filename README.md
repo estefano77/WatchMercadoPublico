@@ -1314,6 +1314,7 @@ comprobación de cabecera mira el ``maskImage`` ya resuelto.
 | Dónde | Qué sale | Por qué |
 |---|---|---|
 | Cabecera, izquierda | Símbolo propio + `WatchMerPub` | Identidad de la herramienta |
+| Pestaña del navegador | "WatchMerPub · Licitaciones de la semana" | Va en el `<PageTitle>` de `Home.razor`. Antes de que arranque Blazor se ve el `<title>` del `index.html`, y en la página 404, "No encontrado · WatchMerPub" |
 | Cabecera, derecha | Logotipo de **SMC** | Identifica al propietario: herramienta interna suya |
 | Encabezado de la página | "Novedades en **Mercado Público**" | Uso nominativo: describe la plataforma de la que salen los datos |
 | Encabezado, a la derecha | "Ir a **Mercado Público**" → la URL de `UrlMercadoPublico` | Salida a la plataforma. La URL viene de la configuración, no del marcado |
