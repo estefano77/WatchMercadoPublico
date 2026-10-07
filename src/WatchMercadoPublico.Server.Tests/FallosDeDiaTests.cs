@@ -58,13 +58,20 @@ public class FallosDeDiaTests
     /// Un fallo que dura para siempre sería peor que el problema que arregla:
     /// ese día jamás volvería a aparecer y no se podría ni saber por qué.
     /// </summary>
+    /// <remarks>
+    /// La espera no es un descuido: el plazo se mide contra el reloj, y con un
+    /// plazo de un milisegundo la comprobación puede caer dentro de ese mismo
+    /// milisegundo, con el plazo sin vencer aún. Se espera de sobra para que no
+    /// dependa de cuánto tarde la máquina.
+    /// </remarks>
     [Fact]
-    public void ElPlazoDelFalloCaduca()
+    public async Task ElPlazoDelFalloCaduca()
     {
-        // Un plazo de un milisegundo ya está vencido cuando se pregunta.
         var cache = NuevaCache(TimeSpan.FromMilliseconds(1));
 
         cache.GuardarDiaFallido(Proveedor, UnDia());
+
+        await Task.Delay(150);
 
         Assert.False(cache.DiaFallidoReciente(Proveedor, UnDia()));
     }
