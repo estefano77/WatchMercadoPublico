@@ -109,11 +109,18 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          # Se dice explícitamente en vez de dejarlo deducido del entorno, que es
-          # lo que hace azure/login por su cuenta. Implícito funcionaría, pero si
-          # algún día el nombre de la variable cambia en otro lado, el fallo
-          # aparece como "no puedo autenticarme" y no como "falta este secreto".
-          creds: ${{ secrets.AZURE_CLIENT_SECRET }}
+          # SIN línea "creds". Espera el objeto entero en JSON:
+          #
+          #   {"clientId":"...","clientSecret":"...","tenantId":"...","subscriptionId":"..."}
+          #
+          # y si se le pasa solo la contraseña, la action intenta hacer un JSON
+          # de ella y revienta con:
+          #
+          #   SyntaxError: Unexpected number in JSON at position 1
+          #
+          # La contraseña no hace falta aquí: azure/login la lee del entorno, que
+          # es lo que hace justamente con un secreto llamado AZURE_CLIENT_SECRET.
+          # Por eso los cuatro van con ese nombre y no con otros.
 
       - name: Deploy to Azure Web App
         id: deploy-to-webapp
