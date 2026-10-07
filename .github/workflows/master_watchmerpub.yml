@@ -23,30 +23,11 @@ jobs:
         with:
           dotnet-version: '10.x'
 
-      # El publish apunta al proyecto del SERVIDOR, no a la solución. La plantilla
-      # de Azure lo deja sin proyecto, y aquí eso rompe por dos cosas a la vez:
-      #
-      #   1. Publica los cuatro proyectos en la misma carpeta, incluidos los dos de
-      #      pruebas, que acabarían dentro de la aplicación publicada. Azure avisa
-      #      de esto con NETSDK1194, que sale en el log del despliegue fallido.
-      #   2. El cliente Blazor se publica DOS VECES a la vez: una por estar en la
-      #      solución, y otra porque el target SuperponerClienteBlazor del
-      #      servidor vuelve a publicar el cliente con la tarea MSBuild. Las dos
-      #      se pisan en obj\...\wasm\for-publish\runtime-icall-table.h y el
-      #      despliegue muere con:
-      #
-      #        error MSB4018: The "ManagedToNativeGenerator" task failed
-      #        The process cannot access the file ... because it is being used
-      #        by another process.
-      #
-      # Es el mismo comando que ya usan MonsterASP y scripts\arrancar.ps1, así que
-      # es un camino probado con este proyecto y no uno nuevo.
-      #
-      # No se deja un "dotnet build" antes: publicar ya compila, y el build aparte
-      # solo serviría para compilar también los proyectos de pruebas, que aquí no
-      # se publican.
+      - name: Build with dotnet
+        run: dotnet build --configuration Release
+
       - name: dotnet publish
-        run: dotnet publish src/WatchMercadoPublico.Server -c Release -o "${{env.DOTNET_ROOT}}/myapp"
+        run: dotnet publish -c Release -o "${{env.DOTNET_ROOT}}/myapp"
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
@@ -57,71 +38,13 @@ jobs:
   deploy:
     runs-on: windows-latest
     needs: build
-
-    # ESTE PERMISO ES LO QUE FALTABA LA PRIMERA VEZ, y por eso se escribe aquí
-    # y no se da por hecho.
-    #
-    # Con solo "contents: read", el token del workflow queda recortado y
-    # azure/login no puede pedir el token federado. El fallo es este, y no dice
-    # nada de credenciales, lo que despista mucho:
-    #
-    #   Unable to get ACTIONS_ID_TOKEN_REQUEST_URL env variable
-    #   Failed to fetch federated token from GitHub
-    #
-    # id-token: write NO va en el job de build, solo en el que entra en Azure.
-    permissions:
-      contents: read
-      id-token: write
-
+    
     steps:
       - name: Download artifact from build job
         uses: actions/download-artifact@v4
         with:
           name: .net-app
-
-      # El deploy entra con azure/login, no con un perfil de publicación.
-      #
-      # El perfil se intentó tres veces y falló de tres maneras distintas, todas
-      # por lo mismo: el fichero que entrega Azure para esta app no trae el
-      # elemento <MSDeploy publishUrl="..."/>, que es de donde la acción saca la
-      # dirección de despliegue. Con el perfil, el error es:
-      #
-      #   Publish profile does not contain kudu URL
-      #
-      # Además Microsoft va retirando los perfiles de publicación, así que el
-      # camino se está cerrando solo. Con azure/login no hay XML que pegar: la
-      # acción pide un token, y el token se renueva solo en cada ejecución.
-      #
-      # Lo que hay que tener puesto en GitHub, los cuatro como secretos:
-      #
-      #   AZURE_TENANT_ID
-      #   AZURE_CLIENT_ID
-      #   AZURE_SUBSCRIPTION_ID
-      #   AZURE_CLIENT_SECRET
-      #
-      # El principal de servicio necesita un rol sobre la app. Contributor sobre
-      # ese recurso es lo que basta, y conviene NO darle Contributor en la
-      # suscripción entera: con acceso solo a watchmerpub, si algún día el secreto
-      # se filtra, lo único que se puede tocar es esta aplicación.
-      - name: Iniciar sesion en Azure
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          # SIN línea "creds". Espera el objeto entero en JSON:
-          #
-          #   {"clientId":"...","clientSecret":"...","tenantId":"...","subscriptionId":"..."}
-          #
-          # y si se le pasa solo la contraseña, la action intenta hacer un JSON
-          # de ella y revienta con:
-          #
-          #   SyntaxError: Unexpected number in JSON at position 1
-          #
-          # La contraseña no hace falta aquí: azure/login la lee del entorno, que
-          # es lo que hace justamente con un secreto llamado AZURE_CLIENT_SECRET.
-          # Por eso los cuatro van con ese nombre y no con otros.
-
+      
       - name: Deploy to Azure Web App
         id: deploy-to-webapp
         uses: azure/webapps-deploy@v3
@@ -129,3 +52,4 @@ jobs:
           app-name: 'watchmerpub'
           slot-name: 'Production'
           package: .
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_B194D67184B24C2196FE1C627362741F }}
