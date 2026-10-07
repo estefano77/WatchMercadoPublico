@@ -1449,6 +1449,42 @@ equipo del usuario tarda 0,87 s.
 La variación de la respuesta cacheada (de 0,26 a 5,12 s) no es del hosting: es el
 candado. Una petición que llega mientras otra tiene la semana la espera.
 
+### El día que falla, medido el 7 de octubre de 2026
+
+La tabla de arriba es de un día que **sí** respondía. Cuando un día falla, la cosa
+cambia por completo, y conviene tener las dos cifras separadas porque se confunden
+suelen:
+
+| | |
+|---|---|
+| Semana en curso, **con un día fallando** | **65,5 s** |
+| La misma semana, otra vez justo después | **65,0 s**, y `desdeCache: false` |
+| Días consultado / hábiles / sin respuesta | 3 / 5 / 1 |
+| El día sin respuesta | `2026-10-07`, que era **hoy** |
+
+Las dos llamadas tardaron lo mismo, y esa es la pista: si la segunda hubiera salido
+de la caché, la caché estaría funcionando. No lo estaba, porque **el fallo no se
+guardaba en ninguna parte**. Un día que falla no es un día cacheado: es un día que
+se vuelve a preguntar entero en cada petición.
+
+Y los 60 de esos 65 segundos **no eran la API tardando**. Eran las esperas entre
+reintentos: 2, 4, 8, 16 y 30 segundos, que son exactamente 60. El día fallaba
+siempre y fallaba deprisa, así que la escalera se subía entera cada vez.
+
+Por eso 65 s es un número peligroso: el cliente corta a los 150 s, así que una sola
+consulta cabe, pero con el candado (30 s de espera) y con alguien más mirando por
+delante, se pasa. Ahí es cuando aparecía la pantalla clavada.
+
+La solución fue **recordar también el fallo**, con `MinutosDeCacheFallo` (15 min):
+el día sigue saliendo como fallido y la pantalla sigue diciendo que puede faltar
+algo de ese día, pero no se vuelve a preguntar hasta que pase el plazo. Y el botón
+"Actualizar" salta el plazo, que es la única forma de reintentarlo a mano.
+
+> **Por qué 15 y no 4:** tiene que ser **mayor** que `MinutosEntreRefrescos`. Con el
+> mismo plazo que la caché de datos, cada refresco automático llegaría justo
+> cuando el fallo caduca y volvería a pagar la escalera entera una vez cada cinco
+> minutos. Sería lo mismo que no haber arreglado nada, pero con más código.
+
 ---
 
 ## Catálogo de fallos
@@ -1470,6 +1506,7 @@ Por **síntoma**, no por causa interna:
 | Al volver a la pestaña se enredan dos cargas y una pisa a la otra | Cada carga toma un número con `generacionCarga`. Una carga que llega tarde, o a la que la red de seguridad ya le cerró la puerta, ve que su número no es el vigente y no escribe su respuesta ni toca el `finally`. |
 | "Esa misma semana se está consultando ahora mismo" | Código `409`. El candado lo tenía otra petición y no se esperó más de 30 s. Es a propósito: antes se esperaba sin límite y sin decir nada. |
 | Todo va lento en MonsterASP y no en local | Esperado: ~3 veces por llamada a la API (2,74 s contra 0,87 s por día hábil). Ver "Qué tan rápido es, medido". Lo que NO es normal es que dos consultas en paralelo sean más lentas que en serie: eso significaría que se rompió el candado único. |
+| **La semana tarda más de un minuto, y da igual cuántas veces la pidas** | Un día está fallando y **su fallo no se recordaba**, así que la escalera de seis intentos (2+4+8+16+30 s = 60 s) se subía entera en cada petición. Se ve en `diasSinRespuesta`, y en que la segunda llamada también tarda lo mismo y vuelve con `desdeCache: false`. Mira si el día que falla es **hoy**: es lo normal, y suele ser porque la API no responde aún por una fecha que acaba de empezar. |
 | Un día sale con el nombre de otro | El array de días del cliente indexado por `DayOfWeek`, que en .NET empieza por **domingo**. Esa lógica se movió al servidor (`TextosDeFecha`) precisamente por eso. Si alguien la reintroduce, el primer síntoma es "un viernes que pone sábado". |
 | Al abrir la página, la cabecera y nada debajo | Estado muerto: `Semana` a null sin error ni consulta en vuelo. Hay una rama `else` que lo evita, así que si aparece, hay que mirar la consola del navegador. |
 | Se queda en "Cargando" tras publicar | Falta el target `SuperponerClienteBlazor`, o el `index.html` publicado sin sustituir. |

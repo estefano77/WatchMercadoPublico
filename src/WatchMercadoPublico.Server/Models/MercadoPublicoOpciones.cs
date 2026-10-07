@@ -60,6 +60,32 @@ public sealed class MercadoPublicoOpciones
     public string ModoConsulta { get; set; } = "v1";
 
     /// <summary>
+    /// Minutos que se recuerda que un día falló, antes de volver a preguntarlo.
+    ///
+    /// <para>
+    /// Es un plazo de memoria del fallo, no de los datos: no guarda ninguna
+    /// licitación, solo que ese día ya se preguntó y no respondió. El día sigue
+    /// saliendo como fallido y la pantalla sigue diciendo que puede faltar algo.
+    /// </para>
+    ///
+    /// <para>
+    /// Tiene que ser MAYOR que <see cref="MinutosEntreRefrescos"/>, y por eso no
+    /// son los mismos 4 minutos de <see cref="MinutosDeCache"/>. Con el mismo
+    /// plazo, cada refresco automático llegaría justo cuando el fallo caduca y
+    /// volvería a subir la escalera de seis intentos entera, que es justamente lo
+    /// que esto evita.
+    /// </para>
+    ///
+    /// <para>
+    /// El valor viene de una medición en MonsterASP: el día que fallaba costaba
+    /// 60 de los 65 segundos de cada consulta, y no porque la API tardara, sino
+    /// porque las esperas entre reintentos son de 2, 4, 8, 16 y 30 s y ese día
+    /// fallaba siempre y deprisa.
+    /// </para>
+    /// </summary>
+    public int MinutosDeCacheFallo { get; set; } = 15;
+
+    /// <summary>
     /// Minutos de vida de la caché en memoria.
     ///
     /// Va por debajo del refresco automático (5 min) a propósito: si la caché

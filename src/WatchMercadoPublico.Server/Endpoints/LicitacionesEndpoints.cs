@@ -389,6 +389,34 @@ public static class LicitacionesEndpoints
                 {
                     var forzarConsulta = refrescar && dia == hoy;
 
+                    // Un fallo que se acaba de producir NO vuelve a preguntarse
+                    // enseguida. El motivo está medido: el día que fallaba costaba
+                    // 60 de los 65 segundos de cada consulta, no porque la API
+                    // tardara, sino porque las esperas entre reintentos suman
+                    // 2+4+8+16+30 s y ese día fallaba siempre y deprisa. Como el
+                    // fallo no se guardaba en ninguna parte, la escalera entera se
+                    // subía otra vez en cada petición, para siempre.
+                    //
+                    // Da igual que hoy sea el día que falla o uno pasado: el
+                    // plazo es el mismo. La escalera entera se paga igual.
+                    //
+                    // Y el botón "Actualizar" sí salta el plazo, con
+                    // refrescar = true. Es la única manera de hacerlo y por eso
+                    // no puede quedarse sin efecto justo en el día que más
+                    // urge reintentar.
+                    if (!refrescar && cache.DiaFallidoReciente(config.CodigoProveedor, dia))
+                    {
+                        // Ojo con lo que esto NO es: el día se sigue anotando como
+                        // sin respuesta, igual que si se hubiera preguntado. Y
+                        // desdeCache NO se toca, porque aquí no se consultó nada.
+                        // Recordar un fallo no autoriza a decir que no hay nada.
+                        sinRespuesta.Add($"{dia:yyyy-MM-dd}");
+                        log.LogInformation(
+                            "El día {Dia} falló hace poco y no se vuelve a preguntar hasta que pase el plazo",
+                            dia);
+                        continue;
+                    }
+
                     var lote = forzarConsulta ? null : cache.ObtenerDia(config.CodigoProveedor, dia);
 
                     if (lote is null)
@@ -403,6 +431,11 @@ public static class LicitacionesEndpoints
                             // sí lo hacía, y un solo fallo dejaba la semana entera
                             // en error.
                             sinRespuesta.Add($"{dia:yyyy-MM-dd}");
+
+                            // Y el fallo se guarda, que es lo que hace que la
+                            // próxima consulta no vuelva a pagar los 60 s.
+                            cache.GuardarDiaFallido(config.CodigoProveedor, dia);
+
                             log.LogWarning("El día {Dia} de la semana no se pudo consultar", dia);
                             continue;
                         }

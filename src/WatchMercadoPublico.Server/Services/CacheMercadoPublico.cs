@@ -34,6 +34,25 @@ public sealed class CacheMercadoPublico
     private readonly Dictionary<string, EntradaDetalle> porDetalle = new(StringComparer.Ordinal);
 
     /// <summary>
+    /// Días que FALLARON, con la hora en que deja de importar recordarlo.
+    ///
+    /// <para>
+    /// Aquí no hay datos, solo la memoria de que ya se preguntó y no respondió.
+    /// Y existe por una medición: el día que falla estaba costando 60 de los 65
+    /// segundos de cada consulta, para siempre, porque el fallo no se guardaba
+    /// en ninguna parte y la escalera de seis intentos se volvía a subir entera
+    /// en cada petición.
+    /// </para>
+    ///
+    /// <para>
+    /// Lo que se guarda NO es una mentira: el día sigue saliendo como fallido y
+    /// la pantalla sigue diciendo que puede faltar algo de ese día. Lo único que
+    /// cambia es que no se vuelve a preguntar hasta que pase el plazo.
+    /// </para>
+    /// </summary>
+    private readonly Dictionary<string, DateTimeOffset> porDiaFallido = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// UN candado para toda la aplicación, a propósito, y con la medición que lo
     /// justifica.
     ///
@@ -67,12 +86,14 @@ public sealed class CacheMercadoPublico
     private readonly SemaphoreSlim candado = new(1, 1);
     private readonly TimeSpan caducidad;
     private readonly TimeSpan caducidadHistorica;
+    private readonly TimeSpan caducidadFallo;
     private readonly ILogger<CacheMercadoPublico> log;
 
     public CacheMercadoPublico(
         ILogger<CacheMercadoPublico> log,
         TimeSpan caducidad,
-        TimeSpan? caducidadHistorica = null)
+        TimeSpan? caducidadHistorica = null,
+        TimeSpan? caducidadFallo = null)
     {
         this.log = log;
         this.caducidad = caducidad <= TimeSpan.Zero ? TimeSpan.FromMinutes(15) : caducidad;
@@ -85,6 +106,15 @@ public sealed class CacheMercadoPublico
         this.caducidadHistorica = caducidadHistorica is { } h && h > TimeSpan.Zero
             ? h
             : TimeSpan.FromDays(30);
+
+        // El plazo del fallo tiene que ser MÁS LARGO que el refresco automático.
+        // Si fuera igual, cada refresco llegaría justo cuando el fallo caduca y
+        // volvería a subir la escalera entera, y no se arreglaría nada. Quince
+        // minutos es más que los cinco del refresco, y bastante menos que los
+        // cuatro de espera que costaba preguntar en balde.
+        this.caducidadFallo = caducidadFallo is { } f && f > TimeSpan.Zero
+            ? f
+            : TimeSpan.FromMinutes(15);
     }
 
     private static string ClaveDia(string proveedor, DateOnly fecha) => $"{proveedor}|{fecha:yyyyMMdd}";
@@ -107,6 +137,10 @@ public sealed class CacheMercadoPublico
     /// El plazo depende de si el día ya pasó: hoy caduca en minutos para que
     /// aparezca lo que se publica durante la jornada; un día pasado dura mucho
     /// más porque no va a cambiar.
+    ///
+    /// Y borra el fallo que hubiera: si el día acaba de responder, ya no hay nada
+    /// que recordar, y dejarlo puesto haría que la próxima consulta lo saltara
+    /// sin preguntarlo.
     /// </summary>
     public void GuardarDia(string proveedor, DateOnly fecha, List<Licitacion> datos)
     {
@@ -115,7 +149,34 @@ public sealed class CacheMercadoPublico
 
         porDia[ClaveDia(proveedor, fecha)] =
             new EntradaDia(DateTimeOffset.UtcNow.Add(plazo), datos);
+
+        porDiaFallido.Remove(ClaveDia(proveedor, fecha));
     }
+
+    // ------------------------------------------------------------------
+    // Días que fallaron
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Anota que este día se preguntó y no respondió, para no volver a preguntarlo
+    /// hasta que pase el plazo.
+    /// </summary>
+    public void GuardarDiaFallido(string proveedor, DateOnly fecha) =>
+        porDiaFallido[ClaveDia(proveedor, fecha)] = DateTimeOffset.UtcNow.Add(caducidadFallo);
+
+    /// <summary>
+    /// ¿Este día falló hace poco y aún se está procurando?
+    ///
+    /// Es la pregunta que evita la escalera de reintentos entera en cada petición.
+    /// Quien la hace tiene que dejar el día en la lista de sin respuesta igual
+    /// que si hubiera preguntado: recordarlo no autoriza a decir que no hay nada.
+    /// </summary>
+    public bool DiaFallidoReciente(string proveedor, DateOnly fecha) =>
+        porDiaFallido.TryGetValue(ClaveDia(proveedor, fecha), out var vence)
+        && vence > DateTimeOffset.UtcNow;
+
+    /// <summary>El plazo que se recuerda un fallo. Solo para pruebas y para el log.</summary>
+    public TimeSpan CaducidadFallo => caducidadFallo;
 
     // ------------------------------------------------------------------
     // Detalles
@@ -144,16 +205,18 @@ public sealed class CacheMercadoPublico
         var ahora = DateTimeOffset.UtcNow;
         var dias = porDia.Where(kv => kv.Value.Vence <= ahora).Select(kv => kv.Key).ToList();
         var detalles = porDetalle.Where(kv => kv.Value.Vence <= ahora).Select(kv => kv.Key).ToList();
+        var fallidos = porDiaFallido.Where(kv => kv.Value <= ahora).Select(kv => kv.Key).ToList();
 
         foreach (var clave in dias) porDia.Remove(clave);
         foreach (var clave in detalles) porDetalle.Remove(clave);
+        foreach (var clave in fallidos) porDiaFallido.Remove(clave);
 
-        if (dias.Count + detalles.Count > 0)
+        if (dias.Count + detalles.Count + fallidos.Count > 0)
             log.LogInformation(
-                "Caché podada: {Dias} días y {Detalles} detalles caducados",
-                dias.Count, detalles.Count);
+                "Caché podada: {Dias} días, {Fallidos} fallos y {Detalles} detalles caducados",
+                dias.Count, fallidos.Count, detalles.Count);
 
-        return dias.Count + detalles.Count;
+        return dias.Count + detalles.Count + fallidos.Count;
     }
 
     /// <summary>Vacía todo, o solo lo de un proveedor (botón "Actualizar").</summary>
@@ -163,6 +226,7 @@ public sealed class CacheMercadoPublico
         {
             porDia.Clear();
             porDetalle.Clear();
+            porDiaFallido.Clear();
             return;
         }
 
@@ -170,6 +234,15 @@ public sealed class CacheMercadoPublico
         // se descartan también: sus fichas volverían a pedir detalle.
         foreach (var clave in porDia.Keys.Where(k => k.StartsWith(codigoProveedor + "|", StringComparison.Ordinal)).ToList())
             porDia.Remove(clave);
+
+        // Y los fallos también se descartan. Si no, el botón "Actualizar" no
+        // reintentaría un día que había fallado, y durante el plazo entero
+        // seguiría apareciendo como sin respuesta sin que nadie lo volviera a
+        // preguntar. El botón es la única manera de saltarse este plazo, y si no
+        // se lo salta deja de servir para lo único que sirve.
+        foreach (var clave in porDiaFallido.Keys.Where(k => k.StartsWith(codigoProveedor + "|", StringComparison.Ordinal)).ToList())
+            porDiaFallido.Remove(clave);
+
         porDetalle.Clear();
     }
 
@@ -192,10 +265,17 @@ public static class CacheMercadoPublicoExtensions
         var minutosHistoricos = configuracion.GetValue<int?>(
             $"{MercadoPublicoOpciones.Seccion}:DiasDeCacheHistorico") ?? 30;
 
+        // Días que fallaron: 15 minutos por defecto, o lo que diga la
+        // configuración. Tiene que ser mayor que MinutosEntreRefrescos o el
+        // refresco automático llegaría siempre con el fallo caducado.
+        var minutosFallo = configuracion.GetValue<int?>(
+            $"{MercadoPublicoOpciones.Seccion}:MinutosDeCacheFallo") ?? 15;
+
         servicios.AddSingleton(sp => new CacheMercadoPublico(
             sp.GetRequiredService<ILogger<CacheMercadoPublico>>(),
             TimeSpan.FromMinutes(Math.Max(1, minutos)),
-            TimeSpan.FromDays(Math.Max(1, minutosHistoricos))));
+            TimeSpan.FromDays(Math.Max(1, minutosHistoricos)),
+            TimeSpan.FromMinutes(Math.Max(1, minutosFallo))));
 
         return servicios;
     }
