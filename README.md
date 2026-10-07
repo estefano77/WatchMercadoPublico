@@ -1464,6 +1464,10 @@ Por **síntoma**, no por causa interna:
 | **La página se consulta sola una semana que no elegiste** | El temporizador del refresco automático dispara `CargarAsync`, que lee el **desplegable**, no lo que está en pantalla. Si no se rearma al cambiar los filtros, a los 5 minutos consulta la semana elegida y el aviso de "pulsa Actualizar" se vuelve mentira. Se rearma en `CambiarSemana`, `CambiarAnio`, `CambiarMes` y al terminar cualquier `CargarAsync`. |
 | **El refresco automático deja de funcionar hasta recargar** | `CargarAsync` sin rearmar al final. El temporizador solo se reprogramaba al arrancar y desde su propio disparo, así que traer una semana con "Actualizar" lo dejaba muerto. Ya se rearma en el `finally`. |
 | El contador de segundos se queda en un número bajo mientras la espera es larga | Cuenta ticks, no tiempo. Si el navegador para la página, los ticks dejan de llegar y el número miente. Debe leer el reloj: `DateTimeOffset.Now - inicioEspera`. |
+| **Vuelves a la pestaña tras un rato largo y se queda clavada en "Consultando" para siempre** | No había **nada** que bajara la capa si la espera no se desenrollaba. `Cargando = false` vivía solo en el `finally` de `CargarAsync`, y ese `finally` depende de que la espera vuelva del servidor: si el navegador congeló la página, puede no volver nunca. Ahora hay red de seguridad: `ArmarVigilante` es un temporizador que **vigila** la consulta en vez de esperarla, salta a los 150 s del cliente más 20 s de margen, baja la capa y avisa. Si aparece este aviso, lo que se atascó fue el camino de vuelta, no Mercado Público. |
+| **Vuelves a la pestaña y no se actualiza nada, sin error ni aviso** | El refresco se pedía desde el manejador de visibilidad, y `CargarAsync` se salía de inmediato al ver `if (Cargando) return;` — que en ese instante **seguía en `true`**, porque lo baja el `finally` de la consulta que el rescate acababa de cancelar. La consulta se perdía en silencio. Ahora el manejador solo deja el refresco pendiente (`refrescoPendiente`) y lo atiende el `finally` de esa carga, que es el único punto donde `Cargando` ya es falso. |
+| Un fallo al volver a la pestaña no aparece en ninguna parte | `visibilidad.js` soltaba la promesa de `invokeMethodAsync` sin mirar. Ahora lleva `.catch()` y escribe en la consola del navegador. |
+| Al volver a la pestaña se enredan dos cargas y una pisa a la otra | Cada carga toma un número con `generacionCarga`. Una carga que llega tarde, o a la que la red de seguridad ya le cerró la puerta, ve que su número no es el vigente y no escribe su respuesta ni toca el `finally`. |
 | "Esa misma semana se está consultando ahora mismo" | Código `409`. El candado lo tenía otra petición y no se esperó más de 30 s. Es a propósito: antes se esperaba sin límite y sin decir nada. |
 | Todo va lento en MonsterASP y no en local | Esperado: ~3 veces por llamada a la API (2,74 s contra 0,87 s por día hábil). Ver "Qué tan rápido es, medido". Lo que NO es normal es que dos consultas en paralelo sean más lentas que en serie: eso significaría que se rompió el candado único. |
 | Un día sale con el nombre de otro | El array de días del cliente indexado por `DayOfWeek`, que en .NET empieza por **domingo**. Esa lógica se movió al servidor (`TextosDeFecha`) precisamente por eso. Si alguien la reintroduce, el primer síntoma es "un viernes que pone sábado". |
@@ -1707,6 +1711,12 @@ tests para el cliente, y alcanza a todo lo que son funciones puras: `Formato`,
 componente es lo que de verdad necesita Blazor —el render, el temporizador del
 refresco, el estado de "cargando"—, y eso sigue sin cobertura. Para cerrarlo
 haría falta bUnit.
+
+Y en ese hueco caen justo los fallos más caros. La red de seguridad de la espera
+y el refresco que se atiende desde el `finally` son estado de componente, así que
+**no hay ninguna prueba que los vigile**: si alguien los borra, compila todo,
+pasa las 160 pruebas y vuelve el congelamiento sin que salte nada. Se dejan
+documentados en el catálogo de fallos por eso, no porque una prueba los cubra.
 
 **Y hay un agujero conocido en el servidor, del mismo tipo.** `MercadoPublicoCliente`
 es `sealed` y **no implementa ninguna interfaz**, así que no hay forma de

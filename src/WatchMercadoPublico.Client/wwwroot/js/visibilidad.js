@@ -19,7 +19,19 @@ export function observar(objeto, id) {
     if (!id) throw new Error("Falta el identificador de la pantalla.");
 
     if (!manejadores.has(id)) {
-        const fn = () => objeto.invokeMethodAsync("AlCambiarVisibilidad");
+        const fn = () => {
+            // La promesa que devuelve invokeMethodAsync se vigila. Sin esto,
+            // cualquier fallo es un rechazo sin manejar: no aparece en ninguna
+            // parte, no deja rastro y no reintenta nada. Pasa, por ejemplo,
+            // cuando la pantalla ya no existe y Blazor rechaza la llamada.
+            const trabajo = objeto.invokeMethodAsync("AlCambiarVisibilidad");
+
+            if (trabajo && typeof trabajo.catch === "function") {
+                trabajo.catch((error) => {
+                    console.error("No se pudo atender el cambio de visibilidad: " + error);
+                });
+            }
+        };
         document.addEventListener("visibilitychange", fn);
         manejadores.set(id, fn);
     }

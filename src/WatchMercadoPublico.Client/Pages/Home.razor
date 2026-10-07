@@ -506,6 +506,19 @@
 
     private System.Timers.Timer? temporizador;
     private System.Timers.Timer? reloj;
+    private System.Timers.Timer? vigilante;
+
+    /// <summary>
+    /// Margen que se suma al plazo del cliente para que salte la red de seguridad.
+    ///
+    /// El cliente ya corta por su cuenta a los <see cref="MercadoPublicoApi.SegundosEspera"/>
+    /// segundos, así que si a los 170 segundos la pantalla sigue esperando, lo que se
+    /// atascó no fue la consulta al servidor sino el camino de vuelta de la respuesta.
+    /// Con el margen justo la red saltaría en la misma consulta que el cliente ya
+    /// está cortando por su cuenta, y entonces daría la por buena y se pelearían los
+    /// dos mensajes.
+    /// </summary>
+    private const int MargenDelVigilante = 20;
 
     /// <summary>
     /// Token de la espera en curso, para que el usuario pueda dejarla. Vive aquí
@@ -522,6 +535,39 @@
     /// esperando. Pintarlo con la caja roja sería gritarle por una decisión suya.
     /// </summary>
     private bool esperaCancelada;
+
+    /// <summary>
+    /// Número de la carga en curso.
+    ///
+    /// La red de seguridad lo sube cuando fuerza la pantalla a bajar. Así, una
+    /// consulta que llega tarde ve que su número ya no es el vigente y no escribe
+    /// su respuesta encima de lo que haya ahora, que pertenece a otra carga.
+    /// </summary>
+    private int generacionCarga;
+
+    /// <summary>
+    /// Que hay un refresco pendiente que hacer cuando termine la carga en vuelo.
+    ///
+    /// Existe por un motivo concreto: al volver de la pestaña, el rescate cancela
+    /// la consulta que estaba en marcha y enseguida hay que pedir los datos otra
+    /// vez. Pero pedirlos desde ahí se perdía en silencio, porque
+    /// <see cref="CargarAsync"/> se sale de inmediato al ver <c>Cargando</c> en
+    /// true, y en ese instante todavía lo está: lo baja el <c>finally</c> de la
+    /// consulta que se acaba de cancelar, y ese <c>finally</c> aún no ha corrido.
+    ///
+    /// Así que el refresco se pide desde el <c>finally</c>, que es el único sitio
+    /// donde <c>Cargando</c> ya es falso. El usuario volvía a ver los mismos datos
+    /// viejos, sin error y sin aviso de nada.
+    /// </summary>
+    private bool refrescoPendiente;
+
+    /// <summary>
+    /// Minutos que se anunciarán cuando se atienda el refresco pendiente.
+    ///
+    /// Va aparte del refresco porque el aviso solo se puede poner si la consulta
+    /// salió bien y consultó de verdad, y eso se sabe al terminar, no al pedirlo.
+    /// </summary>
+    private int? minutosParaAviso;
 
     /// <summary>
     /// Si la espera se cortó por plazo y no porque el usuario lo pidiera.
@@ -802,7 +848,10 @@
             // Va antes que lo demás porque es lo único que hay que hacer aunque
             // los datos estén fresquísimos: si la consulta está colgada no hay
             // datos frescos que enseñar.
-            await RescatarConsultaColgadaAsync();
+            //
+            // No se espera: el rescate dispara la cancelación y sigue. La
+            // consulta se desenrolla sola y avisa por su finally.
+            RescatarConsultaColgada();
 
             var minutos = MinutosFuera;
 
@@ -821,46 +870,18 @@
                 return;
             }
 
-            await VolverDeLaPestana(minutos.Value);
+            minutosParaAviso = minutos.Value;
+            refrescoPendiente = true;
+
+            // Si hay una consulta en vuelo, el rescate ya la canceló y va a
+            // desenrollarse: de ella se ocupa su finally, que es el único sitio
+            // donde Cargando ya es falso. Pedirlo aquí se perdía en silencio,
+            // porque CargarAsync se sale al ver Cargando en true y en ese
+            // instante todavía lo está.
+            if (Cargando) return;
+
+            await AtenderRefrescoPospuestoAsync();
         });
-    }
-
-    /// <summary>
-    /// Trae los datos al volver, y avisa de que lo hizo.
-    ///
-    /// El aviso va DESPUÉS de la consulta y solo si salió bien. Ponerlo antes
-    /// obligaría a una de dos cosas malas: o decir "actualizado" cuando la
-    /// consulta falla, o tener que desvanecer un aviso que ya se vio.
-    ///
-    /// Y si la consulta no aporta nada nuevo porque venía de la caché, no se
-    /// dice nada: el aviso habla de que se consultó, y si no se consultó,
-    /// mentimos.
-    ///
-    /// Igual con el fallo: si la consulta falla, los datos que quedan son los de
-    /// antes y la caja de error ya lo dice con todas las letras. Añadir un aviso
-    /// de "actualizado" ahí sería mentir dos veces, porque el usuario leería que
-    /// los datos son nuevos cuando son justamente los viejos.
-    /// </summary>
-    private async Task VolverDeLaPestana(int minutos)
-    {
-        await CargarAsync(refrescar: false);
-
-        if (ErrorConsulta is not null)
-        {
-            // Falló. Los datos en pantalla son los de antes y el error ya lo
-            // dice con su caja: un aviso de "actualizado" aquí sería falso.
-            seFueDeLaPestana = null;
-            return;
-        }
-
-        var consultadaAhora = consultoDeVerdad;
-        seFueDeLaPestana = null;
-
-        if (consultadaAhora)
-        {
-            minutosAvisoVuelta = minutos;
-            StateHasChanged();
-        }
     }
 
     /// <summary>
@@ -885,7 +906,7 @@
     /// así es lo único honesto.
     /// </para>
     /// </summary>
-    private async Task RescatarConsultaColgadaAsync()
+    private void RescatarConsultaColgada()
     {
         if (!Cargando || inicioEspera is not DateTimeOffset inicio) return;
 
@@ -903,7 +924,75 @@
         var espera = cancelarEspera;
 
         if (espera is not null && !espera.IsCancellationRequested)
-            await espera.CancelAsync();
+        {
+            // SIN await, y esto es lo importante. Este era el punto exacto donde
+            // el manejador de visibilidad se quedaba atascado: al esperar aquí, si
+            // el navegador tiene la página congelada, la continuación no llega
+            // nunca y la llamada entera se queda colgada sin llegar nunca al
+            // refresco que iba justo detrás.
+            //
+            // El disparo no necesita esperar a nadie. La consulta se desenrolla
+            // sola, avisa por su finally, y ese finally es el que recoge el
+            // refresco pendiente.
+            VigilarAsync(espera.CancelAsync());
+        }
+    }
+
+    /// <summary>
+    /// Hace el refresco que se pidió al volver de la pestaña y avisa de ello.
+    ///
+    /// <para>
+    /// El aviso va DESPUÉS de la consulta y solo si salió bien. Ponerlo antes
+    /// obligaría a una de dos cosas malas: o decir "actualizado" cuando la
+    /// consulta falla, o tener que desvanecer un aviso que ya se vio.
+    /// </para>
+    ///
+    /// <para>
+    /// Y si la consulta no aporta nada nuevo porque venía de la caché, no se
+    /// dice nada: el aviso habla de que se consultó, y si no se consultó,
+    /// mentimos.
+    /// </para>
+    ///
+    /// <para>
+    /// Igual con el fallo: si la consulta falla, los datos que quedan son los de
+    /// antes y la caja de error ya lo dice con todas las letras. Añadir un aviso
+    /// de "actualizado" ahí sería mentir dos veces, porque el usuario leería que
+    /// los datos son nuevos cuando son justamente los viejos.
+    /// </para>
+    /// </summary>
+    private async Task AtenderRefrescoPospuestoAsync()
+    {
+        if (!refrescoPendiente) return;
+
+        // Se apaga antes de consultar, no después. Si al consultar salta una
+        // excepción, quedaría encendido para siempre y cada carga posterior
+        // volvería a dispararlo.
+        refrescoPendiente = false;
+
+        var minutos = minutosParaAviso;
+        minutosParaAviso = null;
+
+        // Sin enSegundoPlano: el usuario volvió a mirar la pantalla, así que
+        // esto no es un refresco de fondo y el servidor no debe conformarse con
+        // menos reintentos.
+        await CargarAsync(refrescar: false);
+
+        if (ErrorConsulta is not null)
+        {
+            // Falló. Los datos en pantalla son los de antes y el error ya lo
+            // dice con su caja: un aviso de "actualizado" aquí sería falso.
+            seFueDeLaPestana = null;
+            return;
+        }
+
+        var consultadaAhora = consultoDeVerdad;
+        seFueDeLaPestana = null;
+
+        if (consultadaAhora && minutos is not null)
+        {
+            minutosAvisoVuelta = minutos;
+            StateHasChanged();
+        }
     }
 
     /// <summary>Minutos que se anuncian en el aviso, o null si no toca.</summary>
@@ -1120,6 +1209,8 @@
         // terminado la anterior.
         if (Cargando) return;
 
+        var generacion = ++generacionCarga;
+
         Cargando = true;
         ErrorConsulta = null;
         esperaCancelada = false;
@@ -1142,8 +1233,23 @@
 
         try
         {
+            // Y con el reloj, la red de seguridad, que es lo único que
+            // garantiza que la capa de espera se quite.
+            //
+            // Va DENTRO del try a propósito. Si fallara aquí fuera, el finally
+            // no se ejecutaría, Cargando se quedaría en true y, sin red de
+            // seguridad armada, la pantalla se quedaría clavada justo del mismo
+            // modo que se quería arreglar. Dentro, el catch la convierte en un
+            // error visible y el finally baja la capa.
+            ArmarVigilante();
+
             var (resultado, error) = await Api.GetSemanaAsync(
                 Anio, Mes, NumeroSemana, refrescar, espera.Token, enSegundoPlano);
+
+            // Si la red de seguridad ya bajó esta carga, su respuesta llega
+            // tarde. No se escribe nada: la pantalla está en otro estado ahora
+            // y esta carga ya no es la vigente.
+            if (generacion != generacionCarga) return;
 
             if (error is not null)
             {
@@ -1182,6 +1288,10 @@
         }
         catch (OperationCanceledException)
         {
+            // Lo mismo que arriba: una carga que ya no es la vigente no escribe
+            // su mensaje sobre el estado que tiene ahora la pantalla.
+            if (generacion != generacionCarga) return;
+
             if (cortePorPlazo)
             {
                 // Cortada porque la página estuvo parada más rato del plazo. Se dice
@@ -1212,6 +1322,8 @@
         }
         catch (Exception ex)
         {
+            if (generacion != generacionCarga) return;
+
             // Cinturón y tirantes. GetSemanaAsync devuelve el error en la tupla y
             // no debería lanzar, pero si algo se escapa esta línea es la que
             // impide el congelamiento: sin ella, el finally de abajo apagaba el
@@ -1226,22 +1338,39 @@
         }
         finally
         {
-            cancelarEspera = null;
-            Cargando = false;
-            PararReloj();
-
-            // Rearma el refresco automático al terminar CUALQUIER carga, no solo
-            // al arrancar. Faltaba este rearme y era el mismo fallo que se corrigió
-            // esta mañana en los filtros, por el otro lado: al cambiar el desplegable
-            // se cancelaba el temporizador, pero al traer esa semana a pantalla
-            // con "Actualizar" NO se volvía a programar. Resultado: pulsar
-            // "Actualizar" dejaba la página sin refresco automático hasta
-            // recargarla.
+            // Una carga que ya no es la vigente no toca NADA de aquí. Todo lo de
+            // este bloque, el token, el reloj, la vigilancia y el refresco,
+            // pertenecen a la carga que la sustituyó, y pisarlo dejaría sin
+            // reloj, sin red de seguridad o sin refresco a una carga viva.
             //
-            // Va en el finally y no en el try porque también tiene que rearme
-            // cuando la carga falla: tras un error la pantalla sigue mostrando la
-            // semana en curso, y esa es justo la que debe seguir refrescando sola.
-            ProgramarRefresco();
+            // Va con if y no con return porque en un finally no se puede salir
+            // del bloque.
+            if (generacion == generacionCarga)
+            {
+                cancelarEspera = null;
+                Cargando = false;
+                PararReloj();
+                PararVigilante();
+
+                // Rearma el refresco automático al terminar CUALQUIER carga, no solo
+                // al arrancar. Faltaba este rearme y era el mismo fallo que se corrigió
+                // esta mañana en los filtros, por el otro lado: al cambiar el desplegable
+                // se cancelaba el temporizador, pero al traer esa semana a pantalla
+                // con "Actualizar" NO se volvía a programar. Resultado: pulsar
+                // "Actualizar" dejaba la página sin refresco automático hasta
+                // recargarla.
+                //
+                // Va en el finally y no en el try porque también tiene que rearme
+                // cuando la carga falla: tras un error la pantalla sigue mostrando la
+                // semana en curso, y esa es justo la que debe seguir refrescando sola.
+                ProgramarRefresco();
+
+                // Y aquí, y no antes, se atiende el refresco que se pidió al volver
+                // de la pestaña. Este es el único punto donde Cargando ya es falso,
+                // que es la condición que hace falta para que CargarAsync no se
+                // salga por su guardia sin hacer nada.
+                await AtenderRefrescoPospuestoAsync();
+            }
         }
     }
 
@@ -1321,6 +1450,87 @@
         reloj?.Stop();
         reloj?.Dispose();
         reloj = null;
+    }
+
+    /// <summary>
+    /// Red de seguridad de la espera: la única cosa que garantiza que la capa
+    /// de espera se quite.
+    ///
+    /// <para>
+    /// Hasta ahora nada lo garantizaba. La capa se bajaba en el <c>finally</c> de
+    /// <see cref="CargarAsync"/>, y ese <c>finally</c> solo corre cuando la espera
+    /// se desenrolla. Si el navegador congela la pestaña, esa desenrollada puede
+    /// no llegar nunca, y entonces la pantalla se queda con el contador clavado,
+    /// sin error y sin salida: se vio justo eso al volver de la pestaña después
+    /// de un rato largo.
+    /// </para>
+    ///
+    /// <para>
+    /// Este temporizador no espera a la consulta, la vigila, y por eso no depende
+    /// de ella: si cuando salta la consulta sigue en curso, da la carga por
+    /// perdida, baja la capa y deja un aviso honesto. También se apoya en que
+    /// congelar la pestaña congela los temporizadores, pero al volver disparan
+    /// de inmediato, que es justo cuando hace falta que bajen.
+    /// </para>
+    /// </summary>
+    private void ArmarVigilante()
+    {
+        PararVigilante();
+
+        vigilante = new System.Timers.Timer
+        {
+            Interval = TimeSpan.FromSeconds(
+                MercadoPublicoApi.SegundosEspera + MargenDelVigilante).TotalMilliseconds,
+            AutoReset = false,
+        };
+
+        vigilante.Elapsed += (_, _) =>
+        {
+            try
+            {
+                VigilarAsync(InvokeAsync(async () =>
+                {
+                    // Si la carga terminó por la vía normal, no hay nada que
+                    // salvar: el finally ya bajó la capa y apagó este temporizador.
+                    // Solo salta de verdad cuando la espera se quedó atascada.
+                    if (!Cargando) return;
+
+                    // Se sube la generación para que la consulta atascada, si
+                    // alguna vez responde, vea que ya no es su turno y no escriba
+                    // su respuesta encima de lo de ahora.
+                    generacionCarga++;
+
+                    Cargando = false;
+                    PararReloj();
+                    PararVigilante();
+
+                    ErrorConsulta =
+                        "La consulta se quedó atorada en el camino de vuelta y se cerró " +
+                        "para no dejar la pantalla clavada. Puede que Mercado Público la " +
+                        "siga buscando: inténtalo otra vez en un momento.";
+
+                    ProgramarRefresco();
+
+                    // Y si al volver de la pestaña había un refresco esperando,
+                    // esta es su oportunidad: ya no hay nada encima que lo bloquee.
+                    await AtenderRefrescoPospuestoAsync();
+                }));
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"La red de seguridad de la espera falló: {ex}");
+            }
+        };
+
+        vigilante.Start();
+    }
+
+    /// <summary>Apaga la red de seguridad de la espera.</summary>
+    private void PararVigilante()
+    {
+        vigilante?.Stop();
+        vigilante?.Dispose();
+        vigilante = null;
     }
 
     /// <summary>
@@ -1478,6 +1688,11 @@
         // El reloj también: si no, seguiría pidiendo repintados sobre un
         // componente ya descartado, que en Blazor lanza.
         PararReloj();
+
+        // Y la red de seguridad, por lo mismo y con más razón: si se quedara
+        // viva, saltaría sobre una pantalla que ya no existe y bajaría la capa
+        // de un componente destruido.
+        PararVigilante();
 
         // Y la escucha de visibilidad hay que soltarla a mano. El módulo de
         // JavaScript la tiene en una tabla y, sin esta llamada, seguiría
