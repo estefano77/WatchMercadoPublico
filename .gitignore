@@ -1,4 +1,6 @@
 # Compilación
+# Sin el ancla inicial '^': [Bb]in/ solo ignoraba la carpeta "bin" de la RAIZ,
+# y el ensamblado CLR de sql\clr\ compila a sql\clr\bin, que se colaba.
 [Bb]in/
 [Oo]bj/
 publish/

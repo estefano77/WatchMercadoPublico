@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ==========================================================================
+    Ensamblado CLR para el procedimiento de importacion de Mercado Publico.
+
+    QUE HACE Y QUE NO HACE
+
+    Hace UNA sola cosa: una peticion HTTP GET y devuelve lo que contesto el
+    servidor. Nada mas.
+
+    NO parsea el JSON, NO decide reintentos, NO escribe en las tablas. Todo eso
+    esta en T-SQL (ver 03-procedimientos.sql), y a proposito:
+
+      - OPENJSON de SQL Server 2022 es de sobra para el formato de Mercado
+        Publico, y deja el mapeo a la vista en el procedimiento, donde se puede
+        leer y corregir sin recompilar nada.
+      - Los reintentos con esperas escalonadas se leen mejor en T-SQL que
+        atravesando la frontera del CLR, y se pueden probar sin red.
+      - Un ensamblado con logica es codigo que hay que revisar para concederle
+        PERMISSION_SET = UNSAFE. Con una sola funcion de transporte, la
+        superficie que se audita es minima.
+
+    ==========================================================================
+
+    net48, Y NO netstandard2.0 NI net10.0
+
+    SQL Server ejecuta el ensamblado con el CLR del .NET Framework 4.8, asi que
+    un net10.0 no se registra. Y netstandard2.0, que parece el trampolin
+    correcto, falla con:
+
+      Msg 10301: Assembly 'MercadoPublico.Http' references assembly 'netstandard'
+      which is not present in the current database
+
+    porque SQL Server no trae esa fachada y no la puede resolver sola. net48
+    habla su mismo idioma y se registra sin trampolines.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>MercadoPublico.Http</AssemblyName>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+</Project>
