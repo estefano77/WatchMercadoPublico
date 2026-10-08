@@ -193,6 +193,10 @@ if ($Modo -eq 'v1') {
     $config = $limpio | ConvertFrom-Json
     if (-not $config.MercadoPublico) { throw 'La configuracion local no tiene la seccion MercadoPublico.' }
 
+    # Esta lista es una LISTA BLANCA, y por eso hay que ampliarla cada vez que
+    # se anade una clave a la configuracion. Sin FuenteDatos aqui, el script no
+    # podia arrancar en modo base de datos: el proceso salia con el "api" que
+    # trae el appsettings.json publicado y preguntaba a la API sin querer.
     $mapeo = @{
         'NombreEmpresa'         = 'MercadoPublico__NombreEmpresa'
         'RutEmpresa'            = 'MercadoPublico__RutEmpresa'
@@ -201,6 +205,9 @@ if ($Modo -eq 'v1') {
         'MinutosDeCache'        = 'MercadoPublico__MinutosDeCache'
         'MinutosEntreRefrescos' = 'MercadoPublico__MinutosEntreRefrescos'
         'SegundosTimeout'       = 'MercadoPublico__SegundosTimeout'
+        'FuenteDatos'           = 'MercadoPublico__FuenteDatos'
+        'CadenaConexionSql'     = 'MercadoPublico__CadenaConexionSql'
+        'MinutosEntreIngestas'  = 'MercadoPublico__MinutosEntreIngestas'
     }
 
     foreach ($clave in $mapeo.Keys) {
@@ -208,13 +215,36 @@ if ($Modo -eq 'v1') {
         if ($null -ne $valor -and "$valor" -ne '') { $variables[$mapeo[$clave]] = "$valor" }
     }
 
-    if (-not $variables.ContainsKey('MercadoPublico__Ticket')) {
+    # El ticket SOLO hace falta para PREGUNTAR a Mercado Publico. En modo base de
+    # datos no se pregunta nada, y exigirlo aqui echaba por tierra una
+    # instalacion correcta en modo sql. Es el mismo bug que ya se corrigio en el
+    # servidor, donde Servible pedia ticket en los dos modos.
+    $fuente = $variables['MercadoPublico__FuenteDatos']
+    $usaBase = ($null -ne $fuente) -and ($fuente -eq 'sql')
+
+    if (-not $variables.ContainsKey('MercadoPublico__Ticket') -and -not $usaBase) {
         Malo 'El fichero local no tiene Ticket. Ponlo y vuelve a lanzar.'
+        Malo 'En modo base de datos no hace falta, pero entonces pon FuenteDatos = sql.'
         exit 1
     }
 
-    Info "Empresa: $variables['MercadoPublico__NombreEmpresa']"
-    Info 'Ticket:  leido del fichero local'
+    # El $( ) no es cosmetico. Con "Empresa: $variables['Clave']" PowerShell NO
+    # evalua el indice: imprimiria System.Collections.Hashtable['Clave'] entero,
+    # que es justo lo que imprimia.
+    Info "Empresa: $($variables['MercadoPublico__NombreEmpresa'])"
+
+    if ($usaBase) {
+        if (-not $variables.ContainsKey('MercadoPublico__CadenaConexionSql')) {
+            Malo 'FuenteDatos = sql pero no hay CadenaConexionSql. Ponla y vuelve a lanzar.'
+            exit 1
+        }
+
+        Info 'Fuente:   la base de datos del servidor. No se llama a la API.'
+        Info 'Ticket:   no hace falta en este modo, y no se lee.'
+    }
+    else {
+        Info 'Ticket:  leido del fichero local'
+    }
 }
 else {
     Titulo 'Modo demo'
@@ -285,7 +315,19 @@ if (-not $listo) {
     exit 1
 }
 
-$resumen = if ($Modo -eq 'demo') { 'DEMO, datos inventados' } else { 'REAL, consultando Mercado Publico' }
+# El resumen tiene que decir de donde salen los datos, que es lo primero que
+# uno quiere saber al ver "REAL". Decir "consultando Mercado Publico" con la
+# fuente puesta en la base de datos Describe justo lo que no esta pasando.
+$resumen = if ($Modo -eq 'demo') {
+    'DEMO, datos inventados'
+}
+elseif ($variables.ContainsKey('MercadoPublico__FuenteDatos') -and
+        $variables['MercadoPublico__FuenteDatos'] -eq 'sql') {
+    'REAL, leyendo de la base de datos'
+}
+else {
+    'REAL, consultando Mercado Publico'
+}
 
 Write-Host ''
 Write-Host '  WatchMercadoPublico en marcha' -ForegroundColor Green
