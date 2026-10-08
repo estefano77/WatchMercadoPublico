@@ -11,7 +11,20 @@ node_modules/
 
 # Configuración local: aquí va el ticket de Mercado Público. NO se versiona.
 # Copia secrets\appsettings.Development.json.ejemplo y pon tu ticket ahí.
-secrets/
+#
+# OJO con el "todo y la excepción". Escrito como "secrets/" el fichero entero
+# queda fuera, INCLUDING la plantilla, y entonces nadie que clone el repositorio
+# puede ejecutar el comando que la propia aplicación le dice en el aviso de
+# arranque:
+#
+#   Copy-Item : No se encuentra la ruta de acceso
+#   '...\WatchMercadoPublico.Server\secrets\appsettings.Development.json.ejemplo'
+#   porque no existe.
+#
+# que es exactamente lo que pasó. La plantilla es lo único de esa carpeta que SÍ
+# se versiona, porque sin ella el aviso de arranque es un consejo imposible.
+secrets/*
+!secrets/*.ejemplo
 appsettings.Development.json
 appsettings.Local.json
 *.env

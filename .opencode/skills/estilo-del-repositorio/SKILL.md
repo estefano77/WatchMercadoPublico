@@ -101,11 +101,17 @@ proyecto de tests.** Ese es el motivo de que `SemanasDelMes`,
 ## Ficheros que no se versionan
 
 - `appsettings.Development.json` — lleva el **ticket**.
-- `secrets/`
+- `secrets/*` **menos** `*.ejemplo` — la plantilla se versiona, el ticket no.
 - `publicacion*/` y `bin/` y `obj/`
 
 El ticket es una credencial personal de Mercado Público. No va en el código, ni
 en un script, ni en un mensaje de commit, ni en la salida de una prueba.
+
+**OJO con `secrets/` a secas.** Con ese patrón el `.gitignore` se come también la
+plantilla, y entonces el comando que la propia aplicación imprime en el aviso de
+arranque —`Copy-Item secrets\appsettings.Development.json.ejemplo …`— falla con
+"No se encuentra la ruta de acceso", porque el fichero nunca se sube. Pasó de
+verdad. Va `secrets/*` y luego `!secrets/*.ejemplo`.
 
 ## `.gitignore`
 
