@@ -42,7 +42,7 @@ Una pantalla, cuatro estados:
 |---|---|
 | **Hay novedades** | Las licitaciones de la semana, agrupadas por día de publicación. Al hacer clic se abre el detalle. Al pie de cada tarjeta, si hay acta de adjudicación, un enlace **"Ver acta"** que la abre en otra pestaña sin pasar por el detalle. |
 | **No hay nada** | "Nada en la Semana 3 en Octubre de 2026". El nombre de la semana va porque el estado vacío no enseña ni el periodo ni la insignia, y sin él no se sabría a qué semana se refiere. |
-| **No se pudo consultar** | Un aviso explícito con botón de reintento. **Nunca** dice "no hay licitaciones" cuando lo que pasó es que no se pudo preguntar. |
+| **No se pudo consultar** | Un aviso explícito con botón de reintento. **Nunca** dice "no hay licitaciones" cuando lo que pasó es que no se pudo preguntar. En modo base de datos el verbo cambia a **leer** y el período a mes: "No se pudo leer el mes de Octubre de 2026". Decir "consultar esa semana" ahí señalaría un período que no existe en pantalla. |
 | **Los filtros no coinciden con la pantalla** | Al mover un desplegable sin pulsar "Actualizar": un aviso ámbar dice qué semana se está viendo y cuál se ha elegido, y el botón de la barra late. |
 
 Ese último estado existe por una razón concreta. Los desplegables cambian al
@@ -167,6 +167,13 @@ en la interfaz es lo que hay que usar.
 .\scripts\arrancar.ps1 -Puerto 5080    # por defecto busca uno libre
 ```
 
+En `-Modo v1` la fuente la manda `FuenteDatos` de
+`appsettings.Development.json`, no el guion. Con `"api"` se pregunta a Mercado
+Público y hace falta ticket; con `"sql"` se lee de la base local y **el ticket
+no se lee ni se exige**, porque no se pregunta nada a nadie. El resumen que
+imprime el guion dice de dónde salen los datos, para que "REAL" no se confunda
+con "se está llamando a la API".
+
 Hace, en este orden: comprueba que estén `dotnet` y `npm`, compila el CSS,
 detiene la instancia anterior si la hay, publica, arranca y **espera a que el
 servidor responda** antes de imprimir la URL. Se cierra con el `Stop-Process -Id`
@@ -183,6 +190,13 @@ Tres cosas que el script hace y que conviene no perder si se toca:
 - **No deja el ticket puesto en la sesión.** Pone las variables de entorno,
   arranca el proceso y las restaura. Si no, un `-Modo v1` dejaría la credencial
   en el entorno de la terminal.
+- **Pasa la configuración por una lista blanca de claves.** El guion fuerza
+  `ASPNETCORE_ENVIRONMENT=Production`, así que `appsettings.Development.json` no
+  se lee: todo tiene que ir por variable de entorno. Con `FuenteDatos` fuera de
+  esa lista, un `-Modo v1` con `"sql"` en la configuración local arrancaba en
+  modo `api` —el del `appsettings.json` publicado— sin decir nada, y preguntaba
+  a la API sin querer. Una clave nueva en la configuración necesita su línea en
+  la lista, o el guion arrancará en un modo que nadie pidió.
 
 El ticket **no está en el script**. En modo `v1` se lee de
 `appsettings.Development.json` y se pasa por variable de entorno, porque ese
@@ -194,7 +208,7 @@ fichero no se publica a propósito.
 dotnet test
 ```
 
-219 pruebas, **sin red y sin ticket**: no tocan la API, comprueban funciones puras.
+224 pruebas, **sin red y sin ticket**: no tocan la API, comprueban funciones puras.
 Ver [Tests](#tests) para qué hay que leerlos antes de tocar nada.
 
 ---
@@ -1886,7 +1900,7 @@ Iconos de [Lucide](https://lucide.dev) (licencia ISC). Tipografía
 dotnet test
 ```
 
-**219 pruebas** (147 del servidor, 72 del cliente), todas en verde. **No hay que
+**224 pruebas** (147 del servidor, 77 del cliente), todas en verde. **No hay que
 tener ticket, ni red, ni la API en pie.** Eso no es una comodidad: es lo que hace
 posible testear. Un método que hace una petición no se puede comprobar sin
 pedirla, y para la aplicación casi todo lo que se rompió no necesitaba la API para
@@ -1965,7 +1979,7 @@ haría falta bUnit.
 Y en ese hueco caen justo los fallos más caros. La red de seguridad de la espera
 y el refresco que se atiende desde el `finally` son estado de componente, así que
 **no hay ninguna prueba que los vigile**: si alguien los borra, compila todo,
-pasa las 219 pruebas y vuelve el congelamiento sin que salte nada. Se dejan
+pasa las 224 pruebas y vuelve el congelamiento sin que salte nada. Se dejan
 documentados en el catálogo de fallos por eso, no porque una prueba los cubra.
 
 **El hueco se ha hecho más grande con la fuente de datos.** El `code-behind` de

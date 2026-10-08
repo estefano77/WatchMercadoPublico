@@ -27,7 +27,7 @@ a `publicacion/`, pasa la configuración por variables de entorno y arranca el
 | Modo | Qué hace |
 |---|---|
 | `demo` (por defecto) | Datos inventados. No llama a la API ni gasta cupo. |
-| `v1` | Datos reales. Necesita ticket en `appsettings.Development.json`. |
+| `v1` | Datos reales. Necesita ticket en `appsettings.Development.json`, **salvo que `FuenteDatos` sea `sql`**: en modo base de datos no se llama a la API y el ticket no se lee. El guion tiene una lista blanca de claves que pasa por variables de entorno, y `FuenteDatos`, `CadenaConexionSql` y `MinutosEntreIngestas` están en ella: si añades otra clave a la configuración, añádela también ahí o el guion arrancará en el modo del `appsettings.json` publicado sin avisar. |
 
 Para probar la interfaz sin nada más, `demo`. Para datos reales, copia la
 plantilla de configuración y pon el ticket ahí:
@@ -57,12 +57,13 @@ página carga bien y solo parece que el CSS no funciona.
 dotnet test
 ```
 
-xUnit v2, dos proyectos: `WatchMercadoPublico.Server.Tests` (108 casos) y
-`WatchMercadoPublico.Client.Tests` (59). Los dos son puros: **no tocan la red ni
+xUnit v2, dos proyectos: `WatchMercadoPublico.Server.Tests` (147 casos) y
+`WatchMercadoPublico.Client.Tests` (77). Los dos son puros: **no tocan la red ni
 el ticket**.
 
-> Nota: el README dice "134 tests" y en otro sitio "32". El número real medido
-> es **167** casos (108 + 59). Si lo corriges, corrige los tres sitios.
+> Nota: el número real medido son **224** casos (147 + 77). Si lo cambias,
+> corrige el README y esta skill: las dos han llevado cifras distintas, y ya se
+> corrigió una vez por lo mismo.
 
 Cinco tests usan el reloj de verdad (`Task.Delay` corto para comprobar que un
 plazo o un intervalo se respeta). Son los únicos que dependen del tiempo, y
