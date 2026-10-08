@@ -284,27 +284,81 @@
                             </div>
                         </section>
 
-                        @* Hitos *@
+                        @* Hitos: tabla de dos columnas *@
                         @if (Hitos.Count > 0)
                         {
                             <section>
-                                <h3 class="mb-2 text-[0.65rem] font-bold tracking-wide text-muted uppercase">
+                                <h3 id="hitos-del-proceso"
+                                    class="mb-2 text-[0.65rem] font-bold tracking-wide text-muted uppercase">
                                     Hitos del proceso
                                 </h3>
-                                <ol class="space-y-0">
-                                    @foreach (var hito in Hitos)
-                                    {
-                                        <li class="flex gap-3 pb-3 last:pb-0">
-                                            <span class="mt-1 h-2 w-2 shrink-0 rounded-full bg-violet-500"></span>
-                                            <div class="min-w-0 flex-1">
-                                                <p class="text-xs text-muted">@hito.Etiqueta</p>
-                                                <p class="text-sm font-semibold text-ink-soft">
-                                                    @Formato.FechaHora(hito.Fecha)
-                                                </p>
-                                            </div>
-                                        </li>
-                                    }
-                                </ol>
+
+                                @* UNA TABLA, y no la lista de puntos que había antes.
+                                   Un hito es un par (nombre, fecha): eso es una
+                                   tabla, y una lista de dos renglones por entrada
+                                   deja seis renglones de los que la mitad está
+                                   en blanco.
+
+                                   La fecha va a la DERECHA y con tabular-nums,
+                                   que es lo que hace que las cifras queden
+                                   alineadas en vertical. Con la lista, las horas
+                                   se leían una debajo de otra y no había forma
+                                   de comparar "17:30" con "17:00" de un vistazo.
+
+                                   Cada fila lleva su <th scope="row">, que es lo
+                                   que dice la especificación: el nombre del hito
+                                   es la cabecera de su fila, no una celda más. Sin
+                                   eso, un lector de pantalla lee "Creación, 7 sept
+                                   2026" sin poder saber que lo segundo pertenece a
+                                   lo primero. *@
+                                <div class="overflow-hidden rounded-2xl border border-line">
+                                    <table class="w-full border-collapse text-left text-sm"
+                                           aria-labelledby="hitos-del-proceso">
+                                        <thead class="bg-field text-[0.62rem] tracking-wide text-muted uppercase">
+                                            <tr>
+                                                <th scope="col" class="px-3 py-2 font-bold sm:px-4">
+                                                    Hito
+                                                </th>
+                                                <th scope="col" class="px-3 py-2 text-right font-bold sm:px-4">
+                                                    Fecha
+                                                </th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var hito in Hitos)
+                                            {
+                                                <tr class="border-t border-line">
+                                                    <th scope="row"
+                                                        class="px-3 py-2.5 text-left font-medium text-ink-soft sm:px-4">
+                                                        @hito.Etiqueta
+                                                    </th>
+                                                    @* font-medium en las DOS columnas a propósito.
+                                                       Con la etiqueta en media y la fecha en
+                                                       normal, la etiqueta se veía MÁS pesada
+                                                       que la fecha aunque estuviera en un
+                                                       color más apagado: el peso gana al
+                                                       color y la jerarquía sale al revés de
+                                                       lo que dice el texto. Las dos en
+                                                       media, y la diferencia la marca el
+                                                       color.
+
+                                                       Y el text-xs en móvil es por una
+                                                       medida: a 333 px, con padding de
+                                                       px-4 y todo en text-sm, "Apertura
+                                                       económica" se partía en dos líneas y
+                                                       esa fila quedaba con 61 px entre
+                                                       filas de 41. Con el padding más
+                                                       corto y la fecha un punto más
+                                                       pequeña cabe en una línea, y el
+                                                       escalonado desaparece. *@
+                                                    <td class="px-3 py-2.5 text-right font-medium whitespace-nowrap tabular-nums text-ink text-xs sm:px-4 sm:text-sm">
+                                                        @Formato.FechaHora(hito.Fecha)
+                                                    </td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
                             </section>
                         }
 
