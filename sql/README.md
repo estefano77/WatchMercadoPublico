@@ -1,42 +1,157 @@
 # Persistencia en SQL Server
 
-Guardar en base de datos todo lo que la aplicación lee de Mercado Público, para
-poder consultarlo con SQL en vez de con la pantalla.
+Guardar en base de datos todo lo que se lee de Mercado Público, para poder
+consultarlo con SQL y para que la aplicación **no tenga que preguntar a la API
+cada vez**.
+
+Hay dos caminos hacia los mismos datos y se elige con una clave de configuración:
+
+```
+MercadoPublico__FuenteDatos = "sql"
+MercadoPublico__CadenaConexionSql = "Server=localhost\SQLEXPRESS;Database=WatchMerPub;Integrated Security=True"
+```
+
+Con `api` —lo de siempre— la base no se toca. Con `sql` la aplicación lee de
+aquí y no necesita ni ticket. Ver [la fuente de datos](../README.md#la-fuente-de-datos-api--sql-server)
+en el README del proyecto para lo que cambia en pantalla.
 
 ## Aviso importante
 
-Estos archivos **crean las tablas, nada más**. La aplicación **sigue sin tocar la
-base**: hoy funciona sin base de datos, como está en el README del proyecto, y
-sigue funcionando así. Para que escriba haría falta otro cambio: añadir el
-paquete `Microsoft.Data.SqlClient`, una cadena de conexión en la configuración y
-las llamadas de `INSERT`/`UPDATE` en `MercadoPublicoCliente` y
-`LicitacionesEndpoints`.
+**El acceso a la base es solo por procedimiento almacenado.** No hay Entity
+Framework, ni mapeo objeto-relacional, ni migraciones, ni un modelo que se pueda
+desincronizar del esquema.
+
+El precio de esa decisión se dice aquí y no en otro sitio: si mañana cambia el
+esquema, hay que tocar los procedimientos a mano. Con EF el cambio se propagaría
+solo. Se prefiere que el cambio sea **visible**.
 
 ## Los archivos
 
 | Archivo | Qué es |
 |---|---|
 | `01-esquema-mercadopublico.sql` | Las tablas, las vistas y los índices |
+| `02-registrar-ensamblado.sql` | Registra el CLR que hace el `GET` HTTP dentro de SQL Server |
+| `03-procedimiento-importar.sql` | `MpImportarRango`: descarga días a la base |
+| `04-funciones-auxiliares.sql` | Funciones auxiliares de la importación |
+| `05-procedimientos-lectura.sql` | `mp.LeeMes`, `mp.LeeDetalle`, y la cuenta de días |
+| `clr/` | El proyecto C# que hace la petición HTTP (`net48`) |
+| `97-prueba-lectura.sql` | Comprueba 17 cosas **contra la base real** |
+| `98-prueba-importar.sql` | Comprueba el importador contra la API |
 | `99-prueba-esquema.sql` | Mete datos de ejemplo y comprueba 11 cosas |
+
+Detalle del importador: [`README-importar.md`](README-importar.md).
 
 ## Cómo usarlo
 
 ```powershell
 # Crear la base (una vez)
-sqlcmd -S localhost\SQLEXPRESS -E -Q "CREATE DATABASE WatchMercadoPublico"
+sqlcmd -S localhost\SQLEXPRESS -E -Q "CREATE DATABASE WatchMerPub"
 
 # Crear el esquema (se puede repetir las veces que haga falta)
-sqlcmd -S localhost\SQLEXPRESS -E -d WatchMercadoPublico -b -f 65001 `
+sqlcmd -S localhost\SQLEXPRESS -E -d WatchMerPub -b -f 65001 `
         -i sql\01-esquema-mercadopublico.sql
 
-# Comprobarlo
-sqlcmd -S localhost\SQLEXPRESS -E -d WatchMercadoPublico -b -f 65001 `
-        -i sql\99-prueba-esquema.sql
+# Registrar el CLR (una vez, y reinicia el servicio de SQL Server)
+sqlcmd -S localhost\SQLEXPRESS -E -b -f 65001 `
+        -i sql\02-registrar-ensamblado.sql
+
+# Llenar la base
+sqlcmd -S localhost\SQLEXPRESS -E -d WatchMerPub -b -f 65001 `
+        -Q "EXEC dbo.MpImportarRango @desde='2026-01-14', @hasta='2026-10-08', @codigoProveedor=N'71284', @ticket=N'...', @resultado=@r OUTPUT PRINT @r"
+
+# Comprobar que se lee bien
+sqlcmd -S localhost\SQLEXPRESS -E -d WatchMerPub -b -f 65001 `
+        -i sql\97-prueba-lectura.sql
 ```
 
 El `-f 65001` no es adorno: sin él, `sqlcmd` lee el fichero con la página de
 códigos del sistema y los acentos de los comentarios se descuelgan. En Management
 Studio no hace falta; ahí se pega el fichero entero.
+
+## Los procedimientos de lectura
+
+| Procedimiento | Conjuntos | Para qué |
+|---|---|---|
+| `mp.LeeMes` | **5** | Lo que usa la aplicación: cabecera, días no comprobados, listado, detalles, items |
+| `mp.CuentaDiasDelMes` | 1 | Los ocho números del mes |
+| `mp.DiasSinComprobarDelMes` | 1 | Los días que no se pudieron mirar, con su motivo |
+| `mp.LeeDetalle` | 3 | La ficha de una licitación |
+| `mp.TodosLosDiasDelMes` | función | Los días del mes, del 0 al 31 |
+
+### Por qué son cinco y no dos
+
+`mp.LeeMes` devuelve cinco conjuntos, y eso hace que **no se pueda probar en
+T-SQL**: `INSERT @tabla EXEC unProcedimiento` mete *todos* los conjuntos en la
+misma tabla. No hay forma de coger solo el primero.
+
+Y lo que hay que probar es exactamente la primera parte: que la cuenta de días
+cuadre, para que la pantalla pueda decir la verdad sobre lo que no se comprobó.
+Por eso esa cuenta vive en dos procedimientos de un solo conjunto, que sí se
+pueden meter en una tabla.
+
+De paso `mp.LeeMes` se queda corto: llama a los dos y pega lo que devuelven.
+
+### Los cinco conjuntos, en orden
+
+El orden **es parte del contrato**. La aplicación los lee por posición, con un
+`NextResultAsync()` al final de cada vuelta del bucle:
+
+0. Cabecera — `Anio, Mes, DiasHabiles, DiasConsultados, DiasFallidos, DiasPendientes, Total, Consultado`
+1. Días no comprobados — `FechaDia, Motivo`
+2. Listado
+3. Detalles
+4. Items
+
+El `NextResultAsync()` va **al final** a propósito, porque
+`ExecuteReaderAsync()` deja el lector ya sobre el primer conjunto. Un
+`while (await NextResultAsync())` se come la cabecera y lee el conjunto
+equivocado; sale como `IndexOutOfRangeException: DiasHabiles`, que no dice ni qué
+conjunto es ni que hubo un salto. Con `sqlcmd` no se ve, porque imprime los cinco
+bien.
+
+### Por qué `mp.LeeMes` devuelve los días no comprobados
+
+Porque **sin ellos el modo base de datos no puede ser honesto**.
+
+Ocurrió de verdad: el 8 de octubre de 2026 se importaron los días 5, 6 y 7 y los
+tres fueron rechazados con `203 / "Ticket no válido"`; los días 1 y 2 nunca se
+preguntaron. Ese mes tiene cero licitaciones en la base. Un procedimiento que
+devolviera solo las licitaciones habría hecho que la pantalla dijera *"no se
+publicó nada en octubre"*, que es falso: no se miró.
+
+Con los días sale un aviso que dice qué pasó y por qué:
+
+```
+No se pudo comprobar todo el mes de octubre
+De 6 días hábiles, 6 no se pudieron consultar.
+  2026-10-01 al 2026-10-02 — Nunca se consulto este dia
+  2026-10-05 al 2026-10-06 al 2026-10-07 — Ticket no válido.
+```
+
+El motivo importa porque decide la reacción: un `429` se arregla esperando y un
+ticket caducado, no.
+
+### Dos trampas de T-SQL que salen aquí
+
+**`DATEADD(...) - 1` no vale.** Restarle un entero a un `date` da:
+
+```
+Operand type clash: date is incompatible with int
+```
+
+El mensaje no menciona el `DATEADD` ni la aritmética, y es fácil que alguien
+busque el `DATEADD` en otra parte. Se resta el día **dentro**:
+
+```sql
+DATEADD(DAY, -1, DATEADD(MONTH, 1, @primeroDelMes))
+```
+
+**`sys.all_objects` no sirve para generar números.** Es el truco que aparece en
+los blogs —un `ROW_NUMBER()` sobre una vista del sistema como generador de días—
+y depende de cuántas filas tenga esa vista. En una instancia recién instalada
+puede no alcanzar para un mes entero, y entonces el recuento de días hábiles sale
+**bajo, sin ningún error**. Un fallo que solo depende del servidor donde corra.
+Aquí los días van en un `VALUES (0)…(31)` explícito.
 
 ## Qué guarda cada cosa
 
@@ -51,6 +166,10 @@ Studio no hace falta; ahí se pega el fichero entero.
 
 Vistas ya montadas: `vwMpLicitacion` (una fila por licitación, con el total
 adjudicado) y `vwMpDetalle` (la ficha con los items en filas).
+
+`MpConsulta` es lo que hace posible la honestidad de la pantalla: sin ella no se
+puede distinguir un día comprobado con cero resultados de un día que nadie
+preguntó.
 
 ## Las cinco decisiones que no son obvias
 
@@ -188,7 +307,7 @@ es justo lo que no hay que almacenar.
 
 ## Notas de la prueba
 
-`99-prueba-esquema.sql` mete datos con la forma exacta que produce la aplicación
+`99-prueba-esquema.sql` mete datos con la forma exacta que produce el importador
 (los códigos y montos son los de una respuesta real), comprueba 11 cosas y se
 deshace todo. La base queda con las tablas y sin datos.
 
@@ -202,3 +321,28 @@ Va entero en **un solo lote, sin `GO`**. Dos cosas de `GO` que costaron un rato:
   seguían 13 filas.
 
 Por eso el paso final comprueba que la base quedó vacía y avisa si no.
+
+### `97-prueba-lectura.sql` va contra los datos reales
+
+Esta prueba es la excepción a la regla de arriba, y a propósito:
+
+- **No mete datos.** Solo lee. Si metiera, estaría probando los datos que ella
+  misma acaba de escribir en vez de los que se importaron de verdad. Y lo que se
+  comprueba es cómo se comporta el procedimiento con datos que nadie fabricó.
+- **No lleva transacción**, porque no escribe nada. Una transacción alrededor de
+  un `SELECT` solo añade la posibilidad de que se deshaga lo que no se ha
+  tocado.
+- **Falla si le faltan datos.** Si la base no tiene la licitación
+  `1456839-6-LP26`, avisa con `[??]` y lanza, en vez de pasar en verde. Una
+  prueba que se salta lo que no puede comprobar es una prueba que un día deja de
+  comprobar y nadie lo nota.
+
+Comprobaciones del caso crítico:
+
+| | |
+|---|---|
+| Del 1 al 8 de octubre de 2026 solo cuentan los **6** días hábiles que pasaron | Los 22 del mes entero no, y los 16 que faltan salen como pendientes, no como fallidos |
+| Octubre no cuenta **ningún** día como comprobado | Los días 5, 6 y 7 dieron `203`, que es un fallo pero es un intento |
+| Salen los **6** días no comprobados, ni uno más | Ni uno de menos, que sería esconder un fallo; ni uno de más, que sería avisar de un día que sí se miró |
+| Los días rechazados dicen que el ticket no valía | Sin el motivo no se puede decidir si reintentar tiene sentido |
+| Los días nunca preguntados también salen | Fue justo lo del 1 y el 2 de octubre |
