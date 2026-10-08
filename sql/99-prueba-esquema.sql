@@ -37,6 +37,34 @@ SET QUOTED_IDENTIFIER ON;
    fallo que no se ve en la salida: solo se ve en la base, consultando. */
 BEGIN TRAN;
 
+/* FOTOGRAFIA DE LO QUE HAY ANTES DE EMPEZAR.
+
+   El paso 0 de abajo borra TODAS las tablas, así que hace falta saber qué había
+   para poder comprobar al final que todo ha vuelto como estaba. Antes esto se
+   contaba como "la base ha quedado vacía", y en cuanto la base tuvo datos
+   reales —13 licitaciones importadas de verdad— el aviso saltó siempre:
+
+     AVISO: quedan 86 fila(s) de la prueba. La transaccion no ha cogido.
+
+   con 86 filas que eran las de verdad y la transaccion perfectamente Revival.
+   Un aviso que salta siempre es un aviso que nadie lee, y este además accuses
+   de algo que no ha pasado.
+
+   Se guardan CONTOS y SUMAS DE CHECKSUM, no solo el número. Si el ROLLBACK
+   fallara y los DELETE del paso 0 llegaran a commitearse, los contos volverían a
+   ser los mismos —porque los de ahora también son "todas las filas"— y solo el
+   checksum de los codigos delataría que ahora hay otras filas. */
+DECLARE @antes TABLE (
+    Tabla sysname, Cuantas int, Suma int);
+
+INSERT @antes (Tabla, Cuantas, Suma)
+SELECT 'MpEmpresa', COUNT(*), CHECKSUM_AGG(CHECKSUM(CodigoProveedor)) FROM dbo.MpEmpresa
+UNION ALL SELECT 'MpConsulta', COUNT(*), CHECKSUM_AGG(CHECKSUM(FechaHora, TipoConsulta, FechaDia)) FROM dbo.MpConsulta
+UNION ALL SELECT 'MpLicitacion', COUNT(*), CHECKSUM_AGG(CHECKSUM(CodigoExterno)) FROM dbo.MpLicitacion
+UNION ALL SELECT 'MpLicitacionDetalle', COUNT(*), CHECKSUM_AGG(CHECKSUM(LicitacionId)) FROM dbo.MpLicitacionDetalle
+UNION ALL SELECT 'MpLicitacionItem', COUNT(*), CHECKSUM_AGG(CHECKSUM(LicitacionId, Correlativo)) FROM dbo.MpLicitacionItem
+UNION ALL SELECT 'MpLicitacionEstadoHistorico', COUNT(*), CHECKSUM_AGG(CHECKSUM(LicitacionId, CodigoEstado)) FROM dbo.MpLicitacionEstadoHistorico;
+
 /* Se vacia todo ANTES de empezar, aunque la transaccion vaya a deshacerse.
 
    Hace falta porque el ROLLBACK del final solo se llega a ejecutar si la
@@ -409,23 +437,48 @@ ORDER BY FechaHora;
    limpieza del principio (paso 0) es obligatoria: es la red que recoge lo que
    se quede si esta prueba se corta a medio camino.
 
-   El IF de abajo es la comprobacion de verdad, y no un adorno: si la
-   transaccion no cogiera, contaria filas y lo diria.
+   El IF de abajo compara contra la FOTOGRAFIA del principio, y no contra cero,
+   porque esta base tiene datos reales que no son de la prueba. Comparar con
+   cero hacia que el aviso saltara SIEMPRE, acusando de un fallo que no habia.
    --------------------------------------------------------------- */
 ROLLBACK TRAN;
 
-DECLARE @quedan int =
-      (SELECT COUNT(*) FROM dbo.MpLicitacionItem)
-    + (SELECT COUNT(*) FROM dbo.MpLicitacionEstadoHistorico)
-    + (SELECT COUNT(*) FROM dbo.MpLicitacionDetalle)
-    + (SELECT COUNT(*) FROM dbo.MpLicitacion)
-    + (SELECT COUNT(*) FROM dbo.MpConsulta)
-    + (SELECT COUNT(*) FROM dbo.MpEmpresa);
+DECLARE @despues TABLE (
+    Tabla sysname, Cuantas int, Suma int);
+
+INSERT @despues (Tabla, Cuantas, Suma)
+SELECT 'MpEmpresa', COUNT(*), CHECKSUM_AGG(CHECKSUM(CodigoProveedor)) FROM dbo.MpEmpresa
+UNION ALL SELECT 'MpConsulta', COUNT(*), CHECKSUM_AGG(CHECKSUM(FechaHora, TipoConsulta, FechaDia)) FROM dbo.MpConsulta
+UNION ALL SELECT 'MpLicitacion', COUNT(*), CHECKSUM_AGG(CHECKSUM(CodigoExterno)) FROM dbo.MpLicitacion
+UNION ALL SELECT 'MpLicitacionDetalle', COUNT(*), CHECKSUM_AGG(CHECKSUM(LicitacionId)) FROM dbo.MpLicitacionDetalle
+UNION ALL SELECT 'MpLicitacionItem', COUNT(*), CHECKSUM_AGG(CHECKSUM(LicitacionId, Correlativo)) FROM dbo.MpLicitacionItem
+UNION ALL SELECT 'MpLicitacionEstadoHistorico', COUNT(*), CHECKSUM_AGG(CHECKSUM(LicitacionId, CodigoEstado)) FROM dbo.MpLicitacionEstadoHistorico;
+
+/* Se comparan las DOS cosas: numero de filas y suma de checksums. Con el numero
+   solo no bastaria. Si el ROLLBACK fallara y los DELETE del principio llegaran
+   a commitearse, las filas serian "todas las de la tabla" igual que antes y el
+   numero cliquaria; lo que delataria el cambio son los codigos. */
+DECLARE @cambios TABLE (
+    Tabla sysname, Antes int, Despu int);
+
+INSERT @cambios (Tabla, Antes, Despu)
+SELECT a.Tabla, a.Cuantas, d.Cuantas
+FROM @antes AS a
+FULL OUTER JOIN @despues AS d ON a.Tabla = d.Tabla
+WHERE a.Tabla IS NULL OR d.Tabla IS NULL
+   OR a.Cuantas <> d.Cuantas
+   OR ISNULL(a.Suma, -1) <> ISNULL(d.Suma, -1);
 
 PRINT '';
-IF @quedan = 0
-    PRINT 'La base ha quedado vacia: las filas de la prueba se han revertido.'
+IF NOT EXISTS (SELECT 1 FROM @cambios)
+    PRINT 'La base ha quedado como estaba: las filas de la prueba se han revertido.'
 ELSE
-    PRINT 'AVISO: quedan ' + CAST(@quedan AS varchar(10)) + ' fila(s) de la prueba. '
-        + 'La transaccion no ha cogido; ejecuta el paso 0 de limpieza a mano.';
+BEGIN
+    DECLARE @resumen nvarchar(600) = (
+        SELECT STRING_AGG(CONCAT(Tabla, ': antes ', Antes, ', ahora ', Despu), '; ')
+        FROM @cambios);
+
+    PRINT 'AVISO: la base NO ha vuelto a como estaba -> ' + @resumen
+        + '. La transaccion no ha cogido; ejecuta el paso 0 de limpieza a mano.';
+END
 
