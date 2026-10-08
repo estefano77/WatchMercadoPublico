@@ -320,19 +320,41 @@
         }
         else if (ErrorConsulta is not null)
         {
+            @* ESTE PANEL HABLABA EN DOS MODOS A LA VEZ, Y EN UNO DE LOS DOS
+               MENTIA.
+
+               Decia "No se pudo consultar" con un cuerpo que el servidor escribe
+               como "No se pudo leer la base de datos": dos verbos distintos en
+               dos lineas seguidas, en la misma caja. Y debajo, "no haya nada
+               publicado ESA SEMANA", cuando en modo base de datos el selector de
+               semana no esta en pantalla. El usuario no tiene delante ninguna
+               semana a la que mirando.
+
+               Asi que el verbo y el periodo salen del modo. En modo API no se
+               cambia ni una palabra, porque ahi si se consulta y si hay semana.
+               En modo base de datos se lee, y el periodo es el mes.
+
+               Y el nombre del mes sale de los desplegables y no de la respuesta
+               del servidor, porque en un fallo no hay respuesta: sale de donde
+               sale el aviso de periodo pendiente. *@
             <div class="entrada-suave rounded-2xl border border-rose-500/30 bg-rose-500/10 px-6 py-10 text-center">
                 <span class="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-rose-500/15 text-rose-500">
                     <Icon Name="alerta" Size="26" />
                 </span>
-                <p class="mt-4 text-base font-bold text-ink">No se pudo consultar</p>
+                <p class="mt-4 text-base font-bold text-ink">
+                    @TextoFallo.Titulo
+                </p>
                 <p class="mx-auto mt-1.5 max-w-lg text-sm leading-relaxed text-ink-soft">
                     @ErrorConsulta
                 </p>
                 @* No se puede decir "no hay licitaciones": lo que no se pudo fue
-                   preguntar. Afirmar lo contrario sería mentir. *@
+                   preguntar —o leer. Afirmar lo contrario sería mentir.
+
+                   El período sale del modo, y por eso no es "esa semana" a
+                   secas: en modo base de datos no hay ninguna semana delante. *@
                 <p class="mx-auto mt-1.5 max-w-lg text-sm text-muted">
-                    Esto <strong>no</strong> significa que no haya nada publicado esa semana: significa
-                    que no se pudo comprobar.
+                    Esto <strong>no</strong> significa que no haya nada publicado
+                    @TextoFallo.Periodo: significa que no se pudo comprobar.
                 </p>
                 <button type="button" @onclick="ActualizarAsync" disabled="@Cargando"
                         class="boton-actualizar mt-5">
@@ -343,7 +365,6 @@
         }
         else if (Semana is { Total: 0 })
         {
-            @* SIN RESULTADOS: EL TITULO ES SIEMPRE EL MISMO, Y LA LEYENDA DEBAJO
             @* SIN RESULTADOS: EL TITULO ES SIEMPRE EL MISMO, Y LA LEYENDA DEBAJO
                CAMBIA.
 
@@ -952,6 +973,23 @@
         UsaBaseDeDatos
             ? MesEnPalabras(Anio, Mes)
             : SemanaEnPalabras(Anio, Mes, NumeroSemana);
+
+    /// <summary>
+    /// El texto del panel de "no se pudo", en el idioma del modo en el que se
+    /// está mirando.
+    /// </summary>
+    /// <remarks>
+    /// Va a <see cref="FiltrosDeSemana.TextoDelPanelDeFallo"/> y no se compone
+    /// aquí porque este texto estuvo hablando de SEMANAS en modo base de datos,
+    /// donde no hay semanas, y eso no lo podía ver ningún test desde aquí: el
+    /// componente es Blazor y sin bUnit no se prueba.
+    ///
+    /// Los meses salen de <c>Anio</c> y <c>Mes</c>, que son los desplegables, y
+    /// no de <c>Semana</c>: cuando este panel sale no hay respuesta del servidor,
+    /// y <c>Semana</c> es justamente lo que la respuesta trae.
+    /// </remarks>
+    private FiltrosDeSemana.PanelDeFallo TextoFallo =>
+        FiltrosDeSemana.TextoDelPanelDeFallo(UsaBaseDeDatos, Anio, Mes, Estado?.MesesDisponibles);
 
     /// <summary>
     /// "la semana 4 en febrero de 2026", o "la Semana 4 en Febrero de 2026" con

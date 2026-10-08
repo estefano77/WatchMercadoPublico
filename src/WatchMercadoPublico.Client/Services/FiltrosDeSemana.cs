@@ -156,4 +156,50 @@ public static class FiltrosDeSemana
     /// </summary>
     public static string Publicaciones(int total) =>
         total == 1 ? "1 publicación" : $"{total} publicaciones";
+
+    /// <summary>
+    /// Las dos piezas del panel de "no se pudo", por separado.
+    /// </summary>
+    /// <remarks>
+    /// El título va entero y la aclaración lleva la palabra "no" marcada en
+    /// negrita, así que el texto no se puede devolver como una frase sola sin
+    /// meter HTML aquí dentro. Se devuelven las dos piezas y el componente las
+    /// junta, que es lo que permite probarlas.
+    /// </remarks>
+    public sealed record PanelDeFallo(string Titulo, string Periodo);
+
+    /// <summary>
+    /// El texto del panel de error, que DEBE hablar en el modo en el que se
+    /// está mirando.
+    ///
+    /// ESTE ERA EL TERCER texto que se quedó hablando en semanas cuando ya no
+    /// había semanas. Decía "No se pudo consultar" con un cuerpo que el servidor
+    /// escribe como "No se pudo leer la base de datos" —dos verbos distintos en
+    /// dos líneas seguidas de la misma caja— y debajo "no haya nada publicado
+    /// ESA SEMANA", cuando en modo base de datos el selector de semana no está
+    /// en pantalla y el usuario no tiene ninguna semana delante.
+    ///
+    /// El verbo y el período salen de <paramref name="usaBaseDeDatos"/>, y el
+    /// nombre del mes de los desplegables, NO de la respuesta del servidor: en
+    /// un fallo no hay respuesta, que es justo cuando el panel aparece. Es el
+    /// mismo camino que el aviso de período pendiente, y por el mismo motivo.
+    ///
+    /// El título en modo base de datos nombra el mes. Un "No se pudo leer" a
+    /// secas diría que algo falló pero no sobre qué, y en una pantalla donde el
+    /// mes se cambia con un desplegable eso deja al usuario sin saber cuál de
+    /// sus meses hay que reintentar.
+    /// </summary>
+    public static PanelDeFallo TextoDelPanelDeFallo(
+        bool usaBaseDeDatos,
+        int anio,
+        int mes,
+        IReadOnlyList<string>? meses)
+    {
+        if (!usaBaseDeDatos)
+            return new PanelDeFallo("No se pudo consultar", "esa semana");
+
+        return new PanelDeFallo(
+            $"No se pudo leer el mes de {MesEnPalabras(anio, mes, meses, capitalizado: true)}",
+            "este mes");
+    }
 }

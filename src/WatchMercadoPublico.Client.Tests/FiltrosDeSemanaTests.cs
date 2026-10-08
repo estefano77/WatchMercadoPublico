@@ -252,4 +252,74 @@ public class FiltrosDeSemanaTests
         Assert.DoesNotContain("2026 de", deLaSemana);
         Assert.Contains("septiembre de 2026", deLaSemana);
     }
+
+    // --- El panel de "no se pudo" ---------------------------------------------
+
+    [Fact]
+    public void El_panel_de_fallo_no_habla_de_semanas_en_modo_base_de_datos()
+    {
+        // REGRESIÓN. En modo base de datos el panel decía "No se pudo consultar"
+        // —y el cuerpo que pone el servidor es "No se pudo leer la base de
+        // datos", o sea dos verbos distintos en dos líneas seguidas de la misma
+        // caja— y debajo "no haya nada publicado ESA SEMANA".
+        //
+        // En ese modo no hay ninguna semana delante: el selector de semana no
+        // está en pantalla. El texto señalaba a un período que el usuario no
+        // puede ver ni elegir. Y era el TERCER texto que se quedaba hablando en
+        // semanas después de quitar el selector, después de los dos anteriores.
+        var panel = FiltrosDeSemana.TextoDelPanelDeFallo(usaBaseDeDatos: true, 2026, 10, LosDoceMeses);
+
+        Assert.DoesNotContain("semana", panel.Titulo, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("consult", panel.Titulo, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("semana", panel.Periodo, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void El_panel_de_fallo_en_modo_api_no_cambia()
+    {
+        // Al revés del anterior, y por el mismo motivo: en modo API sí se
+        // consulta y sí hay semana, así que este texto es el correcto y no se
+        // toca. El fallo anterior no era tener dos modos, era tener UNO.
+        var panel = FiltrosDeSemana.TextoDelPanelDeFallo(usaBaseDeDatos: false, 2026, 10, LosDoceMeses);
+
+        Assert.Equal("No se pudo consultar", panel.Titulo);
+        Assert.Equal("esa semana", panel.Periodo);
+    }
+
+    [Fact]
+    public void El_panel_de_fallo_nombra_el_mes_que_se_esta_mirando()
+    {
+        // El título tiene que decir SOBRE QUÉ falló. Un "No se pudo leer" a
+        // secas, en una pantalla donde el mes se cambia con un desplegable,
+        // deja al usuario sin saber cuál de sus meses hay que reintentar.
+        var panel = FiltrosDeSemana.TextoDelPanelDeFallo(usaBaseDeDatos: true, 2026, 10, LosDoceMeses);
+
+        Assert.Equal("No se pudo leer el mes de Octubre de 2026", panel.Titulo);
+        Assert.Equal("este mes", panel.Periodo);
+    }
+
+    [Fact]
+    public void El_panel_de_fallo_toma_el_mes_que_no_se_pasa_como_argumento()
+    {
+        // El nombre del mes sale de los desplegables y no de la respuesta del
+        // servidor, porque cuando sale este panel no hay respuesta del servidor.
+        // El test fija que el mes ARGUMENTO manda: si alguien lo cambia por el
+        // que venga en la respuesta, que es null cuando falla, el título
+        // degrada a "el mes de mes 10 de 2026" y esto lo coge.
+        var panel = FiltrosDeSemana.TextoDelPanelDeFallo(usaBaseDeDatos: true, 2026, 7, LosDoceMeses);
+
+        Assert.Equal("No se pudo leer el mes de Julio de 2026", panel.Titulo);
+    }
+
+    [Fact]
+    public void El_panel_de_fallo_cae_a_un_numero_si_el_mes_no_cabe_en_la_lista()
+    {
+        // Lo mismo que el resto de textos de mes: la lista llega filtrada al
+        // mes en curso, así que un mes futuro no está en ella. Un hueco en medio
+        // del título se lee como que la pantalla está rota.
+        var panel = FiltrosDeSemana.TextoDelPanelDeFallo(usaBaseDeDatos: true, 2026, 12, MesesDelAnyoEnCurso);
+
+        Assert.Equal("No se pudo leer el mes de mes 12 de 2026", panel.Titulo);
+        Assert.DoesNotContain("  ", panel.Titulo);
+    }
 }
