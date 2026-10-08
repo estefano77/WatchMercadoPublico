@@ -63,6 +63,35 @@ public static class TextosDeFecha
         $"Del {DiaCorto(desde)} al {DiaCorto(hasta)} de {hasta.Year}";
 
     /// <summary>
+    /// Un mes natural entero, escrito: "Del 1 al 30 de septiembre de 2026".
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// DEL PRIMER DÍA AL ÚLTIMO, sin recorte por día hábil y sin parar en hoy.
+    /// Antes hacía las dos cosas y las dos se han quitado, y el motivo es la
+    /// premisa del modo base de datos: ahí la búsqueda se hace sobre el mes
+    /// entero, porque leer una fila de un SQL Server local no es una llamada que
+    /// haya que ahorrar. En modo API sí se recorta a días hábiles, y por un
+    /// motivo que aquí no aplica: cada día no consultado es una petición más, y
+    /// se asume que no se publica en fin de semana.
+    /// </para>
+    /// <para>
+    /// Parar en "hoy" era lo peor de las dos cosas. El 8 de octubre de 2026
+    /// decía "Del 1 al 8 de octubre de 2026", que parece que la búsqueda se
+    /// quedó corta por un fallo, cuando lo que pasa es que el mes no se había
+    /// terminado todavía. El texto tiene que describir el RANGO QUE SE
+    /// BUSCÓ, y el rango buscado es el mes entero.
+    /// </para>
+    /// <para>
+    /// Y sigue siendo un método del servidor y no una interpolación en el
+    /// endpoint, como todo el texto: si lo compusiera el cliente habría dos
+    /// copias de la regla y acabarían discrepando sin que nada avise.
+    /// </para>
+    /// </remarks>
+    public static string PeriodoDelMes(int anio, int mes) =>
+        $"Del 1 al {DateTime.DaysInMonth(anio, mes)} de {NombreMes(mes).ToLowerInvariant()} de {anio}";
+
+    /// <summary>
     /// Fecha con el día de la semana y el año: "viernes 27 de febrero de 2026".
     ///
     /// El año va aquí y no en <see cref="DiaCorto"/> porque el rango de la semana

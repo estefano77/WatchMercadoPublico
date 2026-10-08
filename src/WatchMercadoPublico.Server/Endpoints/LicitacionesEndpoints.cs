@@ -103,6 +103,7 @@ public static class LicitacionesEndpoints
 
         grupo.MapGet("/estado", ObtenerEstado);
         grupo.MapGet("/semana", ObtenerSemana);
+        grupo.MapGet("/mes", ObtenerMes);
         grupo.MapGet("/licitaciones/{codigo}", ObtenerDetalle);
         grupo.MapPost("/refrescar", Refrescar);
 
@@ -143,6 +144,18 @@ public static class LicitacionesEndpoints
             EmpresaConfigurada = config.Modo == "demo" || config.TieneCodigoProveedor,
             Servible = config.Servible,
             Modo = config.Modo,
+
+            // La fuente, y lo que se puede hacer con ella. El cliente lo
+            // necesita para dos cosas: esconder el selector de semana en modo
+            // base de datos, y no ofrecer "Dejar de esperar" cuando la consulta
+            // es a un SQL Server local.
+            //
+            // BaseDeDatosUtilizable va aparte de UsaBaseDeDatos a propósito. Con
+            // fuente "sql" y sin cadena de conexión, la pantalla tiene que
+            // poder decir "falta configurar", no quedarse en blanco esperando.
+            Fuente = config.Fuente,
+            UsaBaseDeDatos = config.UsaBaseDeDatos,
+            BaseDeDatosUtilizable = config.BaseDeDatosUtilizable,
 
             Empresa = new
             {
@@ -284,10 +297,110 @@ public static class LicitacionesEndpoints
     /// Los tres van como [FromQuery] explícito porque son tipos simples: sin el
     /// atributo, el enlazador minimal API los busca en la RUTA —que no los tiene
     /// — y responde 400 con el cuerpo vacío. Un error que no dice nada.
+    /// </summary>
     ///
     /// Van AL FINAL a propósito: C# exige que los parámetros opcionales vayan
     /// detrás de los obligatorios, y los servicios de DI no pueden llevar
     /// valores por defecto —dárselos los ocultaría una falta de registro.
+    /// <summary>
+    /// Licitaciones de UN MES, desde la base de datos.
+    /// </summary>
+    ///
+    /// <para>
+    /// La otra mitad del interruptor de <c>FuenteDatos</c>. Devuelve lo mismo
+    /// que <c>/api/semana</c> pero cambia la unidad de la semana al mes, para
+    /// que la lectura contra la base sea una consulta y no cinco seguidas.
+    /// </para>
+    ///
+    /// <para>
+    /// Y DEVUELVE TAMBIÉN LOS DÍAS QUE NO SE PUDIERON COMPROBAR, con su motivo.
+    /// No es un añadido: es lo que impide que la pantalla diga "no hay nada"
+    /// cuando en realidad no se preguntó. Pasó de verdad el 8 de octubre de
+    /// 2026, cuando tres días se importaron con un ticket caducado: sin esto,
+    /// ese mes habría salido vacío y con la etiqueta de "no se publicó nada".
+    /// </para>
+    private static async Task<IResult> ObtenerMes(
+        LectorMercadoPublico lector,
+        IOptions<MercadoPublicoOpciones> opciones,
+        ILoggerFactory registros,
+        CancellationToken ct,
+        [FromQuery] int anio,
+        [FromQuery] int mes)
+    {
+        var config = opciones.Value;
+        var log = registros.CreateLogger("Mes");
+
+        if (config.UsaBaseDeDatos && !config.BaseDeDatosUtilizable)
+            return Results.Problem(
+                "La fuente de datos es la base de datos pero falta la cadena de "
+                + "conexion en MercadoPublico__CadenaConexionSql.",
+                statusCode: StatusCodes.Status503ServiceUnavailable,
+                title: "Base de datos sin configurar");
+
+        if (anio is < 1900 or > 9999 || mes is < 1 or > 12)
+            return Results.BadRequest(new { error = "El anio o el mes no son validos." });
+
+        try
+        {
+            var leido = await lector.LeerMesAsync(config.CodigoProveedor, anio, mes, ct);
+
+            return Results.Ok(new
+            {
+                Anio = leido.Anio,
+                Mes = leido.Mes,
+                DiasHabiles = leido.DiasHabiles,
+                DiasConsultados = leido.DiasConsultados,
+                DiasFallidos = leido.DiasFallidos,
+                DiasPendientes = leido.DiasPendientes,
+
+                // Los dos juntos: la lista para el mensaje y el diccionario
+                // para poder decir QUE paso con cada uno. Con solo los nombres
+                // no se puede distinguir "no habia nada" de "el ticket caduco",
+                // que es justo lo que el usuario necesita para decidir si
+                // insistir tiene sentido.
+                DiasSinRespuesta = leido.DiasSinRespuesta
+                    .Select(d => $"{d.Fecha:yyyy-MM-dd}").ToList(),
+                MotivosSinRespuesta = leido.DiasSinRespuesta
+                    .ToDictionary(d => $"{d.Fecha:yyyy-MM-dd}", d => d.Motivo),
+
+                Total = leido.Items.Count,
+                Items = leido.Items.Select(ConTextoDePublicacion).ToList(),
+                DesdeCache = false,
+                Periodo = TextosDeFecha.PeriodoDelMes(leido.Anio, leido.Mes),
+                /* El nombre del mes CON ANO, y con mayuscula:
+                   "el mes de Junio de 2026".
+
+                   De CalendarioDelMes.NombreMes y no de TextosDeFecha.NombreMes,
+                   porque el segundo lo devuelve en minuscula: va dentro de frases
+                   como "Del 1 al 30 de junio de 2026", donde en minuscula es lo
+                   correcto. Un titulo de panel empieza con mayuscula.
+
+                   Y lo compone el servidor, no el cliente: el nombre del mes no
+                   esta en ningun sitio del cliente salvo el desplegable, y ese
+                   llega filtrado al mes en curso. Depender de el para escribir
+                   un texto es la clase de acoplamiento que ya rompio una vez el
+                   array de dias. */
+                Consultado = leido.Consultado,
+                PeriodoDelMes = $"el mes de {CalendarioDelMes.NombreMes(leido.Mes)} de {leido.Anio}",
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Un fallo leyendo la base NO es "no hay licitaciones". Se responde
+            // con un error y se dice en el log, porque una lista vacia por no
+            // haber podido leer es la misma mentira que la del listado por API.
+            log.LogError(ex, "No se pudo leer el mes {Anio}-{Mes:00} de la base", anio, mes);
+
+            return Results.Json(
+                new { error = "No se pudo leer la base de datos." },
+                statusCode: StatusCodes.Status502BadGateway);
+        }
+    }
+
     private static async Task<IResult> ObtenerSemana(
         MercadoPublicoCliente api,
         CacheMercadoPublico cache,
@@ -675,6 +788,7 @@ public static class LicitacionesEndpoints
     private static async Task<IResult> ObtenerDetalle(
         string codigo,
         MercadoPublicoCliente api,
+        LectorMercadoPublico lector,
         CacheMercadoPublico cache,
         IOptions<MercadoPublicoOpciones> opciones,
         CancellationToken ct)
@@ -705,7 +819,25 @@ public static class LicitacionesEndpoints
 
         try
         {
-            if (config.Modo == "demo")
+            if (config.UsaBaseDeDatos)
+            {
+                // La ficha también sale de la base, por mp.LeeDetalle. NO es un
+                // detalle menor: dejarlo solo en la ruta de la API hacía que
+                // abrir una ficha en modo base de datos dijera "Mercado Público
+                // no devolvió el detalle" en una instalación sin ticket, con la
+                // ficha ahí al lado en el listado.
+                //
+                // El 404 es un resultado honesto y no un error: de esa licitacion
+                // no se ha importado la ficha todavía.
+                detalle = await lector.LeerDetalleAsync(config.CodigoProveedor, codigo, ct);
+
+                if (detalle is null)
+                    return Results.NotFound(new
+                    {
+                        error = "Esa licitación no está importada en la base de datos.",
+                    });
+            }
+            else if (config.Modo == "demo")
             {
                 detalle = DatosDemo.Detalle(codigo);
             }

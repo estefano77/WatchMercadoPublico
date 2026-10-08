@@ -184,4 +184,72 @@ public class FiltrosDeSemanaTests
         // "1 publicación" y queda mintiendo: no se publicó ninguna.
         Assert.Equal("0 publicaciones", FiltrosDeSemana.Publicaciones(0));
     }
+    // --- El mes en palabras, para el modo base de datos ---
+
+    [Fact]
+    public void El_mes_en_palabras_no_lleva_numero_de_semana()
+    {
+        // El fallo concreto: en modo base de datos el aviso de "has cambiado el
+        // filtro" decia "Estás viendo la semana 1 en octubre de 2026" y "has
+        // elegido la semana 2 en septiembre de 2026". No hay ninguna semana
+        // detrás: el selector de semana ni siquiera está en pantalla.
+        Assert.Equal(
+            "octubre de 2026",
+            FiltrosDeSemana.MesEnPalabras(2026, 10, LosDoceMeses));
+
+        Assert.Equal(
+            "septiembre de 2026",
+            FiltrosDeSemana.MesEnPalabras(2026, 9, LosDoceMeses));
+    }
+
+    [Fact]
+    public void El_mes_en_palabras_no_empieza_con_mayuscula_dentro_de_una_frase()
+    {
+        // Va DENTRO de una frase: "Estás viendo octubre de 2026". Con mayúscula
+        // se lee como si empezara una oracion.
+        Assert.Equal(
+            "septiembre de 2026",
+            FiltrosDeSemana.MesEnPalabras(2026, 9, LosDoceMeses));
+
+        // Y con capitalizado:true, para cuando SÍ sea el principio de una linea.
+        Assert.Equal(
+            "Septiembre de 2026",
+            FiltrosDeSemana.MesEnPalabras(2026, 9, LosDoceMeses, capitalizado: true));
+    }
+
+    [Fact]
+    public void El_mes_en_palabras_no_inventa_el_articulo()
+    {
+        // "el mes de octubre de 2026" dentro de "Estás viendo..." produce
+        // "Estás viendo el mes de octubre de 2026". No es un error, pero es otra
+        // frase, y el aviso ya dice que lo que se ha elegido es un mes.
+        var texto = FiltrosDeSemana.MesEnPalabras(2026, 10, LosDoceMeses);
+
+        Assert.DoesNotContain("el mes", texto);
+        Assert.DoesNotContain("semana", texto);
+        Assert.DoesNotContain(" la ", $" {texto} ");
+    }
+
+    [Fact]
+    public void El_mes_en_palabras_cae_a_un_numero_si_no_cabe_en_la_lista()
+    {
+        // La lista llega FILTRADA al mes en curso, así que un mes futuro no
+        // está en ella. Imprimir un hueco sería peor que decir "mes 12".
+        Assert.Equal("mes 12 de 2026", FiltrosDeSemana.MesEnPalabras(2026, 12, MesesDelAnyoEnCurso));
+        Assert.Equal("mes 0 de 2026", FiltrosDeSemana.MesEnPalabras(2026, 0, LosDoceMeses));
+        Assert.Equal("mes 5 de 2026", FiltrosDeSemana.MesEnPalabras(2026, 5, null));
+    }
+
+    [Fact]
+    public void El_mes_y_la_semana_no_se_confunden()
+    {
+        // Los dos textos conviven en el mismo aviso segun el modo, y uno no
+        // puede contaminar el formato del otro.
+        var delMes = FiltrosDeSemana.MesEnPalabras(2026, 9, LosDoceMeses);
+        var deLaSemana = FiltrosDeSemana.EnPalabras(2026, 9, 2, LosDoceMeses);
+
+        Assert.DoesNotContain("semana", delMes);
+        Assert.DoesNotContain("2026 de", deLaSemana);
+        Assert.Contains("septiembre de 2026", deLaSemana);
+    }
 }

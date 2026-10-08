@@ -143,6 +143,83 @@ public sealed class MercadoPublicoOpciones
     /// </summary>
     public int MinutosEntreRefrescos { get; set; } = 5;
 
+    /// <summary>
+    /// De dónde salen los datos: <c>api</c> o <c>sql</c>.
+    ///
+    /// <para>
+    /// Es un campo APARTE de <see cref="ModoConsulta"/>, y no un valor más de
+    /// ese, porque son dos cosas distintas que se confunden al leerlo. La
+    /// fuente dice DE DÓNDE sale el dato; el modo dice CÓMO se consulta la API.
+    /// Con un solo campo habría combinaciones que no significan nada: ¿qué es
+    /// "sql" con <c>c2</c>, que es Compra Ágil? ¿Y "demo" con fuente sql?
+    /// </para>
+    ///
+    /// <para>
+    /// Un valor desconocido cae en "api", que es lo que hacía antes. Es
+    /// deliberado: si alguien escribe "sqlserver" en vez de "sql", la
+    /// aplicación avisa por el log en vez de quedarse en silencio. Lo que no
+    /// hace es dejar de funcionar.
+    /// </para>
+    /// </summary>
+    public string FuenteDatos { get; set; } = "api";
+
+    /// <summary>La fuente normalizada, para comparar.</summary>
+    public string Fuente =>
+        (FuenteDatos ?? "").Trim().ToLowerInvariant() switch
+        {
+            "sql" or "sqlserver" or "basedatos" => "sql",
+            _ => "api",
+        };
+
+    /// <summary>¿Se leen los datos de la base de datos?</summary>
+    public bool UsaBaseDeDatos => Fuente == "sql";
+
+    /// <summary>
+    /// Cadena de conexión a SQL Server.
+    ///
+    /// <para>
+    /// Va en la configuración y NUNCA en el código. Contiene usuario y
+    /// contraseña, y el repositorio es público: una cadena de conexión escrita
+    /// en un fichero versionado es una credencial filtrada.
+    /// </para>
+    ///
+    /// <para>
+    /// Y NO viaja al cliente. El cliente es WebAssembly y se descarga entero:
+    /// una cadena ahí quedaría a la vista de cualquiera que abra las
+    /// herramientas del navegador. Por eso la conexión se abre en el SERVIDOR,
+    /// nunca en el cliente, por mucho que el interruptor se toque desde la
+    /// configuración.
+    /// </para>
+    /// </summary>
+    public string CadenaConexionSql { get; set; } = "";
+
+    /// <summary>
+    /// Minutos entre importaciones automáticas, cuando la fuente es la base de
+    /// datos.
+    ///
+    /// <para>
+    /// Con cero no se programa ninguna. Es el valor por defecto a propósito:
+    /// una tarea que sale sola descarga de la API y gasta cupo del ticket sin
+    /// que nadie la haya pedido, y eso no debe pasar por abrir la aplicación.
+    /// </para>
+    /// </summary>
+    public int MinutosEntreIngestas { get; set; }
+
+    /// <summary>
+    /// ¿Se puede leer de la base de datos de verdad?
+    ///
+    /// <para>
+    /// No basta con que la fuente sea "sql": hace falta también la cadena de
+    /// conexión. Si falta, <see cref="UsaBaseDeDatos"/> sigue siendo cierto
+    /// porque es lo que se pidió, y esto avisa de que además falta lo otro.
+    /// Con las dos cosas a medias, la pantalla no tiene forma de distinguir
+    /// "no hay nada" de "no se pudo leer", que es justo lo que no se puede
+    /// decir.
+    /// </para>
+    /// </summary>
+    public bool BaseDeDatosUtilizable =>
+        UsaBaseDeDatos && !string.IsNullOrWhiteSpace(CadenaConexionSql);
+
     /// <summary>¿Hay un ticket utilizable?</summary>
     public bool TieneTicket =>
         !string.IsNullOrWhiteSpace(Ticket)
@@ -166,11 +243,32 @@ public sealed class MercadoPublicoOpciones
     /// <summary>
     /// ¿Se puede atender una consulta?
     ///
-    /// En modo real hacen falta las dos cosas: ticket y código de proveedor. Sin
-    /// ticket la API responde 401; sin código no hay a quién preguntar.
+    /// <para>
+    /// Lo que hace falta depende de la fuente, y por eso la condición está
+    /// partida y no es un "y" de tres cosas.
+    /// </para>
+    ///
+    /// <para>
+    /// En modo API hacen falta ticket y código de proveedor: sin ticket la API
+    /// responde 401 y sin código no hay a quién preguntar.
+    /// </para>
+    ///
+    /// <para>
+    /// En modo base de datos NO hace falta ticket, porque no se pregunta nada a
+    /// Mercado Público: lo que se necesita es poder abrir la conexión y saber a
+    /// qué empresa pertenece lo que se lee. Pedir ticket ahí no era un detalle
+    /// menor: <c>Servible</c> es lo que enciende el aviso de "la aplicación no
+    /// está configurada" y lo que decide si la pantalla pinta o no los
+    /// resultados, así que con la condición antigua una instalación correcta en
+    /// modo base de datos y sin ticket se quedaba mostrando un aviso que no
+    /// aplicaba y un hueco vacío debajo.
+    /// </para>
     /// </summary>
     public bool Servible =>
-        Modo == "demo" || (TieneTicket && TieneCodigoProveedor);
+        Modo == "demo"
+        || (UsaBaseDeDatos
+            ? BaseDeDatosUtilizable && TieneCodigoProveedor
+            : TieneTicket && TieneCodigoProveedor);
 
     /// <summary>¿Hay un código de proveedor configurado?</summary>
     public bool TieneCodigoProveedor => !string.IsNullOrWhiteSpace(CodigoProveedor);

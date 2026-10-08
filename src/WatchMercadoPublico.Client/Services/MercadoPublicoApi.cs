@@ -127,6 +127,52 @@ public sealed class MercadoPublicoApi(HttpClient http)
             return (null, "No se pudo conectar con el servidor.");
         }
     }
+    /// <summary>
+    /// Licitaciones de UN MES, cuando los datos vienen de la base de datos.
+    /// </summary>
+    ///
+    /// <para>
+    /// Devuelve la tupla (datos, error) como los demás, por la misma razón: un
+    /// cliente que se come el error deja que la pantalla degrade en silencio.
+    /// </para>
+    ///
+    /// <para>
+    /// NO lleva CancellationToken, y a diferencia de <see cref="GetSemanaAsync"/>
+    /// aquí no es que no haga falta: es que no habría nada que cancelar. La
+    /// consulta va a un SQL Server local y no llama a la API, así que no gasta
+    /// cupo del ticket ni deja trabajo a medias si el navegador se va.
+    /// Cancelarla solo añadiría un camino en el que la pantalla se queda
+    /// esperando sobre datos que ya llegaron.
+    /// </para>
+    /// </summary>
+    public async Task<(MesLicitaciones? Data, string? Error)> GetMesAsync(
+        int anio, int mes)
+    {
+        try
+        {
+            using var respuesta = await http.GetAsync($"api/mes?anio={anio}&mes={mes}");
+            var cuerpo = await respuesta.Content.ReadAsStringAsync();
+
+            if (respuesta.IsSuccessStatusCode)
+            {
+                var pagina = Deserializar<MesLicitaciones>(cuerpo);
+                return pagina is null
+                    ? (null, "El servidor devolvió una respuesta inesperada.")
+                    : (pagina, null);
+            }
+
+            return (null, ExtraerError(cuerpo) ?? "No se pudieron cargar las licitaciones de ese mes.");
+        }
+        catch (OperationCanceledException)
+        {
+            return (null, "La consulta al servidor se cortó antes de tiempo.");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or NotSupportedException)
+        {
+            return (null, "No se pudo conectar con el servidor.");
+        }
+    }
+
 
     /// <summary>
     /// Detalle de una licitación. Se pide al abrir la ficha y queda cacheado en

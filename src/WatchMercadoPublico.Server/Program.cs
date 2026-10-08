@@ -32,6 +32,19 @@ builder.Services.AddCacheMercadoPublico(builder.Configuration);
 // llamada a AddScoped que falta, y tumba TODAS las rutas, incluida la SPA.
 builder.Services.AddScoped<MercadoPublicoCliente>();
 
+// La otra fuente de datos. Scoped y NO singleton a propósito, aunque podría ser
+// singleton: no guarda estado entre llamadas (la conexión se abre y se cierra
+// cada vez), así que no hay nada que compartir. Y un singleton con un SqlConnection
+// dentro acabaría con una conexión viva para siempre y sin cerrarla nunca.
+builder.Services.AddScoped<LectorMercadoPublico>();
+
+// La otra mitad de la base de datos: la que ESCRIBE. Va aparte del lector y no
+// dentro de él porque no se usan nunca en el mismo camino. La pantalla solo lee;
+// el temporizador solo ingiere. Juntarlos sería una clase con dos maneras
+// totalmente distintas de abrir la conexion, una de las cuales ESCRIBE.
+// Juntarlas daria una clase con un "estoy escribiendo" repartido por todos lados.
+builder.Services.AddSingleton<IngestaMercadoPublico>();
+
 // Singleton A PROPÓSITO: el ritmo hacia la API tiene que ser el mismo para todas
 // las peticiones del proceso. Si fuera scoped, cada petición HTTP tendría el suyo
 // y dos a la vez no se limitarían entre sí, que es el 429 que se quiere evitar.
@@ -64,25 +77,71 @@ if (opciones.Modo == "demo")
 
 if (!opciones.Servible)
 {
-    app.Logger.LogWarning(
-        """
-        ============================================================
-        FALTA CONFIGURAR LA CONSULTA A MERCADO PUBLICO.
-        La aplicación arranca y la interfaz funciona, pero cualquier
-        consulta a la API fallará. En la sección "MercadoPublico" del
-        appsettings hacen falta DOS cosas:
+    /* La plantilla se busca con ruta ABSOLUTA, y no con una relativa.
 
-          - Ticket: se pide en mercadopublico.cl y llega al correo.
-          - CodigoProveedor: el código de la empresa en Mercado Público.
+       La relativa era "secrets\appsettings.Development.json.ejemplo", y
+       funciona solo si el directorio actual es la raíz del repositorio. Con la
+       aplicación arrancada desde dentro de src\WatchMercadoPublico.Server —que
+       es lo normal con dotnet run --project, y lo que hace el IDE — el
+       directorio actual es el proyecto y el comando falla:
 
-        Para una instalación normal, copia la plantilla y rellénala:
+           Copy-Item : No se encuentra la ruta de acceso
+           '...\src\WatchMercadoPublico.Server\secrets\appsettings.Development.json.ejemplo'
+           porque no existe.
 
-          Copy-Item secrets\appsettings.Development.json.ejemplo `
-                  src\WatchMercadoPublico.Server\appsettings.Development.json
+       El aviso se leía, se copiaba tal cual y no funcionaba. Un aviso cuyo
+       consejo no se puede seguir no vale como aviso.
 
-        Para probar la interfaz SIN nada de eso: "ModoConsulta": "demo".
-        ============================================================
-        """);
+       ContentRootPath es el directorio del proyecto, que la aplicación ya sabe
+       sin preguntar. La plantilla vive dos niveles arriba, en la raíz del
+       repositorio. Si algún día cambia de sitio, este es el único sitio que hay
+       que tocar, y la comprobación de abajo avisa. */
+    var plantilla = Path.GetFullPath(
+        Path.Combine(app.Environment.ContentRootPath, "..", "..", "secrets",
+            "appsettings.Development.json.ejemplo"));
+
+    if (!File.Exists(plantilla))
+    {
+        app.Logger.LogWarning(
+            """
+            ============================================================
+            FALTA CONFIGURAR LA CONSULTA A MERCADO PUBLICO.
+            Y ADEMÁS: no se encuentra la plantilla de configuración en
+
+              {Ruta}
+
+            Si clonaste el repositorio, eso significa que la plantilla no se
+            versionó. Créala copiando src\WatchMercadoPublico.Server\appsettings.json
+            a src\WatchMercadoPublico.Server\appsettings.Development.json y
+            añadiendo dentro la sección "MercadoPublico".
+            ============================================================
+            """, plantilla);
+    }
+    else
+    {
+        app.Logger.LogWarning(
+            """
+            ============================================================
+            FALTA CONFIGURAR LA CONSULTA A MERCADO PUBLICO.
+            La aplicación arranca y la interfaz funciona, pero cualquier
+            consulta a la API fallará. En la sección "MercadoPublico" del
+            appsettings hacen falta DOS cosas:
+
+              - Ticket: se pide en mercadopublico.cl y llega al correo.
+              - CodigoProveedor: el código de la empresa en Mercado Público.
+
+            Para una instalación normal, copia la plantilla y rellénala. Esta
+            ruta es absoluta, así que el comando funciona desde cualquier
+            directorio:
+
+              Copy-Item '{Plantilla}' '{Destino}'
+
+            Para probar la interfaz SIN nada de eso: "ModoConsulta": "demo".
+            ============================================================
+            """,
+            plantilla,
+            Path.Combine(app.Environment.ContentRootPath, "appsettings.Development.json"));
+    }
 }
 else if (!opciones.TieneTicket)
 {
@@ -232,6 +291,81 @@ _ = Task.Run(async () =>
         }
     }
 });
+
+// ---------------------------------------------------------------------------
+// Ingesta automática a la base de datos
+//
+// Va AQUÍ, junto al temporizador de purga, y no en un SQL Server Agent. El
+// Express no lo trae: el servicio SQLSERVERAGENT no existe en una instalación
+// de Express, así que "programarlo en SQL Server" es, en esta máquina, no
+// tener nada.
+//
+// Y va dentro del servidor por una razón más profunda que la del Agent: el
+// ticket está en la configuración del servidor y no sale de ahí. Un trabajo de
+// SQL Server Agent necesita las credenciales guardadas en el servidor de
+// impersonalidades, y el ticket es una credencial.
+//
+// Con MinutosEntreIngestas = 0 no se programa ninguna, que es el valor por
+// defecto a propósito.
+// ---------------------------------------------------------------------------
+
+var minutosIngesta = opciones.MinutosEntreIngestas;
+var ingesta = app.Services.GetRequiredService<IngestaMercadoPublico>();
+
+if (!opciones.UsaBaseDeDatos)
+{
+    app.Logger.LogInformation(
+        "Fuente de datos: la API de Mercado Público. No se programa ninguna ingesta.");
+}
+else if (minutosIngesta <= 0)
+{
+    app.Logger.LogInformation(
+        "Fuente de datos: la base de datos. MinutosEntreIngestas = 0, así que NO se " +
+        "importa nada solo. La base se llena ejecutando sql/03-procedimiento-importar.sql " +
+        "a mano, o poniendo MinutosEntreIngestas mayor que cero.");
+}
+else if (ingesta.FaltaParaIngerir is { } falta)
+{
+    // No se programa el temporizador. Es tentador programarlo igual y que cada
+    // pasada avise, pero eso es un bucle que se despierta cada N minutos para
+    // no hacer nada, y con el log lleno de líneas iguales nadie ve la que
+    // importa.
+    app.Logger.LogError(
+        "Fuente de datos: la base de datos, con ingesta cada {Minutos} minutos, pero {Falta}. " +
+        "No se programa ninguna ingesta.",
+        minutosIngesta, falta);
+}
+else
+{
+    app.Logger.LogInformation(
+        "Fuente de datos: la base de datos. Importando los días que falten cada {Minutos} minutos.",
+        minutosIngesta);
+
+    var reloj = new PeriodicTimer(TimeSpan.FromMinutes(minutosIngesta));
+    _ = Task.Run(async () =>
+    {
+        while (await reloj.WaitForNextTickAsync(app.Lifetime.ApplicationStopping))
+        {
+            try
+            {
+                await ingesta.IngerirAsync(app.Lifetime.ApplicationStopping);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                // Cada pasada se reintenta sola en el siguiente tictac. Si una
+                // importa y la siguiente no, no hay nada que arreglar a mano:
+                // los días que fallaron se vuelven a mirar porque el rango se
+                // recalcula y @soloFaltantes se los salta si ya entraron.
+                app.Logger.LogError(
+                    "Falló la ingesta automática: {Error}", ex.Message);
+            }
+        }
+    });
+}
 
 // ---------------------------------------------------------------------------
 // API

@@ -109,12 +109,20 @@ npm run css
 Se pide gratis en <https://api.mercadopublico.cl/modules/IniciarSesion.aspx>
 (Clave Única; llega al correo). Es uno por persona y no se puede transferir.
 
-Copia la plantilla y pega tu ticket:
+Copia la plantilla y pega tu ticket. **Desde la raíz del repositorio**:
 
 ```powershell
 Copy-Item secrets\appsettings.Development.json.ejemplo `
         src\WatchMercadoPublico.Server\appsettings.Development.json
 ```
+
+> Si no estás en la raíz, el comando falla: `secrets/` está en la raíz, no en el
+> proyecto. La aplicación **te imprime la orden con la ruta absoluta** en el
+> aviso de arranque, que funciona desde cualquier directorio. Úsala si te da
+> error.
+
+La plantilla ya trae la sección `"MercadoPublico"` montada y las **14 claves**
+documentadas una a una. Lo único que hay que rellenar:
 
 ```jsonc
 "MercadoPublico": {
@@ -127,6 +135,16 @@ Copy-Item secrets\appsettings.Development.json.ejemplo `
 
 El `CodigoProveedor` es lo único imprescindible: sin él la aplicación arranca
 pero no hay a quién consultar. Los otros dos son solo para la cabecera.
+
+Si además vas a usar la [fuente de datos](#la-fuente-de-datos-api--sql-server)
+desde la base, rellena estas dos:
+
+```jsonc
+"MercadoPublico": {
+  "FuenteDatos": "sql",
+  "CadenaConexionSql": "Server=localhost\\SQLEXPRESS;Database=WatchMerPub;Integrated Security=True;TrustServerCertificate=True"
+}
+```
 
 El fichero queda fuera del repositorio (está en `.gitignore`) y **no se publica**
 (`CopyToPublishDirectory="Never"`).
@@ -176,7 +194,7 @@ fichero no se publica a propósito.
 dotnet test
 ```
 
-167 pruebas, **sin red y sin ticket**: no tocan la API, comprueban funciones puras.
+219 pruebas, **sin red y sin ticket**: no tocan la API, comprueban funciones puras.
 Ver [Tests](#tests) para qué hay que leerlos antes de tocar nada.
 
 ---
@@ -222,12 +240,184 @@ Sección `MercadoPublico`:
 | `DiasMaximos` | `30` | Tope duro. El servidor no deja pedir más, aunque se manipule la petición. |
 | `MinutosDeCache` | `15` | Vida de la caché en memoria de un barrido. |
 | `SegundosTimeout` | `30` | Espera máxima a Mercado Público. |
+| `FuenteDatos` | `api` | `api` = se pregunta a Mercado Público. `sql` = se lee de la base. Ver [la fuente de datos](#la-fuente-de-datos-api--sql-server). |
+| `CadenaConexionSql` | *(vacío)* | Solo si `FuenteDatos = sql`. **Nunca en un fichero versionado.** |
+| `MinutosEntreIngestas` | `0` | Cada cuántos minutos se importan a la base los días que falten. `0` = no se importa nada solo. |
 
 En producción, el ticket va por **variable de entorno**, nunca en un fichero:
 
 ```
 MercadoPublico__Ticket = "tu-ticket"
 ```
+
+Y lo mismo con la cadena de conexión, que también lleva credenciales:
+
+```
+MercadoPublico__CadenaConexionSql = "Server=localhost\SQLEXPRESS;Database=WatchMerPub;Integrated Security=True"
+```
+
+---
+
+## La fuente de datos: API o SQL Server
+
+Hay **dos caminos hacia los mismos datos**, y se elige con una clave de
+configuración:
+
+```
+MercadoPublico__FuenteDatos = "sql"
+MercadoPublico__CadenaConexionSql = "Server=...;Database=WatchMerPub;..."
+```
+
+Es la ruta por la que nació esta aplicación, y sigue siendo la que se prueba.
+
+Con `sql`:
+
+- **La pantalla casi no cambia.** Solo el filtro (año y mes, sin semana), el
+  texto del overlay y un panel de resultado vacío que dice la verdad sobre los
+  días que no se pudieron comprobar.
+- **No hace falta ticket** para leer. No se pregunta a Mercado Público: se lee
+  lo que ya se descargó antes.
+- **Las consultas son al instante**, que es de donde sale el motivo de que esto
+  exista.
+
+### Por qué son dos campos y no uno
+
+`FuenteDatos` es **aparte** de `ModoConsulta`, no un valor más. Son dos preguntas
+distintas:
+
+| | Pregunta que responde |
+|---|---|
+| `FuenteDatos` | ¿De dónde sale el dato? |
+| `ModoConsulta` | ¿Cómo se consulta la API? |
+
+Con un solo campo habría combinaciones que no significan nada: ¿qué es `sql` con
+`c2`, que es Compra Ágil? ¿Y `demo` con fuente `sql`?
+
+### Lo que cambia en pantalla, y lo que no
+
+| | `api` | `sql` |
+|---|---|---|
+| Filtro | año + mes + **semana** | año + mes |
+| Al entrar | carga la semana en curso | carga el mes en curso entero |
+| Overlay | "Consultando a Mercado Público…" | "Consultando Datos en el Servidor" |
+| Botón "Dejar de esperar" | sí | **no** |
+| Aviso de "has cambiado el filtro" | "Estás viendo la semana 2 en octubre de 2026" | "Estás viendo octubre de 2026" |
+| Contador de segundos | sí | sí |
+| Sello de la cabecera | "consultado a la API el …" | "leído del servidor el …" |
+| Refresco automático | cada 5 min, en la semana en curso | cada 5 min, en el mes en curso |
+| "Actualizar" | pregunta a la API | **relee de la base**, no reimporta |
+
+El botón de detener desaparece porque no hay nada que detener: la consulta va a
+un SQL Server local, no llama a la API y no gasta cupo del ticket. El código del
+botón **no se borra** — en modo API sigue siendo necesario, y se llegó a quitar
+en una iteración pasada porque una consulta larga era un callejón sin salida.
+
+El botón "Actualizar" relee y no reimporta a propósito. Si también descargara,
+la pantalla volvería a ser lenta por la razón que motivó todo esto.
+
+### El panel de resultado vacío
+
+La búsqueda es **el mes entero, como rango**: del primer día al último, con los
+dos extremos incluidos, **sin excepción de día hábil y sin parar en hoy**. Con
+datos, el sello de la cabecera dice el rango completo:
+
+> 1 publicación · SEPTIEMBRE
+> Del 1 al 30 de septiembre de 2026
+
+Y sin datos:
+
+> **Nada en el mes de Junio de 2026**
+> No se encontraron licitaciones para este período.
+
+El **título no cambia nunca** y la leyenda de debajo sí:
+
+| | Leyenda |
+|---|---|
+| **Modo API** | "Se consultaron X días hábiles y no hay ninguna licitación para este período." |
+| Modo BD, mes comprobado entero | "No hay ninguna licitación para este período." |
+| Modo BD, con días sin comprobar | "No se encontraron licitaciones para este período." |
+
+Son tres textos y no uno por una razón medida: octubre de 2026 fue el primer mes
+con días sin comprobar, así que una versión anterior que elegía entre dos paneles
+mandaba **casi todos los meses** por la rama del aviso ámbar, y el "Nada en el mes
+de Junio de 2026" no aparecía nunca. El caso frecuente —un mes tranquilo sin
+nada— salía por el lado raro.
+
+En el modo BD con días sin comprobar, "no se encontraron" es una afirmación
+sobre **la búsqueda**, no sobre la realidad: la consulta se hizo sobre el rango
+del mes y no devolvió nada. Por eso no dice "no hay ninguna".
+
+### Por qué en SQL van todos los días y en API no
+
+Es la misma regla con dos motivos distintos, y por eso el cálculo **no se
+comparte** entre los dos modos:
+
+| | Rango | Por qué |
+|---|---|---|
+| `api` | días **hábiles**, y no más allá de hoy | Cada día no consultado es **una petición más**. Se asume que no se publica en fin de semana, así que preguntarlo sería gastar cupo para obtener un cero. |
+| `sql` | mes **natural** entero | Leer una fila de un SQL Server local **no es una llamada**. El coste que justifica recortar en modo API aquí no existe. |
+
+Y parar en "hoy" —que antes se hacía en los dos modos— era lo que más confusión
+generaba: el 8 de octubre de 2026 decía "Del 1 al 8 de octubre de 2026", que
+parece que la búsqueda se quedó corta por un fallo, cuando lo que pasa es que el
+mes no había terminado. El texto tiene que describir **el rango que se buscó**, y
+el rango buscado es el mes entero.
+
+Lo que la base **sí** sigue guardando es el detalle por día: `mp.CuentaDiasDelMes
+y `mp.DiasSinComprobarDelMes` devuelven cuántos días se pudieron comprobar y
+cuáles no, con su motivo. Eso no se pinta en pantalla en modo SQL —se decidió
+así— pero está a una consulta de distancia para quien necesite auditar una
+importación, y `sql/97-prueba-lectura.sql` lo comprueba con 20 comprobaciones
+sobre los datos reales.
+
+### La búsqueda usa un rango, y no YEAR/MONTH
+
+`mp.LeeMes` filtra por `FechaPublicacion >= @primeroDelMes AND <= @finDelMes`, no
+por `YEAR(FechaPublicacion) = @anio AND MONTH(...) = @mes`. Las dos formas
+devuelven las mismas filas —esta base lo demuestra: 13 y 13— y por eso parece que
+da igual.
+
+No da igual por una cosa que se llama **sargabilidad**: el índice
+`IX_MpLicitacion_FechaPublicacion` guarda los valores de la columna, no el
+resultado de `YEAR()`, así que solo el rango deja que se use.
+
+**Medido hoy no hay diferencia, y conviene no vender más**: con 13 filas y 3
+lecturas lógicas, las dos formas hacen un recorrido de tabla, porque buscar en un
+índice de una tabla de dos páginas cuesta *más* que recorrerla. El rango es la
+forma correcta y el índice se aprovecha cuando la tabla crece.
+
+### La ingesta
+
+La base se llena con `sql/03-procedimiento-importar.sql`, a mano:
+
+```sql
+EXEC dbo.MpImportarRango
+    @desde = '2026-01-14', @hasta = '2026-10-08',
+    @codigoProveedor = N'71284', @ticket = N'...';
+```
+
+O sola, cada `MinutosEntreIngestas` minutos, con un `PeriodicTimer` dentro del
+servidor ASP.NET Core. No se usa SQL Server Agent porque **Express no lo trae**:
+el servicio `SQLSERVERAGENT` no existe en una instalación de Express.
+
+Con `MinutosEntreIngestas = 0` —el valor por defecto— no se programa ninguna. Es
+deliberado: una tarea que sale sola descarga de la API y gasta cupo del ticket
+sin que nadie lo haya pedido.
+
+### Sin Entity Framework, a propósito
+
+Todo el acceso a la base son **cinco procedimientos almacenados** en
+`sql/05-procedimientos-lectura.sql` y nada más. No hay mapeo objeto-relacional,
+ni migraciones, ni un modelo que se pueda desincronizar del esquema.
+
+Eso tiene un precio que conviene decir: si mañana cambia el esquema, hay que
+tocarlos a mano. Con EF el cambio se propagaría solo. Aquí se prefiere que el
+cambio sea **visible** y no que sea automático.
+
+Y la cadena de conexión **no viaja al cliente**. El cliente es WebAssembly y se
+descarga entero: una cadena ahí quedaría a la vista de cualquiera que abra las
+herramientas del navegador. Por eso la conexión se abre en el servidor, aunque el
+interruptor se toque desde la configuración.
 
 ---
 
@@ -1523,7 +1713,13 @@ Por **síntoma**, no por causa interna:
 | La lista sale vacía | Consulta real y de verdad no hay nada publicado en esa semana. La pantalla lo dice como "Nada en la Semana 3 en Octubre de 2026", no como error. |
 | `401` o `403` al consultar | El ticket caducó, se revocó o se agotó su cupo diario. |
 | Aviso naranja en pantalla | Estás en `ModoConsulta: "demo"`: son datos inventados. |
-| Aviso "la aplicación no está configurada" | Falta el `Ticket` o el `CodigoProveedor` en la sección `MercadoPublico` del **servidor**. |
+| Aviso "la aplicación no está configurada" | Falta el `Ticket` o el `CodigoProveedor` en la sección `MercadoPublico` del **servidor**. Con `FuenteDatos = "sql"` **no falta el ticket**: falta el `CodigoProveedor` o la `CadenaConexionSql`. |
+| Aviso "no se pudo comprobar todo el mes de …" (modo `sql`) | `diasFallidos` > 0 en la base. Salen los días y **el motivo** de cada uno: `Nunca se consulto este dia` es que el rango de importación no llegaba; `Ticket no válido` es que la importación se hizo con el ticket caducado, y hay que pasarlo bien antes de reimportar. |
+| La pantalla dice "No se pudo pintar el contenido de la consulta" en modo `sql` | `Estado.Servible` es `false`. Con `FuenteDatos = "sql"` eso pasa si falta el `CodigoProveedor` o la `CadenaConexionSql`, **no** el ticket. |
+| `502` en `/api/mes` | Falló la lectura de la base. El detalle va al log del servidor con la excepción completa. |
+| `503` en `/api/mes` con "Base de datos sin configurar" | `FuenteDatos = "sql"` y `CadenaConexionSql` vacía. |
+| `404` en `/api/licitaciones/{codigo}` (modo `sql`) | Esa licitación no está importada. **No** es que la base esté caída: son dos cosas distintas y la pantalla las dice distinto. |
+| `IndexOutOfRangeException` al leer de la base, con el nombre de una columna | `ExecuteReaderAsync()` deja el lector **ya sobre el primer conjunto**. Un `while (await NextResultAsync())` se come la cabecera y lee el conjunto equivocado. El bucle de `LectorMercadoPublico` va al revés, con el `NextResultAsync()` al final. |
 | La cabecera sale como "Empresa sin configurar" | Falta `NombreEmpresa`. No impide consultar: el código es lo único imprescindible. |
 
 ---
@@ -1690,11 +1886,21 @@ Iconos de [Lucide](https://lucide.dev) (licencia ISC). Tipografía
 dotnet test
 ```
 
-**167 pruebas** (108 del servidor, 59 del cliente), en 115 métodos repartidos en 13
-ficheros, todas en verde. **No hay que tener ticket, ni red, ni la API en pie.**
-Eso no es una comodidad: es lo que hace posible testear. Un método que hace una
-petición no se puede comprobar sin pedirla, y para la aplicación casi todo lo que
-se rompió no necesitaba la API para estar mal.
+**219 pruebas** (147 del servidor, 72 del cliente), todas en verde. **No hay que
+tener ticket, ni red, ni la API en pie.** Eso no es una comodidad: es lo que hace
+posible testear. Un método que hace una petición no se puede comprobar sin
+pedirla, y para la aplicación casi todo lo que se rompió no necesitaba la API para
+estar mal.
+
+Las 20 comprobaciones de la base de datos van aparte, en
+`sql/97-prueba-lectura.sql`, porque necesitan un SQL Server con la base creada y
+**con datos reales**: se ejecutan contra lo que hay, no contra un conjunto
+inventado, porque lo que se comprueba es justamente cómo se comporta el
+procedimiento con datos que nadie fabricó para la prueba.
+
+```powershell
+sqlcmd -S localhost\SQLEXPRESS -E -d WatchMerPub -b -f 65001 -i sql\97-prueba-lectura.sql
+```
 
 Por eso `ConstruirUrlDia` y `ConstruirError` están extraídos del cliente como
 funciones estáticas, aunque solo los use un sitio: es el requisito para poder
@@ -1710,15 +1916,17 @@ Todos nacieron de bugs que estuvieron en producción:
 | `FormatoDeFechaTests.cs` | La fecha va en `DDMMAAAA` con los dos campos rellenos, los **730 días** de dos años, y no depende del calendario de la cultura del servidor |
 | `ErroresDeApiTests.cs` | Que el mensaje de la API llegue a quien lee, y que un `500` no se traduzca en "la API está caída" cuando la API está diciendo otra cosa |
 | `SemanasDelMesTests.cs` | La regla de lunes a domingo, recortada al mes, y que ninguna semana se quede sin días hábiles |
-| `TextosDeFechaTests.cs` | Los nombres de día y de mes, y que `DayOfWeek.Sunday` siga siendo 0 |
+| `TextosDeFechaTests.cs` | Los nombres de día y de mes, que `DayOfWeek.Sunday` siga siendo 0, y que el texto del mes no anuncie días que no han llegado |
 | `PeriodosDisponiblesTests.cs` | Que no se ofrezcan meses ni semanas que aún no han ocurrido |
 | `ReintentosDeDetalleTests.cs` | Que el detalle se pida **más de una vez**, que sean menos intentos que los días, que la espera se doble, que tenga tope, y que el peor caso quepa en el reloj de IIS |
 | `FallosDeDiaTests.cs` | Que un día fallido se recuerde, que no se recuerde para siempre, que un éxito lo borre, y que "Actualizar" lo salte |
 | `RitmoDeLlamadasTests.cs` | Que no se hable a la API más rápido de lo que admite, y que el turno se quede tomado hasta que se suelte |
 | `ConsultasEnSerieTests.cs` | Que dos consultas vayan siempre en serie, y que el refresco en segundo plano use menos reintentos |
-| `FiltrosDeSemanaTests.cs` | Que un filtro se detecte como cambiado, y las dos regresiones que cazaron: el día indexado por `DayOfWeek` y la comparación por número de semana |
+| `FuenteDeDatosTests.cs` | Que el interruptor de fuente normalice lo escrito, que **en modo base de datos no exija ticket**, y qué necesita la ingesta automática |
+| `FiltrosDeSemanaTests.cs` | Que un filtro se detecte como cambiado, las dos regresiones que cazaron (el día indexado por `DayOfWeek` y la comparación por número de semana), y que el texto del aviso diga **mes** en vez de **semana** cuando lo que se mira es un mes |
 | `FormatoTests.cs` | La fecha numérica, la fecha corta, y que `RemoveDiacritics` no exista sin querer |
 | `EstadosDeLicitacionTests.cs` | Que la insignia de adjudicada se elija por el **código** y no por el texto, que es una cadena que el servidor puede cambiar sin que nadie se entere |
+| `AvisoDeConfiguracionTests.cs` | Que el aviso de "no está configurado" pida lo que falta **en cada modo**, y no el ticket en el que no hace falta |
 | `CortesPorTiempoTests.cs` | Que una espera cortada por tiempo se convierta **siempre** en un error que la pantalla puede mostrar, y nunca en una excepción que nadie ve |
 
 Los tests de `ReintentosDeDetalleTests` se validaron **reintroduciendo el bug**,
@@ -1757,8 +1965,43 @@ haría falta bUnit.
 Y en ese hueco caen justo los fallos más caros. La red de seguridad de la espera
 y el refresco que se atiende desde el `finally` son estado de componente, así que
 **no hay ninguna prueba que los vigile**: si alguien los borra, compila todo,
-pasa las 167 pruebas y vuelve el congelamiento sin que salte nada. Se dejan
+pasa las 219 pruebas y vuelve el congelamiento sin que salte nada. Se dejan
 documentados en el catálogo de fallos por eso, no porque una prueba los cubra.
+
+**El hueco se ha hecho más grande con la fuente de datos.** El `code-behind` de
+`Home.razor` es donde vive ahora la decisión de qué textos pintar según el modo —
+el rótulo de la insignia, el sello de "leído del servidor", el título del panel de
+días sin comprobar, y la condición `UsaBaseDeDatos ? !EsMesActual : !EsSemanaActual`
+del refresco automático—, y nada de eso lo mira ningún test. Salió de ahí el
+primer fallo de esta iteración: `EsSemanaActual` siempre da `false` en modo base
+de datos, así que **el refresco automático no se programaba nunca**. No daba
+ningún error; la pantalla simplemente dejaba de actualizarse sola, y eso es
+justamente el síntoma que nadie va a reportar porque la aplicación "funciona".
+
+Lo que sí se ha probado de esta iteración es lo que se puede probar sin
+renderizar: `MercadoPublicoOpciones` (normalización de la fuente, qué hace falta
+en cada modo, cuándo es servible) y el texto del aviso de configuración, en
+`FuenteDeDatosTests` y `AvisoDeConfiguracionTests`. `FuenteDeDatosTests` existe
+porque la condición antigua de `Servible` pedía ticket en los dos modos y dejó
+en pantalla un aviso falso.
+
+Hubo un segundo trozo de lógica en el componente que ya no está, y conviene
+contarlo porque es el que más páginas costó: el agrupamiento de los días sin
+comprobar. Encadenaba fechas sin límite, así que los 21 días no comprobados de
+septiembre de 2026 salían en una línea de 200 caracteres; y "y N días más"
+contaba las entradas que sobraban en vez de los días, de modo que decía "y 21
+días más" después de haber listado los 21. Se sacó a `AgrupacionDeMotivos`,
+como antes se había hecho con `FiltrosDeSemana`, y su test encontró un tercer
+fallo que la vista no enseñaba: el tope de tres grupos se comprobaba **antes** de
+absorber, así que el último grupo permitido no podía crecer y se quedaba en un
+día.
+
+Ahora ese agrupador **no existe**: en modo base de datos la pantalla ya no
+muestra los días sin comprobar, y sin consumidor era código muerto con tests.
+Los datos siguen guardados en la base y a una consulta de distancia
+(`mp.DiasSinComprobarDelMes`), que es donde se pueden auditar. Los tres fallos
+que encontró quedan escritos aquí y en el historial, porque el mismo agrupador
+volverá si alguien lo necesita.
 
 **Y hay un agujero conocido en el servidor, del mismo tipo.** `MercadoPublicoCliente`
 es `sealed` y **no implementa ninguna interfaz**, así que no hay forma de
@@ -1834,7 +2077,17 @@ WatchMercadoPublico.slnx
 ├── nuget.config
 ├── package.json                   # scripts de Tailwind
 ├── scripts/arrancar.ps1           # compila, publica y levanta en local
-├── secrets/                       # plantilla del ticket (fuera del repo)
+├── secrets/                       # la plantilla SI se versiona; el appsettings.Development.json que sale de ella, no
+├── sql/                           # esquema, importador y procedimientos de lectura
+│   ├── 01-esquema-mercadopublico.sql
+│   ├── 02-registrar-ensamblado.sql   # el CLR que hace el GET HTTP
+│   ├── 03-procedimiento-importar.sql  # MpImportarRango
+│   ├── 04-funciones-auxiliares.sql
+│   ├── 05-procedimientos-lectura.sql   # mp.LeeMes, mp.LeeDetalle y la cuenta de días
+│   ├── 97-prueba-lectura.sql
+│   ├── 98-prueba-importar.sql
+│   ├── 99-prueba-esquema.sql
+│   └── clr/                       # MercadoPublico.Http.csproj + Peticion.cs
 └── src
     ├── WatchMercadoPublico.Client # la SPA
     │   ├── Components/            # Icon, Marca, Aviso, LogoSmc, LogoChileCompra,
@@ -1843,18 +2096,20 @@ WatchMercadoPublico.slnx
     │   ├── Models/                # DTOs (mismos nombres que el JSON del servidor)
     │   ├── Pages/Home.razor       # la pantalla entera: los tres filtros, y su refresco
     │   ├── Services/              # MercadoPublicoApi, Formato, ThemeService,
+    │   │                          #   FiltrosDeSemana (qué dice la semana)
     │   │                          #   FiltrosDeSemana (qué dice la semana,
-    │   │                          #   con sus dos regresiones)
     │   └── wwwroot/               # index.html, css/app.css, icono.svg, marca.svg,
     │                              #   logo-smc.png, LogoChc-blanco.png, LogoChc-oscuro.png
     ├── WatchMercadoPublico.Client.Tests # tests del cliente, sin Blazor
     ├── WatchMercadoPublico.Server # la API y el hosting de la SPA
-    │   ├── Endpoints/             # LicitacionesEndpoints (/estado, /semana, detalle)
+    │   ├── Endpoints/             # LicitacionesEndpoints (/estado, /semana, /mes, detalle)
     │   ├── Models/                # opciones y DTOs
     │   ├── Services/              # MercadoPublicoCliente, CacheMercadoPublico,
     │   │                          #   SemanasDelMes (la regla de semanas),
     │   │                          #   CalendarioDelMes (nombres de mes),
     │   │                          #   TextosDeFecha (días y meses en palabras),
+    │   │                          #   LectorMercadoPublico (lee de la base),
+    │   │                          #   IngestaMercadoPublico (la importa),
     │   │                          #   DatosDemo
     │   └── web.config
     └── WatchMercadoPublico.Server.Tests # tests del servidor, sin red y sin ticket
@@ -1862,6 +2117,11 @@ WatchMercadoPublico.slnx
 
 `DatosDemo.cs` y el modo `demo` son **una ayuda de desarrollo**, no parte de la
 aplicación.
+
+`LectorMercadoPublico` e `IngestaMercadoPublico` son las dos mitades de la fuente
+`sql`, y están separadas a propósito: la pantalla solo lee y el temporizador solo
+escribe, así que nunca comparten camino. Juntas serían una clase con dos maneras
+distintas de abrir la conexión, una de las cuales escribe.
 
 ### Quién decide qué
 
@@ -1875,7 +2135,13 @@ La regla que vertebra el proyecto: **el servidor calcula, el cliente pinta.**
 | El rango de cada semana, escrito | `SemanaDescrita.Texto` | El cliente pintaba "23 al 28 de febrero" por su cuenta |
 | El día de una licitación, escrito | `Licitacion.PublicadoTexto` | Ídem |
 | El periodo del contador | `RespuestaSemana.Periodo` | Ídem |
+| Qué días de un mes no se pudieron comprobar | `mp.CuentaDiasDelMes`, `mp.DiasSinComprobarDelMes` | **Con solo las filas, octubre de 2026 habría salido como "no se publicó nada" cuando no se comprobó nada** |
+| Si se puede leer de la base | `MercadoPublicoOpciones.BaseDeDatosUtilizable` | Que "no hay nada" y "no se pudo leer" no se confundan |
 
 Hay un test que califica esto, y es `TextosDeFechaTests`. Si algún día alguien
 añade en el cliente un array de meses o de días, ese test no lo va a detectar:
 lo detectaría el próximo bug de un día corrido.
+
+**La fuente de datos se declara en el servidor y la cree el cliente.** El cliente
+no deduce el modo: lo lee de `/api/estado`. Si lo dedujera por su cuenta habría
+dos verdades y algún día discreparían.

@@ -111,17 +111,29 @@
                     </select>
                 </div>
 
-                <div class="min-w-0 min-[350px]:col-span-2 sm:col-span-1 sm:min-w-[9rem] sm:flex-1">
-                    <label for="f-semana" class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted">
-                        Semana
-                    </label>
-                    <select id="f-semana" class="campo" value="@NumeroSemana" @onchange="CambiarSemana">
-                        @foreach (var s in Estado?.Semanas ?? [])
-                        {
-                            <option value="@s.Numero" selected="@(s.Numero == NumeroSemana)">Semana @s.Numero - @s.Texto</option>
-                        }
-                    </select>
-                </div>
+                @* EL SELECTOR DE SEMANA SOLO EN MODO API.
+
+                   En modo base de datos el filtro es por año y mes, y no hay
+                   semana: la consulta es a un SQL Server local y trae el mes
+                   entero de golpe. Dejar el desplegable puesto sería dejar un
+                   control que no hace nada, que es peor que no tenerlo.
+
+                   El resto del filtro —año y mes— es idéntico en los dos modos,
+                   y por eso no se toca nada de arriba. *@
+                @if (!UsaBaseDeDatos)
+                {
+                    <div class="min-w-0 min-[350px]:col-span-2 sm:col-span-1 sm:min-w-[9rem] sm:flex-1">
+                        <label for="f-semana" class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted">
+                            Semana
+                        </label>
+                        <select id="f-semana" class="campo" value="@NumeroSemana" @onchange="CambiarSemana">
+                            @foreach (var s in Estado?.Semanas ?? [])
+                            {
+                                <option value="@s.Numero" selected="@(s.Numero == NumeroSemana)">Semana @s.Numero - @s.Texto</option>
+                            }
+                        </select>
+                    </div>
+                }
 
                 <button type="button"
                         class="boton-actualizar @ClaseBotonActualizar min-[350px]:col-span-2 sm:col-span-1"
@@ -148,16 +160,16 @@
                Va como aviso y no como una línea de texto porque aquí lo que hay
                que conseguir es que se pulse el botón de la barra, que por eso
                late. El aviso solo explica; el botón de arriba es la acción. *@
-            @if (HaySemanaPendiente)
+            @if (HayPeriodoPendiente)
             {
                 @* El margen va en un envoltorio y no en el Aviso: el componente
                    no admite clases de fuera, y pegado a la fila de los
                    desplegables parecía parte de ella en vez de un aviso. *@
                 <div class="mt-5">
-                    <Aviso Tipo="aviso" Titulo="@TituloSemanaPendiente" Cerrable="false">
+                    <Aviso Tipo="aviso" Titulo="@TituloPeriodoPendiente" Cerrable="false">
                         <p class="mt-1 text-sm leading-relaxed text-ink-soft">
                             En el selector has elegido
-                            <strong class="font-semibold text-ink">@SemanaEnPalabras(Anio, Mes, NumeroSemana)</strong>,
+                            <strong class="font-semibold text-ink">@PeriodoElegidoEnPalabras</strong>,
                             pero lo que sigue en pantalla es de
                             <strong class="font-semibold text-ink">la última búsqueda</strong>.
                             Pulsa <strong class="font-semibold text-ink">Actualizar</strong>
@@ -267,25 +279,42 @@
             <div class="capa-consulta">
                 <div class="panel-consulta">
                     <span class="aro-consulta" aria-hidden="true"></span>
-                    <p class="min-w-0 text-sm font-semibold text-ink">Consultando a Mercado Público…</p>
+                    @* El texto DICE de dónde se está sacando la información. En
+                       modo base de datos no se está consultando a Mercado Público
+                       y decirlo sería mentir: lo que se está leyendo es lo que
+                       ya se descargó antes. *@
+                    <p class="min-w-0 text-sm font-semibold text-ink">
+                        @(UsaBaseDeDatos ? "Consultando Datos en el Servidor" : "Consultando a Mercado Público…")
+                    </p>
+                    @* El contador se queda en los dos modos. En modo base de
+                       datos la consulta dura milisegundos y casi no se verá, pero
+                       quitarlo aquí metería un cambio más en la misma ruta por un
+                       beneficio que nadie nota. *@
                     @if (SegundosEsperando > 0)
                     {
                         <span class="segundos-consulta tabular-nums">@SegundosEsperando s</span>
                     }
                 </div>
-                @* Botón de salida. Antes la pantalla de espera era un callejón:
-                   el botón de Actualizar quedaba deshabilitado mientras consulta,
-                   así que si la consulta no acababa no había NADA que pulsar. Se
-                   vio con una semana pasada sin caché, que son hasta cinco días
-                   consultados en serie, y en un móvil donde además el navegador
-                   puede parar la página. Que pueda tardar mucho no quita
-                   que la espera tenga que tener final. *@
-                <div class="panel-consulta flex justify-center">
-                    <button type="button" @onclick="DejarDeEsperarAsync"
-                            class="rounded-md px-3 py-1.5 text-[0.7rem] font-semibold text-muted transition hover:bg-hover hover:text-ink">
-                        Dejar de esperar
-                    </button>
-                </div>
+                @* "Dejar de esperar" SOLO en modo API.
+
+                   En modo base de datos la consulta va a un SQL Server local, no
+                   llama a la API y no gasta cupo del ticket. El botón existiría
+                   para algo que no se está haciendo, y además dejaría al usuario
+                   mirando un contador que avanza solo.
+
+                   El CÓDIGO del botón no se borra: en modo API sigue siendo
+                   necesario. Eso lo dejó como callejón sin salida una consulta
+                   larga, y con el botón se arregla. Borrarlo metería una mano en
+                   la ruta de la API para tocar algo que funciona. *@
+                @if (!UsaBaseDeDatos)
+                {
+                    <div class="panel-consulta flex justify-center">
+                        <button type="button" @onclick="DejarDeEsperarAsync"
+                                class="rounded-md px-3 py-1.5 text-[0.7rem] font-semibold text-muted transition hover:bg-hover hover:text-ink">
+                            Dejar de esperar
+                        </button>
+                    </div>
+                }
                 <div class="banda-consulta" aria-hidden="true"><span></span></div>
             </div>
         }
@@ -314,19 +343,88 @@
         }
         else if (Semana is { Total: 0 })
         {
-            @* Sin resultados: NO es un error, siempre que la semana se haya
-               comprobado entera. *@
+            @* SIN RESULTADOS: EL TITULO ES SIEMPRE EL MISMO, Y LA LEYENDA DEBAJO
+            @* SIN RESULTADOS: EL TITULO ES SIEMPRE EL MISMO, Y LA LEYENDA DEBAJO
+               CAMBIA.
+
+               Esto antes no era asi. Cuando el mes tenia dias sin comprobar
+               aparecia un panel ambar que se titulaba "No se pudo comprobar todo
+               el mes de junio", y el "Nada en el mes de Junio de 2026" no salia
+               nunca. October de 2026 fue el primer mes con dias sin comprobar, y
+               por eso el caso mas frecuente —un mes tranquilo que no tiene nada—
+               salia siempre por el otro lado.
+
+               Las dos cosas son verdad a la vez: en junio de 2026 hay cero
+               licitaciones EN LA BASE, y a la vez no se comprobo ninguno de sus
+               22 dias habiles. El titulo dice la primera y la leyenda matiza la
+               segunda. Se eligio que el titulo no cambiara nunca, porque es la
+               pregunta que hace quien abre la pantalla.
+
+               Las tres leyendas:
+                 - Modo API: "Se consultaron X dias habiles y no hay ninguna
+                   licitacion". Aqui la consulta va a la API y el recuento es
+                   real.
+                 - Modo base de datos, mes comprobado entero: "No hay ninguna
+                   licitacion para este periodo".
+                 - Modo base de datos, con dias sin comprobar: "No se
+                   encontraron licitaciones para este periodo", y los dias van
+                   en el desplegable de debajo.
+
+               El titulo lo compone el SERVIDOR y llega en PeriodoDelMes. No se
+               arma aqui con el nombre del mes del desplegable: ese array viene
+               filtrado al mes actual y funciona, pero depender de el para
+               escribir un texto es la clase de acoplamiento que ya rompio una
+               vez el array de dias. *@
+            var tituloVacio = UsaBaseDeDatos
+                ? $"Nada en {Semana.PeriodoDelMes}"
+                : $"Nada en {SemanaEnPalabras(Semana.Anio, Semana.Mes, SemanaMostrada, capitalizado: true)}";
+
             <div class="entrada-suave rounded-2xl border border-dashed border-line bg-surface px-6 py-14 text-center">
                 <span class="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-field text-muted">
                     <Icon Name="calendario" Size="26" />
                 </span>
+
                 <p class="mt-4 text-base font-bold text-ink">
-                    Nada en @SemanaEnPalabras(Semana.Anio, Semana.Mes, SemanaMostrada, capitalizado: true)
+                    @tituloVacio
                 </p>
+
                 <p class="mx-auto mt-1.5 max-w-lg text-sm leading-relaxed text-muted">
-                    Se consultaron @TextoDiasConsultados y no hay ninguna licitación
-                    para este período.
+                    @if (!UsaBaseDeDatos)
+                    {
+                        <text>Se consultaron @TextoDiasConsultados y no hay ninguna licitación
+                        para este período.</text>
+                    }
+                    else if (Semana.DiasFallidos > 0)
+                    {
+                        @* CON DIAS SIN COMPROBAR, y solo en modo base de datos.
+
+                           "No se encontraron" y no "no hay ninguna": lo primero es
+                           una AFIRMACION SOBRE LA BUSQUEDA —la consulta se hizo y
+                           no devolvio nada— y lo segundo sobre la realidad. En
+                           este modo la busqueda devuelve cero de verdad, y esa es
+                           la diferencia.
+
+                           Lo que ya NO va aqui es el recuento de dias sin
+                           comprobar. Se decidio por quien lo usa: es un texto de
+                           cuatro lineas que se leia como un aviso cuando lo que
+                           se pidio era saber si hay algo. Los numeros no se
+                           pierden, estan en el desplegable de abajo —"Por que no
+                           se pudo consultar" con los dias y el motivo de cada
+                           uno—, y ese sigue ahi justamente para que el dato siga
+                           a una pulsacion de distancia.
+
+                           OJO con esto al tocarlo otra vez: si ademas se quita
+                           el desplegable, un mes con 6 de 6 dias sin comprobar
+                           sale con el mismo texto que un mes comprobado entero,
+                           y la diferencia se pierde sin que nada avise. *@
+                        <text>No se encontraron licitaciones para este período.</text>
+                    }
+                    else
+                    {
+                        <text>No hay ninguna licitación para este período.</text>
+                    }
                 </p>
+
             </div>
         }
         else if (esperaCancelada)
@@ -389,17 +487,31 @@
                    contador puede ser de una semana de hace meses: "23:32" a secas
                    no dice si eso fue anteayer o en junio, que es justo lo que
                    hace falta saber para fiarse de lo que se está viendo. *@
+                @* El sello dice DE DÓNDE se sacó. En modo base de datos no se
+                   consultó la API en este momento: se leyó lo que ya estaba
+                   descargado. Decir "consultado a la API" sobre una lectura a un
+                   SQL Server local sería el mismo error que el overlay, en la
+                   línea de al lado, y en letra más pequeña. *@
                 <p class="text-xs text-muted">
-                    @(Semana.DesdeCache
-                        ? $"consultado el {Formato.FechaYHoraCorta(Semana.Consultado)}"
-                        : $"consultado a la API el {Formato.FechaYHoraCorta(Semana.Consultado)}")
+                    @if (Semana.DesdeCache)
+                    {
+                        <text>consultado el @Formato.FechaYHoraCorta(Semana.Consultado)</text>
+                    }
+                    else if (UsaBaseDeDatos)
+                    {
+                        <text>leído del servidor el @Formato.FechaYHoraCorta(Semana.Consultado)</text>
+                    }
+                    else
+                    {
+                        <text>consultado a la API el @Formato.FechaYHoraCorta(Semana.Consultado)</text>
+                    }
                 </p>
             </div>
 
             @* --- Aviso de días sin comprobar --- *@
             @* Es lo que impide que la pantalla insinúe un "no hay nada" cuando en
                realidad hay días que nadie ha podido mirar. *@
-            @if (!Semana.Completa)
+            @if (!Semana.Completa && !UsaBaseDeDatos)
             {
                 <Aviso Tipo="aviso" Titulo="La semana está incompleta" Cerrable="false">
                     <p class="mt-2 text-sm leading-relaxed text-ink-soft">
@@ -470,6 +582,7 @@
              Detalle="@detalleAbierto"
              Cargando="@cargandoDetalle"
              DesdeCache="@detalleDesdeCache"
+             UsaBaseDeDatos="@UsaBaseDeDatos"
              MensajeError="@errorDetalle"
              UrlMercadoPublico="@(Estado?.Empresa is { TieneUrlMercadoPublico: true } e ? e.UrlMercadoPublico : null)"
              OnCerrar="CerrarDetalleAsync" />
@@ -660,6 +773,38 @@
         grupo.First().PublicadoTexto;
 
     private string NombreEmpresa => Estado?.Empresa?.Nombre ?? "…";
+    /// <summary>
+    /// ¿Estamos leyendo de la base de datos en vez de la API?
+    ///
+    /// <para>
+    /// Viene del servidor y se lee de <see cref="Estado"/>, que a su vez viene de
+    /// <c>/api/estado</c>. No se deduce de nada del cliente a propósito: si el
+    /// servidor dice que la fuente es la base, el cliente lo cree, y si el
+    /// cliente lo dedujera por su cuenta habría dos verdades y algún día
+    /// discreparían.
+    /// </para>
+    ///
+    /// <para>
+    /// Antes de que llegue el estado es false. El servidor lo pide al arrancar,
+    /// así que el primer pintado usa la forma de la API y luego se corrige sola.
+    /// Invertirlo daría un parpadeo en el primer arranque, que es peor que
+    /// un instante de la forma "equivocada".
+    /// </para>
+    /// </summary>
+    private bool UsaBaseDeDatos => Estado?.UsaBaseDeDatos == true;
+
+    /// <summary>El nombre del mes que se está mirando, con mayúscula inicial.</summary>
+    /// <remarks>
+    /// Sale del desplegable del servidor, que en el año en curso llega FILTRADO
+    /// hasta el mes de hoy. Solo se usa para la insignia verde, y solo en modo
+    /// base de datos: el título del panel de cero resultados lo trae el servidor
+    /// entero en PeriodoDelMes.
+    /// </remarks>
+    private string NombreMesActual =>
+        Estado?.MesesDisponibles is { Count: > 0 } meses && Mes - 1 < meses.Count
+            ? meses[Mes - 1]
+            : $"{Mes:00}";
+
     private int MinutosRefresco => Estado?.MinutosEntreRefrescos is > 0 ? Estado.MinutosEntreRefrescos : 5;
 
     /// <summary>
@@ -681,6 +826,40 @@
         && Anio == Estado.Anio
         && Mes == Estado.Mes
         && NumeroSemana == Estado.Semana;
+
+    /// <summary>
+    /// ¿Lo que se mira es el MES en que estamos?
+    ///
+    /// <para>
+    /// Es el equivalente de <see cref="EsSemanaActual"/> para el modo base de
+    /// datos, y lo decide el temporizador de refresco: solo programa si se está
+    /// mirando el mes en curso.
+    /// </para>
+    ///
+    /// <para>
+    /// No se compara el número de semana porque en este modo no hay semana. Y no
+    /// se reusa <see cref="EsSemanaActual"/> porque devolvería false siempre —el
+    /// selector no está— y el refresco automático no se programaría nunca. Un
+    /// fallo que no se ve: la pantalla simplemente nunca más se actualiza sola.
+    /// </para>
+    /// </summary>
+    private bool EsMesActual =>
+        Estado is not null
+        && Anio == Estado.Anio
+        && Mes == Estado.Mes;
+
+    /// <summary>
+    /// ¿El filtro apunta a algo distinto de lo que está en pantalla?
+    ///
+    /// En modo base de datos solo hay año y mes, así que se comparan esos dos.
+    /// Sin este matiz, mover el desplegable de mes en modo base de datos daría
+    /// un aviso de "cambio pendiente" con un desplegable de semana que no
+    /// existe, y el usuario no tendría forma de pulsarlo.
+    /// </summary>
+    private bool HayPeriodoPendiente =>
+        UsaBaseDeDatos
+            ? Semana is not null && (Anio != Semana.Anio || Mes != Semana.Mes)
+            : HaySemanaPendiente;
 
     // --- Rótulos del rango ---
 
@@ -704,7 +883,17 @@
     /// </summary>
     private int SemanaMostrada => Semana?.Semana ?? NumeroSemana;
 
-    private string RangoCorto => $"Semana {SemanaMostrada}";
+    /// <summary>
+    /// La insignia verde: "Semana 3" en modo API, el nombre del mes en modo base
+    /// de datos.
+    /// </summary>
+    /// <remarks>
+    /// No dice "Semana 1" en modo base de datos aunque el campo valga 1. Sería
+    /// verdad en el papel —ese es el número que se guarda— y mentira en la
+    /// pantalla, porque no hay ninguna semana detrás de ese rótulo.
+    /// </remarks>
+    private string RangoCorto =>
+        UsaBaseDeDatos ? NombreMesActual : $"Semana {SemanaMostrada}";
 
     /// <summary>
     /// ¿El desplegable apunta a algo distinto de lo que está en pantalla?
@@ -729,15 +918,40 @@
     /// convierte "he cambiado el desplegable y no pasa nada" en un clic.
     /// </summary>
     private string ClaseBotonActualizar =>
-        HaySemanaPendiente ? "boton-actualizar-pendiente" : "";
+        HayPeriodoPendiente ? "boton-actualizar-pendiente" : "";
 
     /// <summary>
     /// Título del aviso. Va en una propiedad y no en el atributo porque Razor no
     /// admite contenido mixto dentro de un atributo de componente: se calcula
     /// aquí y se pinta como <c>Titulo="@Texto"</c>.
     /// </summary>
-    private string TituloSemanaPendiente =>
-        $"Estás viendo {SemanaEnPalabras(Semana!.Anio, Semana.Mes, SemanaMostrada)}";
+    /// <remarks>
+    /// En modo base de datos NO lleva el número de semana. Ahí no hay semana, y
+    /// "Estás viendo la semana 1 en octubre de 2026" señalaría a un período que
+    /// no existe: el selector de semana ni siquiera está en pantalla. Pone solo
+    /// el mes, que es lo que hay.
+    /// </remarks>
+    private string TituloPeriodoPendiente =>
+        UsaBaseDeDatos
+            ? $"Estás viendo {MesEnPalabras(Semana!.Anio, Semana.Mes)}"
+            : $"Estás viendo {SemanaEnPalabras(Semana!.Anio, Semana.Mes, SemanaMostrada)}";
+
+    /// <summary>
+    /// El período ELEGIDO en el desplegable, dicho en palabras.
+    /// </summary>
+    /// <remarks>
+    /// Es el mes en modo base de datos y la semana en modo API, por el mismo
+    /// motivo que el título: hay que nombrar lo que el usuario tiene delante del
+    /// ratón, y en modo base de datos eso es un mes.
+    ///
+    /// Y va aparte del título porque son dos momentos distintos: este es lo que
+    /// se ha elegido y todavía NO está en pantalla, así que no se puede leer de
+    /// la respuesta del servidor. Sale de los desplegables.
+    /// </remarks>
+    private string PeriodoElegidoEnPalabras =>
+        UsaBaseDeDatos
+            ? MesEnPalabras(Anio, Mes)
+            : SemanaEnPalabras(Anio, Mes, NumeroSemana);
 
     /// <summary>
     /// "la semana 4 en febrero de 2026", o "la Semana 4 en Febrero de 2026" con
@@ -763,6 +977,10 @@
     /// </summary>
     private string SemanaEnPalabras(int anio, int mes, int semana, bool capitalizado = false) =>
         FiltrosDeSemana.EnPalabras(anio, mes, semana, Estado?.MesesDisponibles, capitalizado);
+
+    /// <summary>"septiembre de 2026". Va por el mismo camino que la semana.</summary>
+    private string MesEnPalabras(int anio, int mes, bool capitalizado = false) =>
+        FiltrosDeSemana.MesEnPalabras(anio, mes, Estado?.MesesDisponibles, capitalizado);
 
     /// <summary>
 
@@ -1050,6 +1268,12 @@
 
         StateHasChanged();
 
+        // Entra YA con el mes en curso cargado, y en los dos modos. La
+        // decisión de qué pedir la toma CargarAsync de la fuente, así que aquí no
+        // hay nada condicional: en modo API trae la semana en curso y en modo
+        // base de datos el mes en curso entero, que es lo que se mira casi
+        // siempre. La pantalla no espera a que se pulse "Actualizar" en ninguno
+        // de los dos casos.
         await CargarAsync();
         ProgramarRefresco();
     }
@@ -1243,8 +1467,54 @@
             // error visible y el finally baja la capa.
             ArmarVigilante();
 
-            var (resultado, error) = await Api.GetSemanaAsync(
-                Anio, Mes, NumeroSemana, refrescar, espera.Token, enSegundoPlano);
+            // LA FUENTE DECIDE LA UNIDAD. En modo API se pide una semana y se le
+            // pasa el token de cancelación; en modo base de datos se pide un mes
+            // entero y no se le pasa token.
+            //
+            // Y el resultado se guarda en la MISMA variable, Semana, en los dos
+            // casos. No hay dos tipos en pantalla ni dos caminos de pintado: el
+            // modelo es el mismo con la unidad cambiada. Si se guardara aparte,
+            // habría que duplicar el dibujado y cualquier cambio en las tarjetas
+            // tendría que hacerse dos veces, y un día se olvidaría una.
+            SemanaLicitaciones resultado;
+            string? error;
+
+            if (UsaBaseDeDatos)
+            {
+                var (mes, errorMes) = await Api.GetMesAsync(Anio, Mes);
+
+                resultado = mes is null
+                    ? null!
+                    : new SemanaLicitaciones
+                    {
+                        // La semana se pone a 1 porque el selector no está, pero
+                        // los textos que lo usan solo se pintan en modo API. Se
+                        // deja un 1 y no un 0 para que ninguna cuenta dé "semana
+                        // 0" si algún día se usa sin querer.
+                        Semana = 1,
+                        Items = mes.Items,
+                        Total = mes.Total,
+                        Anio = mes.Anio,
+                        Mes = mes.Mes,
+                        Desde = $"{mes.Anio}-{mes.Mes:00}-01",
+                        DiasHabiles = mes.DiasHabiles,
+                        DiasConsultados = mes.DiasConsultados,
+                        DiasPendientes = mes.DiasPendientes,
+                        DiasFallidos = mes.DiasFallidos,
+                        DiasSinRespuesta = mes.DiasSinRespuesta,
+                        PeriodoDelMes = mes.PeriodoDelMes,
+                        DesdeCache = mes.DesdeCache,
+                        Periodo = mes.Periodo,
+                        Consultado = mes.Consultado,
+                    };
+
+                error = errorMes;
+            }
+            else
+            {
+                (resultado, error) = await Api.GetSemanaAsync(
+                    Anio, Mes, NumeroSemana, refrescar, espera.Token, enSegundoPlano);
+            }
 
             // Si la red de seguridad ya bajó esta carga, su respuesta llega
             // tarde. No se escribe nada: la pantalla está en otro estado ahora
@@ -1555,12 +1825,19 @@
         temporizador?.Dispose();
         temporizador = null;
 
-        if (MinutosRefresco <= 0 || !EsSemanaActual) return;
+        if (MinutosRefresco <= 0) return;
+
+        // Solo el PERIODO EN CURSO: en modo API es la semana en curso y en modo
+        // base de datos es el mes. La decisión va dentro de una línea en vez de
+        // duplicar el temporizador, porque con dos copias el día que se tocara
+        // una se habría olvidado la otra y ese fallo no da ningún error: la
+        // pantalla simplemente dejaría de actualizarse sola.
+        if (UsaBaseDeDatos ? !EsMesActual : !EsSemanaActual) return;
 
         // Con un cambio pendiente de traer, no se programa. Es el mismo motivo
         // de arriba escrito como condición: si hay algo sin traer, el refresco
         // no puede traerlo, solo contradecirlo.
-        if (HaySemanaPendiente) return;
+        if (HayPeriodoPendiente) return;
 
         temporizador = new System.Timers.Timer
         {

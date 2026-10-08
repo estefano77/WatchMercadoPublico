@@ -75,6 +75,49 @@ public static class FiltrosDeSemana
     }
 
     /// <summary>
+    /// "septiembre de 2026", o "Septiembre de 2026" con
+    /// <paramref name="capitalizado"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// El equivalente de <see cref="EnPalabras"/> para cuando lo que se está
+    /// mirando es un MES, que es lo que pasa en modo base de datos: ahí no hay
+    /// semana, y decir "la semana 1 en octubre de 2026" señalaría a un período
+    /// que no existe.
+    /// </para>
+    /// <para>
+    /// Sin el número de semana a propósito. El mes ya no se repite dentro del
+    /// año, así que mes y año juntos identifican el período, que es lo que
+    /// <see cref="EnPalabras"/> necesitaba el número para conseguir.
+    /// </para>
+    /// <para>
+    /// Y sin palabras alrededor —"el mes de", "la semana 1 en"— porque esto va
+    /// DENTRO de una frase: "Estás viendo octubre de 2026". Añadir el artículo
+    /// aquí produce "Estás viendo el mes de octubre de 2026", que no es un
+    /// error pero es otra frase.
+    /// </para>
+    /// <para>
+    /// Los nombres de mes vienen de fuera, como argumento, por el mismo motivo
+    /// que en <see cref="EnPalabras"/>: la lista llega filtrada y una tabla
+    /// propia aquí ya salió mal una vez.
+    /// </para>
+    /// </remarks>
+    public static string MesEnPalabras(
+        int anio,
+        int mes,
+        IReadOnlyList<string>? meses,
+        bool capitalizado = false)
+    {
+        var nombre = meses is not null && mes >= 1 && mes <= meses.Count
+            ? meses[mes - 1]
+            : $"mes {mes}";
+
+        if (!capitalizado) nombre = nombre.ToLowerInvariant();
+
+        return $"{nombre} de {anio}";
+    }
+
+    /// <summary>
     /// Cuántos días se CONSULTARON de verdad. Distinto del total de la semana:
     /// si la semana aún no termina, no se han preguntado los días futuros, y
     /// decir "se consultaron 5" cuando se preguntaron 2 es mentir.

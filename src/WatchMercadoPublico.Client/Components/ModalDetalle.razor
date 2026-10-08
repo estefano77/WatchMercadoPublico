@@ -357,10 +357,25 @@
                             </section>
                         }
 
+                        @* El pie dice de dónde salió la ficha. En modo base de
+                           datos no hay "caché" ni "consulta a Mercado Público":
+                           lo que hay es una lectura de SQL Server. Decir
+                           "consultado a Mercado Público" ahí sería quitarle el
+                           mérito a la base de datos, que es justo lo que la
+                           fuente de datos bought. *@
                         <p class="text-center text-[0.7rem] text-muted">
-                            @(DesdeCache
-                                ? "Detalle servido desde la caché del servidor (no gastó consulta)."
-                                : "Detalle consultado a Mercado Público.")
+                            @if (UsaBaseDeDatos)
+                            {
+                                <text>Detalle leído de la base de datos del servidor.</text>
+                            }
+                            else if (DesdeCache)
+                            {
+                                <text>Detalle servido desde la caché del servidor (no gastó consulta).</text>
+                            }
+                            else
+                            {
+                                <text>Detalle consultado a Mercado Público.</text>
+                            }
                         </p>
                     </div>
                 }
@@ -394,6 +409,16 @@
 
     [Parameter] public bool Cargando { get; set; }
     [Parameter] public bool DesdeCache { get; set; }
+
+    /// <summary>
+    /// ¿Viene la ficha de SQL Server en vez de de la API?
+    /// </summary>
+    /// <remarks>
+    /// Lo pasa quien abre el modal, que es quien sabe la fuente. No se deduce
+    /// aquí: un componente que adivina de dónde vienen los datos es un
+    /// componente que un día dice "caché" sobre una lectura a la base.
+    /// </remarks>
+    [Parameter] public bool UsaBaseDeDatos { get; set; }
 
     /// <summary>
     /// Mensaje de error a mostrar. OJO con el nombre: un parámetro de tipo

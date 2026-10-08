@@ -231,6 +231,16 @@ public sealed class SemanaLicitaciones
     public string Periodo { get; set; } = "";
     public DateTimeOffset Consultado { get; set; }
 
+    /// <summary>
+    /// El mes escrito y con año, cuando la búsqueda es por mes.
+    /// </summary>
+    /// <remarks>
+    /// Solo se rellena en modo base de datos. En modo API queda vacía y el
+    /// título del panel de cero resultados usa el texto de la semana, porque no
+    /// hay mes detrás.
+    /// </remarks>
+    public string PeriodoDelMes { get; set; } = "";
+
     /// <summary>¿Se pudo comprobar la semana entera?</summary>
     public bool Completa => DiasFallidos == 0;
 
@@ -245,6 +255,69 @@ public sealed class SemanaLicitaciones
             .OrderBy(g => g.Key);
 }
 
+/// <summary>
+/// Un mes entero de licitaciones, cuando los datos vienen de la base de datos.
+///
+/// <para>
+/// Es la misma forma que <see cref="SemanaLicitaciones"/> con la unidad cambiada,
+/// y no un tipo con otro nombre: la pantalla dibuja las mismas tarjetas en los
+/// dos modos, y si los tipos se parecieran solo un poco acabaría dibujando una
+/// cosa en modo semana y otra en modo mes sin que se note.
+/// </para>
+/// </summary>
+public sealed class MesLicitaciones
+{
+    public List<Licitacion> Items { get; set; } = [];
+
+    public int Total { get; set; }
+
+    public int Anio { get; set; }
+    public int Mes { get; set; }
+
+    /// <summary>Días hábiles del mes que ya han ocurrido.</summary>
+    public int DiasHabiles { get; set; }
+
+    /// <summary>De esos, cuántos se preguntaron DE VERDAD.</summary>
+    public int DiasConsultados { get; set; }
+
+    /// <summary>Días hábiles que todavía no han llegado.</summary>
+    public int DiasPendientes { get; set; }
+
+    /// <summary>De los que ya pasaron, cuántos NO se pudieron comprobar.</summary>
+    public int DiasFallidos { get; set; }
+
+    /// <summary>Los días concretos que fallaron, en ISO.</summary>
+    public List<string> DiasSinRespuesta { get; set; } = [];
+
+    public bool DesdeCache { get; set; }
+
+    public string Periodo { get; set; } = "";
+
+    /// <summary>
+    /// El mes escrito y con año: "el mes de Junio de 2026".
+    /// </summary>
+    /// <remarks>
+    /// Va aparte de <see cref="Periodo"/> porque son dos textos para dos sitios:
+    /// <c>Periodo</c> es el rango del mes entero ("Del 1 al 30 de junio de 2026"),
+    /// que va junto al contador, y este es el nombre del mes, que va en el titulo
+    /// del panel de cero resultados.
+    /// </remarks>
+    public string PeriodoDelMes { get; set; } = "";
+    public DateTimeOffset Consultado { get; set; }
+
+    /// <summary>¿Se pudo comprobar el mes entero?</summary>
+    public bool Completo => DiasFallidos == 0;
+
+    /// <summary>¿El mes todavía no ha terminado?</summary>
+    public bool AFuturo => DiasPendientes > 0;
+
+    /// <summary>Las licitaciones agrupadas por día, para no repetir el día.</summary>
+    public IEnumerable<IGrouping<DateOnly, Licitacion>> PorDia =>
+        Items
+            .Where(l => l.FechaPublicacion is not null)
+            .GroupBy(l => DateOnly.FromDateTime(l.FechaPublicacion!.Value.DateTime))
+            .OrderBy(g => g.Key);
+}
 /// <summary>La empresa vigilada, tal como viene de la configuración del servidor.</summary>
 public sealed class EmpresaInfo
 {
@@ -340,11 +413,66 @@ public sealed class EstadoApi
     /// sin ticket es distinto de sin código de proveedor, y el arreglo es
     /// distinto en cada caso.
     /// </summary>
-    public string? FaltaConfiguracion =>
-        Servible ? null
-        : !TicketConfigurado ? "falta el ticket de Mercado Público"
-        : !EmpresaConfigurada ? "falta el código de proveedor de la empresa"
-        : null;
+    /// <summary>
+    /// De dónde salen los datos: <c>api</c> o <c>sql</c>.
+    ///
+    /// <para>
+    /// Con <c>sql</c> el filtro es por año y mes, no por semana, y el texto del
+    /// overlay cambia. Es lo que hace que la misma pantalla sirva para las dos
+    /// fuentes sin que quede a medias ninguna.
+    /// </para>
+    /// </summary>
+    public string Fuente { get; set; } = "api";
+
+    /// <summary>¿Se leen los datos de la base de datos?</summary>
+    public bool UsaBaseDeDatos => Fuente == "sql";
+
+    /// <summary>
+    /// ¿Se puede leer de la base de verdad, o falta la cadena de conexión?
+    ///
+    /// <para>
+    /// Con fuente "sql" y sin cadena, el aviso tiene que decir ESO y no "faltan
+    /// datos": son dos estados distintos y el usuario solo puede arreglar uno.
+    /// </para>
+    /// </summary>
+    public bool BaseDeDatosUtilizable { get; set; } = true;
+
+    /// <summary>
+    /// Qué falta para poder consultar, o null si no falta nada.
+    ///
+    /// <para>
+    /// El caso de la base de datos va PRIMERO y por un motivo concreto: en modo
+    /// "sql" no hace falta ticket para leer, porque no se pregunta a Mercado
+    /// Público. Si se mirara primero el ticket, con fuente "sql" y sin ticket
+    /// aparecería un aviso pidiendo un ticket que no hace falta para nada, y
+    /// quien lo leyera pensaría que la aplicación está mal configurada.
+    /// </para>
+    /// </summary>
+    public string? FaltaConfiguracion
+    {
+        get
+        {
+            if (UsaBaseDeDatos)
+            {
+                // Sin ticket no pasa nada: aquí no se pregunta a Mercado Público.
+                // Pero el CÓDIGO DE PROVEEDOR sí sigue haciendo falta, porque lo
+                // que hay en la base está etiquetado por empresa y sin él no se
+                // sabe qué parte mirar.
+                if (!BaseDeDatosUtilizable)
+                    return "falta la cadena de conexión a la base de datos " +
+                           "(MercadoPublico__CadenaConexionSql)";
+
+                return EmpresaConfigurada
+                    ? null
+                    : "falta el código de proveedor de la empresa";
+            }
+
+            return Servible ? null
+                : !TicketConfigurado ? "falta el ticket de Mercado Público"
+                : !EmpresaConfigurada ? "falta el código de proveedor de la empresa"
+                : null;
+        }
+    }
 }
 
 /// <summary>Una semana del mes, tal como la calcula el servidor.</summary>
