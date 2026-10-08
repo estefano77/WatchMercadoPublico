@@ -176,7 +176,7 @@ fichero no se publica a propósito.
 dotnet test
 ```
 
-32 tests, **sin red y sin ticket**: no tocan la API, comprueban funciones puras.
+167 pruebas, **sin red y sin ticket**: no tocan la API, comprueban funciones puras.
 Ver [Tests](#tests) para qué hay que leerlos antes de tocar nada.
 
 ---
@@ -1690,11 +1690,11 @@ Iconos de [Lucide](https://lucide.dev) (licencia ISC). Tipografía
 dotnet test
 ```
 
-**134 tests** (91 del servidor, 43 del cliente), todos en verde. **No hay que
-tener ticket, ni red, ni la API en pie.** Eso no es una comodidad: es lo que hace
-posible testear. Un método que hace una petición no se puede comprobar sin
-pedirla, y para la aplicación casi todo lo que se rompió no necesitaba la API para
-estar mal.
+**167 pruebas** (108 del servidor, 59 del cliente), en 115 métodos repartidos en 13
+ficheros, todas en verde. **No hay que tener ticket, ni red, ni la API en pie.**
+Eso no es una comodidad: es lo que hace posible testear. Un método que hace una
+petición no se puede comprobar sin pedirla, y para la aplicación casi todo lo que
+se rompió no necesitaba la API para estar mal.
 
 Por eso `ConstruirUrlDia` y `ConstruirError` están extraídos del cliente como
 funciones estáticas, aunque solo los use un sitio: es el requisito para poder
@@ -1713,8 +1713,13 @@ Todos nacieron de bugs que estuvieron en producción:
 | `TextosDeFechaTests.cs` | Los nombres de día y de mes, y que `DayOfWeek.Sunday` siga siendo 0 |
 | `PeriodosDisponiblesTests.cs` | Que no se ofrezcan meses ni semanas que aún no han ocurrido |
 | `ReintentosDeDetalleTests.cs` | Que el detalle se pida **más de una vez**, que sean menos intentos que los días, que la espera se doble, que tenga tope, y que el peor caso quepa en el reloj de IIS |
+| `FallosDeDiaTests.cs` | Que un día fallido se recuerde, que no se recuerde para siempre, que un éxito lo borre, y que "Actualizar" lo salte |
+| `RitmoDeLlamadasTests.cs` | Que no se hable a la API más rápido de lo que admite, y que el turno se quede tomado hasta que se suelte |
+| `ConsultasEnSerieTests.cs` | Que dos consultas vayan siempre en serie, y que el refresco en segundo plano use menos reintentos |
 | `FiltrosDeSemanaTests.cs` | Que un filtro se detecte como cambiado, y las dos regresiones que cazaron: el día indexado por `DayOfWeek` y la comparación por número de semana |
 | `FormatoTests.cs` | La fecha numérica, la fecha corta, y que `RemoveDiacritics` no exista sin querer |
+| `EstadosDeLicitacionTests.cs` | Que la insignia de adjudicada se elija por el **código** y no por el texto, que es una cadena que el servidor puede cambiar sin que nadie se entere |
+| `CortesPorTiempoTests.cs` | Que una espera cortada por tiempo se convierta **siempre** en un error que la pantalla puede mostrar, y nunca en una excepción que nadie ve |
 
 Los tests de `ReintentosDeDetalleTests` se validaron **reintroduciendo el bug**,
 que es la única forma de saber que un test sirve: con un solo intento fallan 3
@@ -1724,7 +1729,7 @@ pruebas, con la espera fija sin doblar fallan 4, y sin tope de espera falla 1.
 
 **Este apartado lo escribió alguien que después se equivocó, y se conserva a
 propósito.** Entonces el cliente no tenía proyecto de pruebas: todo lo anterior
-vivía en el servidor. Hoy `WatchMercadoPublico.Client.Tests` existe, con 43
+vivía en el servidor. Hoy `WatchMercadoPublico.Client.Tests` existe, con 59
 pruebas. El error es la razón de que el proyecto exista.
 
 Los tres bugs de fechas que hicieron falta arreglar estaban **en el cliente**,
@@ -1752,7 +1757,7 @@ haría falta bUnit.
 Y en ese hueco caen justo los fallos más caros. La red de seguridad de la espera
 y el refresco que se atiende desde el `finally` son estado de componente, así que
 **no hay ninguna prueba que los vigile**: si alguien los borra, compila todo,
-pasa las 160 pruebas y vuelve el congelamiento sin que salte nada. Se dejan
+pasa las 167 pruebas y vuelve el congelamiento sin que salte nada. Se dejan
 documentados en el catálogo de fallos por eso, no porque una prueba los cubra.
 
 **Y hay un agujero conocido en el servidor, del mismo tipo.** `MercadoPublicoCliente`
