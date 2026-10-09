@@ -193,8 +193,27 @@ IF OBJECT_ID(N'dbo.MpConfiguracion', N'U') IS NULL
         CONSTRAINT PK_MpConfiguracion PRIMARY KEY CLUSTERED (Clave)
     );
 
+/* LA RUTA VIENE DE DOS SITIOS, Y ANTES SOLO DE UNO.
+
+   $(RutaDll) es la variable de sqlcmd, la que dice el comentario de cabecera:
+
+       sqlcmd -d WatchMerPub -v RutaDll="C:\...\MercadoPublico.Http.dll" -i ...
+
+   Y no se leia. El unico sitio del que se sacaba la ruta era la tabla
+   MpConfiguracion, de modo que el -v documentado se aceptaba en silencio y se
+   ignoraba: el guion registraba la ruta de por defecto, que en una maquina
+   cualquiera no existe, y el fallo que sale no menciona la ruta en ningun
+   sitio. Pasó al instalar el ensamblado firmado: -v con la ruta correcta,
+   ignorado, y el guion cargo el .dll sin firmar de otra carpeta.
+
+   Ahora manda $(RutaDll) si viene, y MpConfiguracion si no. El orden es el
+   que se espera: lo que se dice en la linea de comandos gana sobre lo que se
+   guardo la ultima vez. */
 DECLARE @rutaConfigurada nvarchar(400) =
-    (SELECT Valor FROM dbo.MpConfiguracion WHERE Clave = 'RutaEnsamblado');
+    CASE WHEN LTRIM(RTRIM(N'$(RutaDll)')) <> N''
+         THEN LTRIM(RTRIM(N'$(RutaDll)'))
+         ELSE (SELECT Valor FROM dbo.MpConfiguracion WHERE Clave = 'RutaEnsamblado')
+    END;
 
 DECLARE @rutaDll nvarchar(400);
 

@@ -43,6 +43,47 @@
     <Nullable>disable</Nullable>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!--
+      ===================================================================
+      FIRMA OBLIGATORIA, Y NO ES COSMETICA
+
+      SQL Server 2017 y posteriores traen 'clr strict security' en 1, y en
+      ese modo solo carga ensamblados FIRMADOS. Sin esto, el procedimiento de
+      importacion no arranca nunca y el error no dice nada util:
+
+          System.IO.FileLoadException: ... 'MercadoPublico.Http, Version=0.0.0.0,
+          Culture=neutral, PublicKeyToken=null' ... HRESULT: 0x8013150A
+
+      Lo que mas engaña es que el PublicKeyToken=null del mensaje ya esta
+      diciendo que no esta firmado, y que el fallo aparece al IMPORTAR, no al
+      compilar: el proyecto se compila bien, se registra bien, y lo que falla
+      es la primera llamada. Sin esta linea el error solo es visible cuando
+      alguien importa de verdad.
+
+      La clave NO se versiona. Es un secreto de la maquina, como el ticket, y
+      el .gitignore la cubre. Si se pierde, hay que generar otra y volver a
+      ejecutar 02-registrar-ensamblado.sql, porque sp_add_trusted_assembly
+      guarda el hash y deja de reconocer el ensamblado.
+
+      Sin Windows SDK no hay sn.exe, asi que la clave se genera con .NET, que es
+      el mismo formato:
+          $rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider 1024
+          [IO.File]::WriteAllBytes('MercadoPublico.Http.snk', $rsa.ExportCspBlob($true))
+
+      Este proyecto NO esta en WatchMercadoPublico.slnx, y no deberia estar: es
+      codigo que corre DENTRO de SQL Server, no una libreria de la aplicacion.
+      Que no entre en la solucion es lo que permite que la clave no versionada
+      no rompa la build de todos los dias ni la de GitHub Actions.
+      ===================================================================
+    -->
+    <SignAssembly>true</SignAssembly>
+    <AssemblyOriginatorKeyFile>$(MSBuildProjectDirectory)\MercadoPublico.Http.snk</AssemblyOriginatorKeyFile>
+    <DelaySign>false</DelaySign>
   </PropertyGroup>
+
+  <Target Name="FaltaLaClaveDeFirma" BeforeTargets="CoreCompile" Condition="!Exists('$(MSBuildProjectDirectory)\MercadoPublico.Http.snk')">
+    <Error Text="Falta MercadoPublico.Http.snk. SQL Server 2017+ no carga ensamblados sin firmar. Generala con RSACryptoServiceProvider(1024).ExportCspBlob(true) y dejala al lado del csproj." />
+  </Target>
 
 </Project>

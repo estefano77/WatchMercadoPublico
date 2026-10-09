@@ -29,6 +29,21 @@ appsettings.Development.json
 appsettings.Local.json
 *.env
 
+# Clave de firma del ensamblado CLR.
+#
+# SQL Server 2017+ solo carga ensamblados firmados, así que la clave es
+# obligatoria para que la importación funcione. Y no se versiona por dos motivos:
+# es la clave con la que se declara la confianza en la base —la que se le pasa a
+# sp_add_trusted_assembly— y porque una clave privada en un repositorio deja de
+# ser privada el mismo día que se hace público.
+#
+# Se genera sola, sin Windows SDK:
+#   $rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider 1024
+#   [IO.File]::WriteAllBytes('sql\clr\MercadoPublico.Http.snk', $rsa.ExportCspBlob($true))
+# y hay que volver a ejecutar 02-registrar-ensamblado.sql después de generarla o
+# regenerarla, porque la base guarda el hash y deja de reconocer el ensamblado.
+*.snk
+
 # Publicación
 #
 # Con el asterisco, no solo "publicacion/". Escribido así solo ignoraba la
