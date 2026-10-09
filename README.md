@@ -441,8 +441,11 @@ base**. En un hosting compartido no se puede registrar un ensamblado: deniegan
 es exacta y conviene no disimularla:
 
 - La capa de lectura **sí** se despliega. `01`, `04` y `05` no mencionan el CLR.
-- La base remota **no se llena sola** y **no se actualiza**. Se queda como
-  estuviera el día de la carga.
+- La base remota **no se llena sola desde el hosting**. Nadie, allí, va a
+  preguntarle nada a Mercado Público. Se queda como estuviera el día de la carga
+  *a menos que* se instale la tarea de Windows que lo hace desde el equipo de
+  desarrollo, más abajo en "Que pase solo: la tarea de Windows". Eso tampoco es
+  el hosting actualizándose: es otro proceso, en otra máquina, moviendo datos.
 
 Lo que sí funciona es llenarla desde fuera, copiando de la base local, que sí
 tiene el importador:
@@ -502,6 +505,79 @@ apuntando a las filas equivocadas. Y con `-q`/**`-I`** ausentes el error dice
 `INSERT failed because the following SET options have incorrect settings`, que
 no menciona índices ni columnas calculadas y hace sospechar del archivo de
 datos, que es inocente.
+
+### Que pase solo: la tarea de Windows
+
+La carga sigue siendo un paso manual **si quieres que lo sea**. Y si prefieres
+que no lo sea, hay una tarea del Programador de tareas que la corre sola:
+
+```powershell
+.\scripts\instalar-tarea.ps1                    # todos los dias a las 06:30, con ingesta
+.\scripts\instalar-tarea.ps1 -SinIngesta         # solo copia, no pregunta a la API
+.\scripts\instalar-tarea.ps1 -Hora 23:00        # a otra hora
+.\scripts\instalar-tarea.ps1 -EjecutarAhora      # la lanza ahora, sin esperar a mañana
+.\scripts\instalar-tarea.ps1 -Quitar             # la desinstala
+```
+
+Cada pasada hace las tres cosas de golpe: preguntar a la API los días que falten
+(`-Ingerir`), borrar el destino y copiar (`-Si`), y comparar los recuentos. La
+tarea es `WatchMerPub-Sincronizar`, y lo que escribe está en
+`%LOCALAPPDATA%\WatchMerPub\sincronizar.log`, **fuera del repositorio** a
+propósito: es un fichero que se rellena solo y un día acabaría en un commit con
+la cadena de conexión dentro.
+
+**La ingesta se hace aquí, y no subiendo `MinutosEntreIngestas`.** Es la decisión
+que más importa de todo esto, y por tres razones:
+
+- **El ticket se queda en esta máquina.** Con la ingesta en el servidor habría que
+  subirlo al hosting, y es una credencial con un tope de 10.000 consultas al día.
+- **La ingesta del servidor solo ocurre mientras alguien tenga la aplicación
+  abierta.** Con `MinutosEntreIngestas = 5`, un domingo por la tarde la base
+  remota seguiría con los datos del viernes. Una tarea de Windows no depende de
+  que haya alguien mirando.
+- **Se puede apagar sin tocar la aplicación**, con `-SinIngesta`.
+
+Lo que sí tiene un precio, y conviene saberlo antes de instalarla: **la copia
+borra las tablas del destino antes de rellenarlas.** Durante esos segundos, quien
+esté mirando la página ve una base vacía. Por eso el defecto es a las 06:30.
+
+Tres cosas que se configureon así a propósito, y que se pueden cambiar:
+
+| Ajuste | Por qué |
+|---|---|
+| `IgnoreNew` | Si una pasada sigue cuando llega la siguiente, no arrancar la nueva. Si no, se encadenan dos copias que se borran el destino mutuamente: no dan error, solo datos a medias. |
+| `StartWhenAvailable` | Si el equipo estaba apagado, que corra al encenderlo. Si no, cada fin de semana apagado pierde el día. |
+| `Interactive` | `sqlcmd -E` es autenticación de Windows y necesita la identidad del usuario. La contrapartida: con la sesión cerrada la tarea no corre, y espera a que se inicie. |
+
+Y lo que NO se hizo, con su razón:
+
+| Lo que NO se hizo | Por qué |
+|---|---|
+| **SQL Server Agent** | La instalación es **Express**, y Express no trae el servicio `SQLSERVERAGENT`. No es que no se pueda configurar: no existe. |
+| **`MinutosEntreIngestas > 0`** | Haría la ingesta en el servidor, que es lo que obliga a llevar el ticket al hosting. Y solo funcionaría con la aplicación abierta. |
+| **Un paso de copia dentro de la aplicación** | El servidor desplegado no tiene el CLR registrado, que es justo lo que no se puede registrar en un hosting compartido. La copia la hace esta máquina, que sí lo tiene. |
+| **`*>>` para el registro** | No funciona. Un fallo al invocar el guion lo escribe el motor **antes** de montar la tubería de salida, así que la redirección no lo ve. Medido: `$salida = & guion.ps1 -NoExiste 2>&1` devuelve `$salida.Count = 0`. |
+
+#### `scripts/tarea-sincronizar.ps1`
+
+Es el envoltorio que ejecuta la tarea, y existe por lo del `*>>`: sin él, un
+fallo de arranque deja el registro en **cero bytes** y la tarea con código 1. Es
+la peor forma de fallar, porque no hay nada que leer. El envoltorio lo captura
+con un `try`/`catch`, escribe cabecera con la hora y pie con el resultado, y
+propaga el código de salida.
+
+Dos cosas de PowerShell que costaron y están medidas, porque las dos fallan en
+silencio:
+
+| Lo que se parece | Lo que hace |
+|---|---|
+| `$a = @('-Ingerir', '-Si'); & guion @a` | Un **array** splateado a un script de PowerShell pasa los elementos **posicionales**: `-Ingerir` y `-Si` se los come `$Origen` y `$OrigenBase`. Lo que se veía era `Sqlcmd: '-S': Missing argument`. Un **hash** splateado va por nombre, que es lo que se quiere. A un ejecutable nativo (`sqlcmd`, `bcp`) el array sí está bien. |
+| `& guion 2>&1` | No ve **nada**. El guion cuenta todo con `Write-Host`, que escribe en el flujo **6**, no en el 1. Con `*>&1` entra todo. |
+
+Y una tercera, que solo se nota si se usa mal: **`$LASTEXITCODE` es pegajoso.**
+Tras un guion que hace `exit 7`, al que sigue sin llamar a `exit`,
+`$LASTEXITCODE` sigue valiendo `7`. Si no se pone a cero antes de la llamada, una
+tarea que acaba bien se reporta como fallida.
 
 ---
 

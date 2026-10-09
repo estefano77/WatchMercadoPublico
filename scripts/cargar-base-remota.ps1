@@ -780,10 +780,10 @@ Titulo 'Hecho'
 
 Info 'La base remota ya tiene lo mismo que la local.'
 Write-Host ''
-Write-Host '  OJO: esto no se actualiza solo.' -ForegroundColor Yellow
+Write-Host '  OJO: esto no se actualiza solo mientras nadie lo ejecute.' -ForegroundColor Yellow
 Write-Host '  La ingesta vive en MpImportarRango, que es CLR, y el hosting no deja' -ForegroundColor Yellow
-Write-Host '  registrar el ensamblado. La base remota se queda como estaba en el' -ForegroundColor Yellow
-Write-Host '  momento de esta carga, y la de local es la que sigue avanzando.' -ForegroundColor Yellow
-Write-Host '  Para tenerla al dia hay que volver a correr este guion.' -ForegroundColor Yellow
+Write-Host '  registrar el ensamblado. Nadie lo hace desde ahi.' -ForegroundColor Yellow
+Write-Host '  Con la tarea de Windows instalada -scripts\instalar-tarea.ps1- si que' -ForegroundColor Yellow
+Write-Host '  pasa todos los dias, pero porque lo corre esta maquina, no el hosting.' -ForegroundColor Yellow
 Write-Host ''
 Info 'Para refrescar: .\scripts\cargar-base-remota.ps1 -Si'

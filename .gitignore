@@ -44,6 +44,20 @@ appsettings.Local.json
 # regenerarla, porque la base guarda el hash y deja de reconocer el ensamblado.
 *.snk
 
+# Registro de la tarea programada.
+#
+# scripts\instalar-tarea.ps1 lo escribe en %LOCALAPPDATA%\WatchMerPub, fuera del
+# repositorio a propósito, que es donde debe estar. *.log es la red por si
+# alguien cambia la ruta, o por si alguien prueba el guion a mano y le pasa un
+# -Registro dentro del repo: es un fichero que se rellena solo y cada línea puede
+# llevar la cadena de conexión del hosting con su contraseña.
+#
+# Es deliberadamente amplio, y por lo que costaron los otros dos casos de aquí:
+# "bin/" sin ancla y "publicacion/" sin asterisco dejaban pasar de todo. Amplio,
+# porque un registro no es fuente, y si alguna vez hay que versionar uno está
+# git add -f.
+*.log
+
 # Publicación
 #
 # Con el asterisco, no solo "publicacion/". Escribido así solo ignoraba la
