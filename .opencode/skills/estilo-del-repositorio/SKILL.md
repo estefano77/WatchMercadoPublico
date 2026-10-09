@@ -141,6 +141,13 @@ el texto. Las secciones que valen la pena tienen un `⚠️` delante cuando es u
 trampa.
 
 Si cambias algo que el README describe (número de tests, una propiedad, un
-nombre de fichero), **actualiza el README en el mismo commit**. Y mira esto:
-ahora mismo hay tres cifras distintas de tests ("32", "134 tests", "160
-pruebas") y el número real es **167**. Conviene arreglarlo.
+nombre de fichero), **actualiza el README en el mismo commit**. Y actualiza
+también **las skills**, que llevan las mismas cifras y se contradicen entre ellas.
+
+> Esto pasó tres veces. Aquí hubo un rato en que el README decía "32", "134
+> tests" y "160 pruebas" en tres sitios, esta skill decía **167** y la de la Blazor
+> decía 224. Todas equivocadas menos una, y la única que se leía bien
+> estaba en la skill que nadie miraba al escribir el README.
+>
+> El número real medido hoy es **224** (147 del servidor + 77 del cliente). Si lo
+> cambias, corrige el README y las dos skills en el mismo commit.
