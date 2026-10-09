@@ -92,7 +92,30 @@ BEGIN
 
     DECLARE @baseUrl   nvarchar(300) =
         N'https://api.mercadopublico.cl/servicios/v1/publico/licitaciones.json';
-    DECLARE @hoy       date = CONVERT(date, SYSUTCDATETIME());
+    /* @hoy ES LA FECHA LOCAL, NO LA UTC. Y hay una razon.
+
+       SYSUTCDATETIME() devuelve la hora de Greenwich, y Chile esta en UTC-3.
+       Entre las 21:00 y las 24:00 la fecha UTC ya es la de MAÑANA, de modo que
+       un @hoy hecho con UTC vale un dia de mas durante tres horas de la noche.
+
+       Con eso pasaban dos cosas, las dos malas:
+
+         - El "un dia que aun no ha llegado no se pregunta" comparaba contra un
+           mañana que no habia llegado, asi que ENTRE LAS 21:00 Y LAS 24:00 se
+           preguntaba por el dia siguiente. La API responde 500 a un dia que no
+           ha ocurrido, y ese 500 se guardaba como dia fallido del futuro. Justo
+           cuando se importa de noche, que es cuando se pensaba hacer.
+
+         - Y al deciding que un dia ya consultado se salta, "hoy" tambien era
+           manana, asi que el dia de HOY se saltaba y sus publicaciones nunca
+           llegaban.
+
+       Las marcas de tiempo de las tablas SI van en UTC, y a proposito: se
+       guardan todas en el mismo reloj y comparar entre ellas es directo. Lo que
+       tiene que ser local es la FECHA, porque "hoy" es una pregunta de la
+       persona que mira la pantalla, no del reloj de Greenwich. La aplicacion
+       tampoco lo duda: usa DateTime.Today, que es local. */
+    DECLARE @hoy       date = CONVERT(date, GETDATE());
     DECLARE @inicio    datetime2(3) = SYSUTCDATETIME();
 
     DECLARE @lineas nvarchar(max) = N'';
@@ -209,14 +232,37 @@ BEGIN
             CONTINUE;
         END
 
-        -- Con @soloFaltantes, un dia que ya tiene licitaciones guardadas no se
-        -- vuelve a preguntar. El gasto de cupo es real, asi que la opcion
-        -- existe; por defecto no se salta nada, porque un dia ya descargado
-        -- puede tener novedades de ese mismo dia.
+        -- Con @soloFaltantes, un dia YA CONSULTADO con exito no se vuelve a
+        -- preguntar. El gasto de cupo es real, asi que la opcion existe; por
+        -- defecto no se salta nada, porque un dia ya descargado puede tener
+        -- novedades de ese mismo dia.
+        --
+        -- MIRA EN MpConsulta Y NO EN MpLicitacion. Antes miraba en MpLicitacion,
+        -- y eso hacia que un dia consultado que habia salido VACIO no contara
+        -- como descargado: se volvia a preguntar en cada ejecucion, para
+        -- siempre. Medido en la base local: de 19 dias consultados con exito,
+        -- 13 tienen licitaciones y 7 estaban vacios, y los 7 se gastaban otra
+        -- vez en cada pasada sin devolver nada nuevo.
+        --
+        -- No se puede mirar "si hay licitaciones" porque "no hay ninguna" y "no
+        -- se ha preguntado" son cosas distintas, y confundirlas es justo el
+        -- fallo que el panel de resultado vacio de la pantalla ya distingue. Un
+        -- dia consultado y vacio es un dia que ya se sabe que esta vacio, y es
+        -- JUSTO el que mas caro sale de volver a preguntar.
+        --
+        -- Y HOY NO SE SALTA, porque un dia en curso todavia puede recibir
+        -- publicaciones. Las de ayer ya no cambian; las de hoy si. Por eso la
+        -- comparacion es estricta, @dia < @hoy.
+        --
+        -- Un dia que salio FALLIDO tampoco se salta, que es lo que quiere decir
+        -- "faltantes": se reintenta en esta pasada y, si vuelve a fallar, en la
+        -- siguiente.
         IF @soloFaltantes = 1
-           AND EXISTS (SELECT 1 FROM dbo.MpLicitacion
+           AND @dia < @hoy
+           AND EXISTS (SELECT 1 FROM dbo.MpConsulta
                        WHERE CodigoProveedor = @codigoProveedor
-                         AND FechaPublicacion = @dia)
+                         AND FechaDia = @dia
+                         AND Exito = 1)
         BEGIN
             SET @diasSaltados = @diasSaltados + 1;
             SET @dia = DATEADD(DAY, 1, @dia);
