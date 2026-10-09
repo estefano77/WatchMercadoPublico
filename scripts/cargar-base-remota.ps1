@@ -117,11 +117,42 @@
     Compara el esquema origen con el destino y no copia nada. Es el control de
     vuelo: si las columnas no casan, mejor enterarse antes de quedarse a medias.
 
+.PARAMETRO Ingerir
+    Trae los datos de Mercado Publico a la base local ANTES de copiar. Sin
+    este interruptor solo se copia lo que ya haya, que es lo que hacia el guion
+    hasta ahora.
+
+    Es lo que consume el ticket, asi que no viene de serie: una descarga sin
+    que nadie la haya pedido es justo lo que MinutosEntreIngestas = 0 evita a
+    proposito.
+
+.PARAMETRO Anio
+    Año del mes a traer, con -Ingerir. Por defecto, el año en curso.
+
+.PARAMETRO Mes
+    Mes a traer, con -Ingerir, del 1 al 12. Por defecto NO se trae el mes en
+    curso, sino los ultimos 30 dias, que es la ventana de la aplicacion.
+
+    Un mes concreto se pide para rellenar un hueco: si te has perdido marzo y
+    quieres ese mes entero, -Anio 2026 -Mes 3. El guion avisa antes de gastar
+    nada si ese mes ya esta entero en la base.
+
+.PARAMETRO SinDetalle
+    No trae la ficha de cada licitacion, solo el listado. Sale mas rapido y
+    gasta menos, pero en la pantalla no habra organismo ni montos, y el boton de
+    "Ver detalle" no tendra nada que enseñar.
+
 .EXAMPLE
     .\scripts\cargar-base-remota.ps1 -SoloComprobar
 
 .EXAMPLE
     .\scripts\cargar-base-remota.ps1 -Si
+
+.EXAMPLE
+    .\scripts\cargar-base-remota.ps1 -Ingerir -Si
+
+.EXAMPLE
+    .\scripts\cargar-base-remota.ps1 -Ingerir -Anio 2026 -Mes 3 -Si
 #>
 
 [CmdletBinding()]
@@ -133,7 +164,22 @@ param(
     [string] $Remoto = '',
     [switch] $SinLimpiar,
     [switch] $Si,
-    [switch] $SoloComprobar
+    [switch] $SoloComprobar,
+
+    # --- Ingesta -------------------------------------------------------------
+    # Que el guion traiga los datos de la API antes de copiarlos. Sin esto solo
+    # copia lo que haya en la base local, que es lo que hacia hasta ahora.
+    [switch] $Ingerir,
+
+    # Que mes traer. Con -Ingestar y sin -Anio/-Mes, se traen los ultimos 30 dias,
+    # que es la ventana que usa la aplicacion. Con un mes concreto se trae ese
+    # mes entero, que es para rellenar un hueco concreto a mano.
+    [int] $Anio = 0,
+    [int] $Mes = 0,
+
+    # Que la ingesta traiga tambien la ficha de cada licitacion, no solo el
+    # listado. Sin esto no se ve el organismo ni los montos en ninguna parte.
+    [switch] $SinDetalle
 )
 
 $ErrorActionPreference = 'Stop'
@@ -266,6 +312,216 @@ function SqlOrigen([string] $sql) {
         & sqlcmd @a
     }
     finally { Remove-Item $fichero -ErrorAction SilentlyContinue }
+}
+
+# --- 2 bis. La ingesta, si se ha pedido ---------------------------------------
+#
+# Va ANTES de comparar los esquemas, y no por orden: va antes de la copia porque
+# la copia se lleva lo que hay, y lo que hay lo decide esto.
+#
+# Dos decisiones que no son obvias:
+#
+# EL RANGO POR DEFECTO SON 30 DIAS, NO EL MES EN CURSO. Es la ventana de la
+# aplicacion (IngestaMercadoPublico.DiasMirandoAtras) y con ella el procedimiento
+# se salta solo los dias ya consultados. Con el mes entero se traeria tambien
+# todo lo anterior al ultimo intento, gastando cupo en dias que ya estan, y el
+# motivo por el que MinutosEntreIngestas vale 0 es precisamente no gastar eso.
+#
+# UN MES CONCRETO SI SE IMPORTA ENTERO, y por el motivo contrario: si el usuario
+# pide marzo es porque le falta marzo, y las partes que ya tuviera no pasan nada.
+#
+# Y el guion avisa ANTES de gastar, en vez de preguntar: con -Si esta pensado
+# para las tareas programadas, que no pueden contestarte nada. Avisa, y si el mes
+# ya esta entero se salta solo, que es lo que evita la pasada mensual de una
+# tarea que correra cada dia.
+
+function LeerTicketLocal {
+    if (-not (Test-Path $configLocal)) { return $null }
+
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    $texto = [System.IO.File]::ReadAllText($configLocal, $utf8)
+    $limpio = ($texto -split "`n" | Where-Object { $_ -notmatch '^\s*//' }) -join "`n"
+
+    try { $config = $limpio | ConvertFrom-Json }
+    catch { return $null }
+
+    if (-not $config.MercadoPublico) { return $null }
+    return $config.MercadoPublico
+}
+
+if ($Ingerir) {
+    Titulo 'Ingesta: trayendo datos de Mercado Publico'
+
+    $local = LeerTicketLocal
+    $ticket = ''
+    $codigo = ''
+
+    if ($local) {
+        $ticket = [string] $local.Ticket
+        $codigo = [string] $local.CodigoProveedor
+    }
+
+    if (-not $ticket -or $ticket.StartsWith('CAMBIAR-ESTE-VALOR')) {
+        Malo 'No hay ticket en appsettings.Development.json, y sin ticket no se puede traer nada.'
+        Malo 'Copia secrets\appsettings.Development.json.ejemplo y ponlo, o quita -Ingerir.'
+        exit 1
+    }
+
+    if (-not $codigo) {
+        Malo 'No hay CodigoProveedor en appsettings.Development.json.'
+        exit 1
+    }
+
+    # EL RANGO. Con un mes concreto, ese mes entero. Sin mes, los ultimos 30
+    # dias, que es la ventana de la aplicacion.
+    #
+    # El motivo de que el defecto NO sea el mes en curso: con el mes entero se
+    # traeria tambien todo lo anterior al ultimo intento, gastando cuota en
+    # dias que ya estan. Y el motivo por el que MinutosEntreIngestas vale 0 es
+    # precisamente no gastar eso sin que nadie lo haya pedido.
+    $hoy = Get-Date
+    $fin = $hoy
+
+    if ($Mes -ne 0) {
+        if ($Anio -eq 0) { $Anio = $hoy.Year }
+        if ($Mes -lt 1 -or $Mes -gt 12) { Malo "El mes $Mes no existe."; exit 1 }
+
+        # A MEDIANOCHE. Get-Date -Day 1 conserva la hora del momento, y el
+        # guion llegaba a imprimir
+        #
+        #     Rango: 04/01/2026 15:59:59 a 04/30/2026 15:59:59
+        #
+        # que parece un fallo. Al procedimiento solo le llega yyyyMMdd, asi que
+        # la hora no cambia el resultado, pero es ruido que hace dudar.
+        $inicio = Get-Date -Year $Anio -Month $Mes -Day 1 -Hour 0 -Minute 0 -Second 0
+
+        # El '- 1' va DENTRO del AddDays. Fuera, restarle un entero a un date
+        # da "Operand type clash: date is incompatible with int", y el mensaje
+        # no menciona ni la aritmetica ni la fecha.
+        $fin = $inicio.AddMonths(1).AddDays(-1)
+        if ($fin -gt $hoy) { $fin = $hoy }
+
+        $desdeTxt = $inicio.ToString('dd/MM/yyyy')
+        $hastaTxt = $fin.ToString('dd/MM/yyyy')
+        Info "Rango: $desdeTxt a $hastaTxt, el mes entero o hasta hoy si no ha terminado"
+    }
+    else {
+        if ($Anio -ne 0) { Malo '-Anio sin -Mes no significa nada. Pon los dos, o ninguno.'; exit 1 }
+        $inicio = $hoy.AddDays(-29)
+        $desdeTxt = $inicio.ToString('dd/MM/yyyy')
+        $hastaTxt = $fin.ToString('dd/MM/yyyy')
+        Info 'Rango: los ultimos 30 dias, la ventana de la aplicacion'
+    }
+
+    $desdeApi = $inicio.ToString('yyyyMMdd')
+    $hastaApi = $fin.ToString('yyyyMMdd')
+
+    # Que el mes pedido este ya entero. No se PREGUNTA, se DICE, porque con -Si
+    # no hay nadie a quien preguntarle.
+    $mesCompleto = $false
+
+    if ($Mes -ne 0) {
+        # DIAS HABILES, y no de calendario. El procedimiento no pregunta los
+        # fines de semana, asi que comparar contra los 30 dias del mes hacia que
+        # este atajo no se activara NUNCA: 22 consultados nunca llegan a 30, y el
+        # guion se ponia a preguntar dias que ya estaban.
+        $diasDelMes = 0
+        for ($d = $inicio.Date; $d -le $fin.Date; $d = $d.AddDays(1)) {
+            if ($d.DayOfWeek -ne 'Saturday' -and $d.DayOfWeek -ne 'Sunday') { $diasDelMes++ }
+        }
+
+        # Los consultados TAMBIEN se filtran por dia habil, porque en MpConsulta
+        # hay dias de fin de semana pointeros de cuando alguien.importo a mano o
+        # de una epoca anterior. Contarlos todos daba "27 dias habiles
+        # consultados de 22", que se contradice a si mismo y hace dudar de si
+        # el atajo funciona.
+        $desdeIso = $inicio.ToString('yyyy-MM-dd')
+        $hastaIso = $fin.ToString('yyyy-MM-dd')
+
+        $sqlCuenta = 'SELECT COUNT(DISTINCT FechaDia) FROM dbo.MpConsulta'
+        $sqlCuenta += " WHERE Exito = 1 AND CodigoProveedor = N'$codigo'"
+        $sqlCuenta += " AND FechaDia >= '$desdeIso' AND FechaDia <= '$hastaIso'"
+        $sqlCuenta += ' AND DATEPART(WEEKDAY, FechaDia) NOT IN (1, 7)'
+
+        $cuenta = @(SqlOrigen $sqlCuenta)[0]
+        $consultados = [int] $cuenta
+
+        if ($consultados -ge $diasDelMes) {
+            $mesCompleto = $true
+            Info "Ese mes ya tiene consultados $consultados de los $diasDelMes dias habiles. No se gasta nada."
+            Info 'Se sigue a la copia con lo que haya.'
+        }
+    }
+
+    if (-not $mesCompleto) {
+        $conDetalle = 1
+        if ($SinDetalle) {
+            $conDetalle = 0
+            Info 'Sin detalle: solo el listado, sin la ficha de cada licitacion.'
+        }
+
+        # @soloFaltantes = 1 para que el procedimiento se salte lo ya consultado.
+        # Es lo que hace la aplicacion, y sin esto la pasada gastaria cuota en
+        # dias que ya estan, que es justo lo que no se quiere en una tarea diaria.
+        #
+        # El ticket va por DECLARACION dentro del script y no en la linea de
+        # comandos. Y se dobla la comilla por si acaso: un ticket es un UUID y
+        # no lleva comillas, pero un token mal pegado no puede romper el script.
+        $ticketSql = $ticket.Replace("'", "''")
+        $codigoSql = $codigo.Replace("'", "''")
+
+        $sql = 'SET NOCOUNT ON;' + "`n"
+        $sql += 'SET QUOTED_IDENTIFIER ON;' + "`n"
+        $sql += "DECLARE @t nvarchar(200) = N'$ticketSql';" + "`n"
+        $sql += "DECLARE @p nvarchar(50)  = N'$codigoSql';" + "`n"
+        $sql += 'DECLARE @r nvarchar(max);' + "`n"
+        $sql += 'EXEC dbo.MpImportarRango' + "`n"
+        $sql += "     @desde = '$desdeApi'," + "`n"
+        $sql += "     @hasta = '$hastaApi'," + "`n"
+        $sql += '     @codigoProveedor = @p,' + "`n"
+        $sql += '     @ticket = @t,' + "`n"
+        $sql += "     @conDetalle = $conDetalle," + "`n"
+        $sql += '     @soloFaltantes = 1,' + "`n"
+        $sql += '     @resultado = @r OUTPUT;' + "`n"
+        $sql += 'SELECT @r;'
+
+        $fichero = Join-Path $env:TEMP ('cbr-ingesta-{0}.sql' -f [guid]::NewGuid().ToString('N'))
+        [System.IO.File]::WriteAllText($fichero, $sql, (New-Object System.Text.UTF8Encoding($false)))
+
+        $salida = @()
+        $codigoSalida = 0
+        try {
+            # -I por el mismo motivo que en SqlOrigen: sin QUOTED_IDENTIFIER ON el
+            # procedimiento falla con el error de los indices filtrados.
+            $a = @('-S', $Origen, '-d', $OrigenBase, '-b', '-W', '-h', '-1', '-f', '65001', '-I', '-i', $fichero)
+            if ($OrigenUsuario) {
+                $a += @('-U', $OrigenUsuario)
+                if ($OrigenPassword) { $env:SQLCMDPASSWORD = $OrigenPassword }
+            }
+            else { $a += '-E' }
+
+            $salida = & sqlcmd @a 2>&1
+            $codigoSalida = $LASTEXITCODE
+        }
+        finally { Remove-Item $fichero -ErrorAction SilentlyContinue }
+
+        if ($codigoSalida -ne 0) {
+            Malo 'La ingesta ha fallado. No se copia: la base local puede quedarse a medias.'
+            $salida | Select-Object -First 6 | ForEach-Object { Malo "   $_" }
+            exit 1
+        }
+
+        $resumen = ($salida | Where-Object { "$_".Trim() -ne '' }) -join "`n"
+        if ($resumen) {
+            Info 'Resultado de la ingesta:'
+            ($resumen -split "`n") | ForEach-Object { Write-Host "      $_" }
+        }
+        else {
+            Info 'La ingesta no devolvio resumen.'
+        }
+    }
+
+    Write-Host ''
 }
 
 # --- 2. Comprobar que se puede entrar, y en las dos bases -------------------

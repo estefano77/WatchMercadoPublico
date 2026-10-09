@@ -452,11 +452,42 @@ tiene el importador:
 .\scripts\cargar-base-remota.ps1 -Si               # borra el destino y copia
 ```
 
-Toma el destino de `CadenaConexionSql` del `appsettings.Development.json` —la
-misma que usa la aplicación para leer—, exporta cada tabla con `bcp` y la importa
+Toma el destino de `CadenaConexionSql` del `appsettings.Development.json` -la
+misma que usa la aplicación para leer-, exporta cada tabla con `bcp` y la importa
 en orden de padre a hijo, porque las claves foráneas lo mandan y `bcp` no las
 tiene en cuenta. Al final compara los recuentos tabla a tabla y avisa si alguno
 no cuadra.
+
+### Traer los datos antes de copiarlos
+
+Sin `-Ingerir` el guion solo copia lo que haya en la base local, que al principio
+eran siempre las mismas 13 licitaciones. Con `-Ingerir` llama antes a
+`MpImportarRango`, que es la ingesta de verdad, y luego copia lo descargado:
+
+```powershell
+.\scripts\cargar-base-remota.ps1 -Ingerir -Si              # ultimos 30 dias
+.\scripts\cargar-base-remota.ps1 -Ingerir -Anio 2026 -Mes 3 -Si   # marzo entero
+```
+
+El defecto son **los últimos 30 días**, no el mes en curso, y es deliberado: con
+el mes entero se preguntaría también todo lo anterior al último intento, gastando
+cuota en días que ya están. Un mes concreto sí se trae entero, porque si se pide
+marzo es porque falta marzo.
+
+`-SinDetalle` no trae la ficha de cada licitación, solo el listado: más rápido y
+más barato, pero en pantalla no habrá organismo ni montos.
+
+Dos cosas del atajo de "ese mes ya está entero":
+
+- Cuenta **días hábiles**, no días de calendario. El procedimiento no pregunta
+  los fines de semana, así que comparar contra los 30 días del mes hacía que el
+  atajo no se activara nunca: 22 consultados nunca llegan a 30.
+- **Avisa, no pregunta.** Con `-Si` no hay nadie a quien preguntarle, que es
+  justo el caso de una tarea programada.
+
+Y `-Ingerir -SoloComprobar` es una combinación útil: trae los datos y **no toca
+el remoto**. Es la forma de rellenar la base local sin que la copia se lleve por
+delante nada.
 
 Tres cosas que costaron, y están medidas:
 
