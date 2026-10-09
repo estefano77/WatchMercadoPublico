@@ -311,24 +311,53 @@ BEGIN
     THROW 50012, 'mp.DiasSinComprobarDelMes: numero de dias incorrecto', 1;
 END
 
-/* 13. El motivo tiene que ser el de verdad, y no se exige si no hay ese caso.
-     Una prueba que pide "octubre de 2026 tuvo un 203" deja de comprobar el día
-     que ese 203 se resuelve, que es justo cuando importaría mirarlo. */
-IF EXISTS (SELECT 1 FROM dbo.MpConsulta c
-           WHERE c.CodigoProveedor = @proveedor
-             AND c.FechaDia BETWEEN '2026-10-01' AND '2026-10-08'
-             AND c.Exito = 0 AND c.CodigoHttp = 203)
+/* 13. El motivo tiene que ser el de verdad, y solo se exige si hay ALGÚN día sin
+     comprobar cuyo último intento fue un rechazo por ticket.
+
+     Esto costó una vuelta de más, y la culpa fue de acortar el WHERE. La
+     primera versión de esta prueba miraba si había algún 203 en el mes, sin más:
+
+         IF EXISTS (SELECT 1 FROM dbo.MpConsulta c
+                    WHERE ... AND c.Exito = 0 AND c.CodigoHttp = 203)
+
+     Con los datos de octubre tal como estaban, el 5, 6 y 7 tienen un 203. Pero en
+     MpConsulta queda el registro de ESE intento aunque después el día se
+     consultara bien. Y en cuanto se importa de verdad, el día 5 pasa a estar
+     comprobado y desaparece de la lista de "no comprobado" —porque ya no hay
+     motivo que enseñar—, mientras su 203 sigue ahí para siempre.
+
+     O sea: la prueba pedía un motivo para un día que ya no sale en la lista, y
+     fallaba justo cuando la base estaba bien. Medido: seis días de
+     octubre consultados, la 13 sale en rojo con "hay días rechazados con 203 y
+     ningún motivo dice que el ticket no valía", siendo que no hay ni un solo día
+     sin comprobar en ese mes.
+
+     La condición correcta es "algún día DE LA LISTA tiene un rechazo por
+     ticket", que es lo que el motivo tiene que explicar. Los 203 de días ya
+     comprobados son historia, no un motivo pendiente. */
+DECLARE @rechazadosPorTicket int = (
+    SELECT COUNT(*) FROM @sinComprobar s
+    WHERE EXISTS (SELECT 1 FROM dbo.MpConsulta c
+                  WHERE c.CodigoProveedor = @proveedor
+                    AND c.FechaDia = s.FechaDia
+                    AND c.Exito = 0
+                    AND c.CodigoHttp = 203
+                    AND c.NumeroIntento = (SELECT MAX(c2.NumeroIntento) FROM dbo.MpConsulta c2
+                                           WHERE c2.CodigoProveedor = c.CodigoProveedor
+                                             AND c2.FechaDia = c.FechaDia)));
+
+IF @rechazadosPorTicket > 0
 BEGIN
     IF EXISTS (SELECT 1 FROM @sinComprobar WHERE Motivo LIKE '%válido%' OR Motivo LIKE '%valido%')
-        PRINT '  [OK] 13. Los días rechazados dicen que el ticket no valía.'
+        PRINT '  [OK] 13. Los días rechazados por ticket dicen que el ticket no valía.';
     ELSE
     BEGIN
-        PRINT '  [MAL] 13. Hay días rechazados con 203 y ningún motivo dice que el ticket no valía.';
+        PRINT '  [MAL] 13. Hay ' + CONVERT(varchar(10), @rechazadosPorTicket) + ' día(s) sin comprobar rechazados por ticket y ningún motivo lo dice.';
         THROW 50013, 'mp.DiasSinComprobarDelMes: sin motivo del rechazo', 1;
     END
 END
 ELSE
-    PRINT '  [??] 13. No hay días rechazados con 203 en octubre. Esta prueba no puede decir nada.'
+    PRINT '  [OK] 13. No queda ningún día sin comprobar rechazado por ticket, y no se anuncia ninguno.'
 
 /* 14. Y los días nunca preguntados, igual que antes: solo se exigen si los hay,
      y además se exige lo contrario cuando el mes está comprobado entero. Un
