@@ -106,9 +106,21 @@ BEGIN
 
     /* Si no se dice qué día es hoy, se toma el del servidor. Y un mes del año
        que no existe no se devuelve callado: se dice, porque un 2026/13 que
-       devuelve vacío es indistinguible de un mes sin nada publicado. */
+       devuelve vacío es indistinguible de un mes sin nada publicado.
+
+       "Hoy" es LA FECHA LOCAL, y no es un detalle. Chile está en UTC-3, así que
+       entre las 21:00 y las 24:00 la fecha UTC ya es la de mañana. Con "@hoy =
+       mañana", esta pantalla contaría como un día de hoy uno que todavía no ha
+       ocurrido, y lo haría por la noche, que es justo cuando se mira. El mismo
+       error estaba en 03-procedimiento-importar.sql, en el otro lado.
+
+       Las marcas de tiempo de las tablas sí van en UTC, y a propósito: se
+       guardan todas en el mismo reloj y comparar entre ellas es directo. Lo que
+       tiene que ser local es la FECHA, porque "hoy" es una pregunta de quien
+       mira la pantalla, no del reloj de Greenwich. La aplicación tampoco lo
+       duda: usa DateTime.Today, que es local. */
     IF @hoy IS NULL
-        SET @hoy = CONVERT(date, SYSUTCDATETIME());
+        SET @hoy = CONVERT(date, GETDATE());
 
     IF @anio IS NULL OR @anio < 1900 OR @anio > 9999
     BEGIN
@@ -185,7 +197,25 @@ BEGIN
        cuenta por día, no por fila: un día con tres intentos y uno bueno está
        comprobado. Y un día que se preguntó y llegó con cero licitaciones SÍ
        está comprobado, porque está en MpConsulta con Exito = 1. Eso no hay que
-       contarlo aparte: ya está en la tabla. */
+       contarlo aparte: ya está en la tabla.
+
+       Y ACOTADO POR @hoy, que antes no lo estaba, y eso hacía que DiasFallidos
+       saliera NEGATIVO. Medido, con julio de 2026 y @hoy = 1 de julio:
+
+           DiasHabiles = 1    DiasConsultados = 6    DiasFallidos = -5
+
+       Seis días consultados y un solo día hábil el 1 de julio, porque el conteo
+       cogía días de todo el mes mientras DiasHabiles solo contaba los que ya
+       habían pasado. Las dos mitades de la resta no miraban el mismo periodo.
+
+       Y un DiasFallidos negativo es peor que un número feo: la pantalla decide
+       si un mes está comprobado entero con "DiasFallidos > 0", así que un -5
+       hace que un mes con 22 días sin mirar se anuncie como comprobado entero.
+       Es exactamente la mentira que mp.DiasSinComprobarDelMes existe para
+       evitar, y llegaba por la puerta de atrás.
+
+       Con el tope puesto, DiasConsultados nunca pasa de DiasHabiles y el -5 se
+       convierte en 0, que es la verdad: el 1 de julio no se comprobó. */
     DECLARE @diasComprobados int =
     (
         SELECT COUNT(DISTINCT c.FechaDia)
@@ -193,6 +223,7 @@ BEGIN
         WHERE c.CodigoProveedor = @codigoProveedor
           AND c.FechaDia >= @primeroDelMes
           AND c.FechaDia <= @finDelMes
+          AND c.FechaDia <= @hoy
           AND c.Exito = 1
     );
 
@@ -266,8 +297,13 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
+    /* Tambien la fecha local, por el mismo motivo que en mp.CuentaDiasDelMes: un
+       "hoy" en UTC vale un dia de mas entre las 21:00 y las 24:00, que es la
+       franja en la que se mira. Y aqui el coste es mayor, porque este
+       procedimiento es el que decide que dias sedice que no se pudieron
+       comprobar. */
     IF @hoy IS NULL
-        SET @hoy = CONVERT(date, SYSUTCDATETIME());
+        SET @hoy = CONVERT(date, GETDATE());
 
     IF @anio IS NULL OR @anio < 1900 OR @anio > 9999
     BEGIN
@@ -376,8 +412,13 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
+    /* Tambien la fecha local, por el mismo motivo que en mp.CuentaDiasDelMes: un
+       "hoy" en UTC vale un dia de mas entre las 21:00 y las 24:00, que es la
+       franja en la que se mira. Y aqui el coste es mayor, porque este
+       procedimiento es el que decide que dias sedice que no se pudieron
+       comprobar. */
     IF @hoy IS NULL
-        SET @hoy = CONVERT(date, SYSUTCDATETIME());
+        SET @hoy = CONVERT(date, GETDATE());
 
     /* El mes entero, como rango. Las consultas de mas abajo filtran por esto y
        no por YEAR(FechaPublicacion) = @anio AND MONTH(FechaPublicacion) = @mes.
