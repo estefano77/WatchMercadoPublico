@@ -932,7 +932,7 @@ public partial class Home : ComponentBase
             // modelo es el mismo con la unidad cambiada. Si se guardara aparte,
             // habría que duplicar el dibujado y cualquier cambio en las tarjetas
             // tendría que hacerse dos veces, y un día se olvidaría una.
-            // Nullable a propósito, y es lo que quita el null! de más abajo y el
+            // Admite nulos a propósito, y es lo que quita el null! de más abajo y el
             // aviso del compilador. Las dos ramas pueden no devolver nada, y el
             // código que sigue ya lo comprueba con "if (resultado is null)". Declarar
             // esto como no nulable obligaba a mentir por los dos lados: aquí con un
