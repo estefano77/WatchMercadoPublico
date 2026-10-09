@@ -78,11 +78,40 @@ Un solo test cambia el estado global del proceso, la cultura
 El flujo de GitHub Actions (`.github/workflows/master_watchmerpub.yml`):
 
 1. `dotnet build --configuration Release` sobre la solución.
-2. `dotnet publish -c Release -o ...`
-3. Despliega en Azure Web App `watchmerpub`, slot `Production`.
+2. `dotnet publish src/WatchMercadoPublico.Server/...csproj -c Release -o ./publish`.
+3. Sube `./publish` como artefacto y lo despliega en Azure Web App `watchmerpub`,
+   slot `Production`.
 
 El workflow **compila los proyectos de test pero no ejecuta `dotnet test`**. Si
 tocas la API, los tests hay que pasarlos en local.
+
+### El `publish` va de un csproj, NO de la solución. Y no es lo mismo
+
+Medido ejecutando los dos comandos en local y comparando las salidas:
+
+| | Ficheros que se despliegan |
+|---|---|
+| `dotnet publish -c Release -o X` (solución) | **272** |
+| `dotnet publish <csproj del servidor> -c Release -o ./publish` | **106** |
+
+Lo que se lleva por delante son 166 ficheros que **nunca debieron subir al
+hosting**: los `.dll`/`.deps.json`/`.pdb` de los dos proyectos de test, `xunit.*`,
+`testhost.exe`, `Mono.Cecil.*`, y la carga de cobertura de código con los binarios
+nativos de instrumentación de **diez** plataformas (`alpine`, `arm64`, `macos`,
+`ubuntu`, `x64`, `x86`...) más sus `.resources.dll` en quince idiomas.
+
+**No lo "simplifiques" de vuelta a la solución pensando que es equivalente.**
+Todo lo de la salida nueva está también en la vieja: no falta nada, y la web
+publicada es idéntica.
+
+Y no perder el cliente Blazor no está en juego por publicar un csproj: el target
+`SuperponerClienteBlazor` se sigue disparando, porque con `-o` informado llega
+`PublishDir`. Comprobado: el `importmap` del `index.html` publicado tiene
+contenido y apunta a `_framework/blazor.webassembly.<huella>.js`.
+
+> Al verificar esto, `blazor.webassembly` **no aparece** pelado en `_framework`,
+> sino con huella. La lista de comprobación de más abajo habla del formato de
+> desarrollo; en publicación los nombres llevan hash. No es que falte el fichero.
 
 ### No toques el target `SuperponerClienteBlazor`
 
