@@ -433,6 +433,45 @@ descarga entero: una cadena ahí quedaría a la vista de cualquiera que abra las
 herramientas del navegador. Por eso la conexión se abre en el servidor, aunque el
 interruptor se toque desde la configuración.
 
+### Llevar los datos a un hosting donde no se puede instalar el CLR
+
+La ingesta de la base es `MpImportarRango`, que es **CLR y va dentro de la
+base**. En un hosting compartido no se puede registrar un ensamblado: deniegan
+`sp_configure`, `sp_add_trusted_assembly` y `CREATE ASSEMBLY`. La consecuencia
+es exacta y conviene no disimularla:
+
+- La capa de lectura **sí** se despliega. `01`, `04` y `05` no mencionan el CLR.
+- La base remota **no se llena sola** y **no se actualiza**. Se queda como
+  estuviera el día de la carga.
+
+Lo que sí funciona es llenarla desde fuera, copiando de la base local, que sí
+tiene el importador:
+
+```powershell
+.\scripts\cargar-base-remota.ps1 -SoloComprobar   # compara esquemas y no toca nada
+.\scripts\cargar-base-remota.ps1 -Si               # borra el destino y copia
+```
+
+Toma el destino de `CadenaConexionSql` del `appsettings.Development.json` —la
+misma que usa la aplicación para leer—, exporta cada tabla con `bcp` y la importa
+en orden de padre a hijo, porque las claves foráneas lo mandan y `bcp` no las
+tiene en cuenta. Al final compara los recuentos tabla a tabla y avisa si alguno
+no cuadra.
+
+Tres cosas que costaron, y están medidas:
+
+| Interruptor | Qué es, porque no es lo que parece |
+|---|---|
+| `bcp -E` | **Conservar los identity**, no la conexión de confianza. Eso es `-T`. En `sqlcmd` es al revés, y `bcp` no lee la contraseña de `SQLCMDPASSWORD`: se la pide por consola, una vez por tabla. |
+| `bcp -q` | Pone `QUOTED_IDENTIFIER ON`. Sin él **toda** la carga falla, porque seis índices son filtrados y `MpLicitacionItem.Subtotal` es una columna calculada. En `sqlcmd` lo pone `-I`, y hace falta también: el `DELETE` falla igual. |
+| `-C 65001` | UTF-8 en los dos lados. Sin él los acentos se guardan con doble codificación, y se ven mal sin que ningún error lo delate. |
+
+El `-E` importa: sin él cada tabla recibe IDs nuevos y las claves foráneas quedan
+apuntando a las filas equivocadas. Y con `-q`/**`-I`** ausentes el error dice
+`INSERT failed because the following SET options have incorrect settings`, que
+no menciona índices ni columnas calculadas y hace sospechar del archivo de
+datos, que es inocente.
+
 ---
 
 ## Cómo se consulta la API
