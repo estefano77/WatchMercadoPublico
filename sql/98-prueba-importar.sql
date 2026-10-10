@@ -159,6 +159,107 @@ BEGIN CATCH
     END
 END CATCH
 
+-- 2.5 Ventana de sondeo negativa.
+BEGIN TRY
+    EXEC dbo.MpImportarRango @desde = '2026-10-01', @hasta = '2026-10-02',
+                             @codigoProveedor = '71284', @ticket = 'x',
+                             @diasSondeo = -1,
+                             @resultado = @resultado OUTPUT;
+    PRINT 'FALLO 2.5 acepto una ventana de sondeo negativa.';
+    SET @fallosValidacion = @fallosValidacion + 1;
+END TRY
+BEGIN CATCH
+    IF ERROR_MESSAGE() LIKE '%diasSondeo%'
+        PRINT 'OK    2.5  ventana de sondeo negativa rechazada.';
+    ELSE
+    BEGIN
+        PRINT 'FALLO 2.5 fallo por otra cosa: ' + ERROR_MESSAGE();
+        SET @fallosValidacion = @fallosValidacion + 1;
+    END
+END CATCH
+
+-- 2.6 Ventana de sondeo enorme.
+--
+-- El 30 es el tope porque el rango entero ya se limita a 400 dias: una ventana
+-- mayor que eso no distinguiria nada, seria "vuelve a preguntar todo". Por eso
+-- 31 tiene que rechazarse y no aceptarse como un numero sin sentido.
+BEGIN TRY
+    EXEC dbo.MpImportarRango @desde = '2026-10-01', @hasta = '2026-10-02',
+                             @codigoProveedor = '71284', @ticket = 'x',
+                             @diasSondeo = 31,
+                             @resultado = @resultado OUTPUT;
+    PRINT 'FALLO 2.6 acepto una ventana de sondeo de 31 dias.';
+    SET @fallosValidacion = @fallosValidacion + 1;
+END TRY
+BEGIN CATCH
+    IF ERROR_MESSAGE() LIKE '%diasSondeo%'
+        PRINT 'OK    2.6  ventana de sondeo de mas de 30 dias rechazada.';
+    ELSE
+    BEGIN
+        PRINT 'FALLO 2.6 fallo por otra cosa: ' + ERROR_MESSAGE();
+        SET @fallosValidacion = @fallosValidacion + 1;
+    END
+END CATCH
+
+-- 2.7 El parametro EXISTE y se llama exactamente asi.
+--
+-- Esto parece tonto, y no lo es. La regla de saltar dias ya descargados cambio
+-- de "@dia < @hoy" a "@dia < @desdeSondeo", que depende de un parametro. Si un
+-- dia se estropiase el nombre al desplegar, el procedimiento seguiria
+-- COMPILANDO -porque el valor por defecto lo taparia- y no volveria a preguntar
+-- ayer ni anteayer, que es justo lo que se quiere arreglar. Y no habria ningun
+-- error: solo datos que faltan sin decir nada.
+--
+-- OJO CON EL NOMBRE: en sys.parameters el nombre lleva la @ delante
+-- (@diasSondeo), al reves que en sys.columns, donde no la lleva. Buscar
+-- 'diasSondeo' sin la arroba no encuentra nada y el EXISTS sale falso.
+DECLARE @haySondeo bit = CASE WHEN EXISTS (
+    SELECT 1 FROM sys.parameters
+    WHERE object_id = OBJECT_ID(N'dbo.MpImportarRango')
+      AND name = N'@diasSondeo')
+    THEN 1 ELSE 0 END;
+
+IF @haySondeo = 1
+    PRINT 'OK    2.7  el procedimiento tiene el parametro @diasSondeo.'
+ELSE
+BEGIN
+    PRINT 'FALLO 2.7 el procedimiento NO tiene @diasSondeo.';
+    SET @fallosValidacion = @fallosValidacion + 1;
+END
+
+-- 2.8 Y ADEMAS TIENE QUE VALER 3 CUANDO NO SE LE PASA.
+--
+-- El primer intento de esta comprobacion fue mirar el valor por defecto en el
+-- catalogo, y no se puede: en esta instancia (SQL Server 16.0.1190.2)
+-- sys.parameters.has_default_value viene a 0 en TODOS los parametros, tambien
+-- en los que llevan = 1 en el CREATE. No es que falte el valor; es que la
+-- columna no se rellena para procedimientos. Asi que se comprueba LLAMANDO, que
+-- ademas es lo que de verdad importa: que alguien que ejecute el EXEC a mano,
+-- como el que imprime 02-registrar-ensamblado.sql, se lleve la ventana de tres
+-- y no la de antes.
+--
+-- El rango es un sabado a proposito, el 3 de octubre de 2026: los fines de
+-- semana se saltan antes de preguntar nada, asi que esta llamada NO gasta ni una
+-- peticion de la API y se puede ejecutar en cualquier momento.
+BEGIN TRY
+    EXEC dbo.MpImportarRango @desde = '2026-10-03', @hasta = '2026-10-03',
+                             @codigoProveedor = '71284', @ticket = 'x',
+                             @resultado = @resultado OUTPUT;
+
+    IF @resultado LIKE '%Ventana de sondeo en dias : 3%'
+        PRINT 'OK    2.8  sin pasarle el parametro, la ventana por defecto es 3.'
+    ELSE
+    BEGIN
+        PRINT 'FALLO 2.8 sin pasarle el parametro la ventana NO vale 3. El resumen fue:';
+        PRINT @resultado;
+        SET @fallosValidacion = @fallosValidacion + 1;
+    END
+END TRY
+BEGIN CATCH
+    PRINT 'FALLO 2.8 fallo por otra cosa: ' + ERROR_MESSAGE();
+    SET @fallosValidacion = @fallosValidacion + 1;
+END CATCH
+
 
 /* ---------------------------------------------------------------------------
    3. El camino de error de verdad, contra la API

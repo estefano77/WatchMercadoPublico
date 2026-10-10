@@ -121,6 +121,46 @@ datos, que es inocente.
 Y `sqlcmd -f 65001` en todo lo que se ejecuta con `-i`: sin él lee el fichero con
 la página de códigos del sistema.
 
+### `sqlcmd` recorta a 256 caracteres, y `-y 0` no se puede con `-W` ni con `-h`
+
+Cuando lo que se pide es **un solo valor `nvarchar` con saltos de línea dentro**
+—el resumen de un procedimiento, un JSON, un error largo— `sqlcmd` recorta la
+columna a **256 caracteres** y no dice nada.
+
+Lo grave no es que falte texto: es **cómo** falta. Se ve el resumen entero hasta
+"Detalles guardados" y luego una línea cortada que pone `Deta`, que parece un
+resumen que se acaba ahí. El que lo lea no sospecha que falta nada.
+
+```
+'saltados por ya descargados: 18
+ 'Ventana de sondeo en dias : 3
+ 'Deta                              <- el resumen acaba aqui, pero no acaba
+```
+
+Medido en este repo: el resumen de `MpImportarRango` son **271** caracteres, ya
+con las etiquetas más cortas que se le han ocurrido. El anterior eran **241**, y
+cabía de milagro por dos caracteres de margen. En cuanto se le añadió una línea
+dejó de caber y nadie se dio cuenta, porque el corte cae justo donde empieza la
+línea siguiente: no parece un recorte, parece que el resumen se termina ahí.
+
+Y acortar las etiquetas **no lo arregla**: 271 sigue pasando de 256. La única
+cura es `-y 0`.
+
+`-y 0` **es excluyente con las dos cosas que se le pongan por costumbre**:
+
+```
+The -W and the -y/-Y options are mutually exclusive.
+The -h and the -y 0 options are mutually exclusive.
+```
+
+O sea: con `-y 0` no van ni `-W` ni `-h -1`. Quitarlos no cuesta nada aquí. Y
+tranquilo: medido, **`sqlcmd` con `-y 0` y sin `-h` no imprime cabecera** para un
+`SELECT @variable`, así que lo que sale son exactamente las líneas del resumen.
+
+**La regla que sale de esto:** si lo que vuelve de `sqlcmd` es un texto largo, no
+confíes en que llegue entero. Y si lo que se imprime tiene que caber en un
+registro, mira que ninguna línea se corte por la mitad.
+
 **El orden lo manda la clave foránea, no el que se te ocurra.** `bcp` no las
 tiene en cuenta: el padre antes que el hijo al cargar, y **al revés al borrar**,
 que si no `MpLicitacionItem` deja filas apuntando a un `MpLicitacionDetalle` que

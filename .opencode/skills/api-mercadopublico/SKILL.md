@@ -121,6 +121,51 @@ La API responde `500` a un día que no existe. No es una optimización: consulta
 un sábado cuesta reintentos, y contarlo como fallido sería mentira. Los días
 futuros son lo mismo pero sin motivo de red.
 
+**El `500` del fin de semana está medido, no supuesto.** El 10 de octubre de 2026,
+con ticket y proveedor reales:
+
+```
+fecha=20261003  (sábado)  -> HTTP 500
+fecha=20240608  (sábado)  -> HTTP 500
+```
+
+No es un `200` con la lista vacía: es un error del servidor. Por eso la
+consecuencia tiene que estar escrita en el resumen, porque es la pregunta que
+siempre sale: **si hoy es sábado o domingo, hoy no se pregunta y la web no
+mostrará nada de hoy.** No es un fallo, es que no hay forma de preguntar. Los
+días laborables siguientes lo cubren igual, porque el rango sigue siendo de 30
+días.
+
+## 8. Un día cambia mientras dura, y se pregunta por la mañana
+
+**Este es el fallo más caro de los cinco, porque no se ve.**
+
+La regla que parecía obvia —"las publicaciones de ayer ya no cambian, las de hoy
+sí"— está al revés. Un día no cambia cuando se termina: cambia mientras dura, y
+este proyecto mira el rango **a las 06:30**.
+
+```
+10 de octubre, 06:30   se pregunta el 9.  Sale vacio.  El 9 queda descargado.
+10 de octubre, 15:00   se publica una licitacion con FechaPublicacion = 9 de oct.
+11 de octubre, 06:30   el 9 ya no se vuelve a mirar: "ayer ya no cambia".
+                        La licitacion se pierde PARA SIEMPRE.
+```
+
+El síntoma en la base es indistinguible del caso bueno: el día aparece
+descargado, con `Exito = 1` y **cero** licitaciones, que es exactamente lo que
+un día de verdad sin publicaciones también parece. No queda ninguna fila que
+diga "esto se publicó y no lo vimos".
+
+**La regla buena es una ventana, no una frontera:** se vuelven a preguntar los
+últimos N días aunque ya estén descargados. En este repo son tres
+(`@diasSondeo` en `MpImportarRango`), o sea hoy, ayer y anteayer, y son tres
+llamadas al día sobre un cupo de 10.000.
+
+No se puede demostrar a posteriori con los datos guardados: cualquier reimport
+manual refresca `UltimaVezVista` y el rastro se pierde. La argumentación se
+sostiene sola —"el día de hoy puede cambiar hasta que acaba" no puede ser verdad
+sólo para hoy—, pero lo que la sostiene de verdad es el coste: tres llamadas.
+
 ## Detalles del formato que ya están resueltos
 
 Están en `Leer`, `LeerRuta` y `LeerItems` del cliente. **No los reimplementes**:

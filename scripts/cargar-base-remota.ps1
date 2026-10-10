@@ -179,7 +179,16 @@ param(
 
     # Que la ingesta traiga tambien la ficha de cada licitacion, no solo el
     # listado. Sin esto no se ve el organismo ni los montos en ninguna parte.
-    [switch] $SinDetalle
+    [switch] $SinDetalle,
+
+    # Cuantos dias hacia atras se vuelven a preguntar aunque ya esten
+    # descargados. El motivo esta en MpImportarRango: el guion mira el rango por
+    # la manana, y lo que se publico ayer por la tarde llego despues de que ayer
+    # ya estuviera marcado como descargado. Con 3 son hoy, ayer y anteayer, que es
+    # lo que hace falta para que el listado de ayer este completo cuando se
+    # mire manana. Con 0 se vuelve al comportamiento de antes, que solo
+    # repreguntaba hoy.
+    [int] $DiasSondeo = 3
 )
 
 $ErrorActionPreference = 'Stop'
@@ -372,6 +381,16 @@ if ($Ingerir) {
         exit 1
     }
 
+    # Esto se comprueba aqui y no solo en el procedimiento. El procedimiento
+    # tambien lo rechaza, pero si el valor llega desde el guion es mucho mas
+    # facil de ver de donde sale, y no hace falta gastar una conexion para
+    # enterarse de que el numero estaba mal.
+    if ($DiasSondeo -lt 0 -or $DiasSondeo -gt 30) {
+        Malo "-DiasSondeo tiene que estar entre 0 y 30. Vale $DiasSondeo."
+        Malo 'Con 0 se vuelve al comportamiento de antes: solo se vuelve a preguntar el dia de hoy.'
+        exit 1
+    }
+
     # EL RANGO. Con un mes concreto, ese mes entero. Sin mes, los ultimos 30
     # dias, que es la ventana de la aplicacion.
     #
@@ -464,6 +483,11 @@ if ($Ingerir) {
         # Es lo que hace la aplicacion, y sin esto la pasada gastaria cuota en
         # dias que ya estan, que es justo lo que no se quiere en una tarea diaria.
         #
+        # Y @diasSondeo es la excepciones que hace falta: dentro de la ventana no
+        # se salta nada, porque un dia ya descargado por la manana puede haber
+        # recibido publicaciones por la tarde. Con el 3 por defecto se vuelven a
+        # preguntar hoy, ayer y anteayer, que son tres peticiones al dia.
+        #
         # El ticket va por DECLARACION dentro del script y no en la linea de
         # comandos. Y se dobla la comilla por si acaso: un ticket es un UUID y
         # no lleva comillas, pero un token mal pegado no puede romper el script.
@@ -482,6 +506,7 @@ if ($Ingerir) {
         $sql += '     @ticket = @t,' + "`n"
         $sql += "     @conDetalle = $conDetalle," + "`n"
         $sql += '     @soloFaltantes = 1,' + "`n"
+        $sql += "     @diasSondeo = $DiasSondeo," + "`n"
         $sql += '     @resultado = @r OUTPUT;' + "`n"
         $sql += 'SELECT @r;'
 
@@ -493,7 +518,24 @@ if ($Ingerir) {
         try {
             # -I por el mismo motivo que en SqlOrigen: sin QUOTED_IDENTIFIER ON el
             # procedimiento falla con el error de los indices filtrados.
-            $a = @('-S', $Origen, '-d', $OrigenBase, '-b', '-W', '-h', '-1', '-f', '65001', '-I', '-i', $fichero)
+            #
+            # -y 0 es porque el resultado de la ingesta es UN valor nvarchar con
+            # saltos de linea dentro, y sqlcmd recorta las columnas de longitud
+            # variable a 256 caracteres si no se le dice que no. El resumen son
+            # 271, asi que sin esto se leia entero hasta "Ventana de sondeo" y
+            # luego una linea cortada que decia "Deta", que parece un resumen
+            # que se acaba ahi en vez de texto perdido.
+            #
+            # Y -y 0 es EXCLUYENTE con las dos cosas que llevaba esta llamada:
+            #
+            #     The -W and the -y/-Y options are mutually exclusive.
+            #     The -h and the -y 0 options are mutually exclusive.
+            #
+            # asi que aqui no van ni -W ni -h -1. Sin -W solo se pierden los
+            # espacios de relleno. Y sin -h: medido, sqlcmd con -y 0 y sin -h NO
+            # imprime cabecera para este SELECT, asi que lo que sale por pantalla
+            # son exactamente las lineas del resumen, ni una mas.
+            $a = @('-S', $Origen, '-d', $OrigenBase, '-b', '-y', '0', '-f', '65001', '-I', '-i', $fichero)
             if ($OrigenUsuario) {
                 $a += @('-U', $OrigenUsuario)
                 if ($OrigenPassword) { $env:SQLCMDPASSWORD = $OrigenPassword }

@@ -480,6 +480,30 @@ marzo es porque falta marzo.
 `-SinDetalle` no trae la ficha de cada licitación, solo el listado: más rápido y
 más barato, pero en pantalla no habrá organismo ni montos.
 
+**Y un día ya descargado se vuelve a preguntar si está en la ventana de sondeo.**
+Con el guion mirando el rango por la mañana, lo que se publica ayer por la
+tarde llega después de que ayer ya estuviera marcado como descargado, y si no se
+vuelve a mirar se pierde sin que nada lo note: el día aparece descargado y con
+cero licitaciones, que es justo lo que un día de verdad sin publicaciones parece.
+
+```powershell
+.\scripts\cargar-base-remota.ps1 -Ingerir -Si                    # ultimos 30 dias, ventana de 3
+.\scripts\cargar-base-remota.ps1 -Ingerir -Si -DiasSondeo 0     # el comportamiento de antes
+```
+
+`-DiasSondeo` son los días hacia atrás que se vuelven a preguntar aunque ya
+estén descargados: con el 3 por defecto son **hoy, ayer y anteayer**. Son tres
+llamadas al día más, sobre un cupo de 10.000. Con `0` se vuelve a preguntar solo
+el día de hoy, que es como estaba antes.
+
+Un día del que no se puede decir nada es el **fin de semana**, y no es una
+decisión de gusto ni un ahorro: medido el 10 de octubre de 2026, la API contesta
+**HTTP 500** a un sábado, no un 200 con cero resultados. Así que si hoy es sábado
+o domingo, hoy no se pregunta y la web no mostrará nada de hoy. Los días
+laborables siguientes lo cubren igual, porque el rango son los últimos 30 días y
+ese día sigue dentro. El resumen de la ingesta lo dice en voz alta:
+`Saltados por fin de semana`.
+
 Dos cosas del atajo de "ese mes ya está entero":
 
 - Cuenta **días hábiles**, no días de calendario. El procedimiento no pregunta

@@ -78,10 +78,11 @@ public sealed class IngestaMercadoPublico
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Solo días LABORABLES hasta hoy. Un sábado no tiene licitaciones que traer
-    /// y preguntarlo es gastar una llamada para obtener un 200 con cero
-    /// resultados. Y hasta HOY, no hasta el fin de mes: el 31 de diciembre
-    /// todavía no pasó.
+    /// Solo días LABORABLES hasta hoy. Un sábado no tiene licitaciones que traer y
+    /// preguntarlo es gastar la llamada en un error: medido el 10 de octubre de
+    /// 2026 contra la API de verdad, la consulta de un sábado devuelve HTTP 500,
+    /// no un 200 con cero resultados. Y hasta HOY, no hasta el fin de mes: el 31
+    /// de diciembre todavía no pasó.
     /// </para>
     ///
     /// <para>
@@ -89,6 +90,18 @@ public sealed class IngestaMercadoPublico
     /// que ya tiene al menos un intento exitoso no se vuelve a preguntar. Sin
     /// eso, cada pasada del temporizador reintentaría los días que fallaron y,
     /// con un ticket caducado, serían seis reintentos por día y por pasada.
+    /// </para>
+    ///
+    /// <para>
+    /// Y <c>@diasSondeo</c> es la excepción que hace falta, porque esa regla se
+    /// come algo: un día descargado por la mañana puede recibir publicaciones por
+    /// la tarde, y si no se vuelve a mirar, se pierden para siempre sin que nada
+    /// lo note. El detalle está en <c>03-procedimiento-importar.sql</c>; aquí lo
+    /// que importa es el precio, que es de <c>DiasSondeo</c> llamadas más en
+    /// CADA pasada. Con el temporizador a cinco minutos y una ventana de tres son
+    /// unas 860 llamadas al día, dentro del cupo de 10.000 pero ya se nota. Por
+    /// eso la vía normal es la tarea programada, que corre una vez al día y no
+    /// repite cada cinco minutos.
     /// </para>
     /// </remarks>
     public async Task<string> IngerirAsync(CancellationToken ct)
@@ -117,8 +130,11 @@ public sealed class IngestaMercadoPublico
             comando.Parameters.Add("@ticket", SqlDbType.NVarChar, 200).Value = Opciones.Ticket;
             comando.Parameters.Add("@conDetalle", SqlDbType.Bit).Value = true;
 
-            // Los días que ya dieron algo, no se vuelven a preguntar.
+            // Los días que ya dieron algo, no se vuelven a preguntar... salvo los
+            // últimos DiasSondeo días, que sí, porque a esas alturas el día puede
+            // haber cambiado desde que se preguntó.
             comando.Parameters.Add("@soloFaltantes", SqlDbType.Bit).Value = true;
+            comando.Parameters.Add("@diasSondeo", SqlDbType.Int).Value = DiasSondeo;
 
             comando.Parameters.Add("@modoRegistro", SqlDbType.VarChar, 10).Value = Opciones.ModoConsulta;
             comando.Parameters.Add("@resultado", SqlDbType.NVarChar, -1).Value = null;
@@ -149,4 +165,20 @@ public sealed class IngestaMercadoPublico
     /// olvido.
     /// </remarks>
     private const int DiasMirandoAtras = 30;
+
+    /// <summary>
+    /// Cuántos días se vuelven a preguntar aunque ya estén descargados.
+    /// </summary>
+    /// <remarks>
+    /// Tres: hoy, ayer y anteayer. Es el mínimo que hace falta para que el listado
+    /// de ayer esté completo cuando se mire mañana, porque este proceso pregunta
+    /// por la mañana y las publicaciones de la tarde le llegan después.
+    ///
+    /// El coste son tres llamadas extra en cada pasada, y por eso el valor está
+    /// aquí y no escondido en el procedimiento: quien ponga
+    /// <c>MinutosEntreIngestas</c> a cinco minutos tiene que saber que está
+    /// pidiendo casi 900 llamadas al día. La tarea programada evita del todo este
+    /// multiplicador, porque corre una vez.
+    /// </remarks>
+    private const int DiasSondeo = 3;
 }

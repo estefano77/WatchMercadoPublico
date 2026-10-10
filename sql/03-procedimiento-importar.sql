@@ -51,6 +51,7 @@ CREATE OR ALTER PROCEDURE dbo.MpImportarRango
     @ticket                 nvarchar(200),
     @conDetalle             bit          = 1,   -- ademas del listado, la ficha
     @soloFaltantes          bit          = 0,   -- saltar dias ya descargados
+    @diasSondeo             int          = 3,   -- volver a preguntar los ultimos N dias
     @maxIntentosDia         int          = 6,
     @maxIntentosDetalle     int          = 3,
     @minutosEsperaInicial   int          = 2,
@@ -120,7 +121,14 @@ BEGIN
 
     DECLARE @lineas nvarchar(max) = N'';
     DECLARE @errores int = 0;
-    DECLARE @diasOk int = 0, @diasFallidos int = 0, @diasSaltados int = 0;
+    DECLARE @diasOk int = 0, @diasFallidos int = 0;
+    /* Los saltados van separados por MOTIVO y no en un solo numero, porque hace
+       falta un dia para responder a la pregunta que siempre se hace: "por que no
+       hay nada de hoy?". Con un total unico la respuesta posible era "no se, mira
+       el numero", y el numero no dice nada. Tres contadores dicen si fue porque
+       no se puede preguntar (fin de semana), porque todavia no ha llegado, o
+       porque ya estaba descargado y fuera de la ventana de sondeo. */
+    DECLARE @diasFinDeSemana int = 0, @diasFuturos int = 0, @diasYaDescargados int = 0;
     DECLARE @detallesOk int = 0, @detallesFallidos int = 0;
 
     IF @desde IS NULL OR @hasta IS NULL
@@ -180,6 +188,18 @@ BEGIN
         RETURN;
     END
 
+    IF @diasSondeo IS NULL OR @diasSondeo < 0 OR @diasSondeo > 30
+    BEGIN
+        /* 30 es el tope porque el rango entero ya se limita a 400 dias, y una
+           ventana mayor que eso no distinguiria nada: seria "vuelve a preguntar
+           todo". El cero NO es un error: significa "no hay ventana", es decir,
+           volver al comportamiento antiguo en el que solo HOY se repreguntaba.
+           Se deja para poder comparar las dos cosas sin cambiar el codigo. */
+        SET @resultado = 'La ventana de sondeo no es valida.';
+        RAISERROR('@diasSondeo tiene que estar entre 0 y 30.', 16, 1);
+        RETURN;
+    END
+
     SET @lineas = @lineas + N'Desde ' + CONVERT(nvarchar(10), @desde, 23)
                 + N' hasta ' + CONVERT(nvarchar(10), @hasta, 23) + N'.' + NCHAR(10);
 
@@ -209,16 +229,33 @@ BEGIN
     ------------------------------------------------------------------
     DECLARE @dia date = @desde;
 
+    -- La ventana de sondeo: los dias que, aunque ya se den por buenos, se
+    -- vuelven a preguntar porque todavia pueden haber cambiado.
+    DECLARE @desdeSondeo date = DATEADD(DAY, -@diasSondeo, @hoy);
+
     WHILE @dia <= @hasta
     BEGIN
         -- Los fines de semana se saltan sin preguntar.
         --
-        -- No es una optimizacion: la API responde 500 a un dia que no ha
-        -- un dia que no existe. Y contarlos como fallidos seria mentira. La aplicacion
-        -- hace lo mismo en SemanasDelMes.DiasHabiles.
+        -- ESTA SI ESTA MEDIDO, no es una costumbre. Probado contra la API de
+        -- verdad el 10 de octubre de 2026 con el ticket real:
+        --
+        --     fecha=20261003  (sabado)  -> HTTP 500
+        --     fecha=20240608  (sabado)  -> HTTP 500
+        --
+        -- No es un 200 con lista vacia: es un error del servidor. Preguntar un
+        -- sabado gasta una llamada, contarla como fallida seria mentira, y
+        -- ademas deja en MpConsulta un dia que no va a mirar nadie.
+        --
+        -- La aplicacion hace lo mismo en SemanasDelMes.DiasHabiles.
+        --
+        -- CONSECUENCIA QUE TOCA RECORDAR: si hoy es sabado o domingo, hoy no se
+        -- pregunta y la web no mostrara nada de hoy. No es un fallo: es que no hay
+        -- forma de preguntar. Los dias laborables siguientes lo cubren igual,
+        -- porque el rango son los ultimos 30 dias y ese dia sigue dentro.
         IF DATEPART(WEEKDAY, @dia) IN (1, 7)
         BEGIN
-            SET @diasSaltados = @diasSaltados + 1;
+            SET @diasFinDeSemana = @diasFinDeSemana + 1;
             SET @dia = DATEADD(DAY, 1, @dia);
             CONTINUE;
         END
@@ -227,7 +264,7 @@ BEGIN
         -- contarlo como fallido seria mentira, y ademas la API responde 500.
         IF @dia > @hoy
         BEGIN
-            SET @diasSaltados = @diasSaltados + 1;
+            SET @diasFuturos = @diasFuturos + 1;
             SET @dia = DATEADD(DAY, 1, @dia);
             CONTINUE;
         END
@@ -250,21 +287,48 @@ BEGIN
         -- dia consultado y vacio es un dia que ya se sabe que esta vacio, y es
         -- JUSTO el que mas caro sale de volver a preguntar.
         --
-        -- Y HOY NO SE SALTA, porque un dia en curso todavia puede recibir
-        -- publicaciones. Las de ayer ya no cambian; las de hoy si. Por eso la
-        -- comparacion es estricta, @dia < @hoy.
+        -- PERO AYER TAMBIEN SE VOLVE A PREGUNTAR, y antes no. La regla de antes
+        -- era "@dia < @hoy", con el comentario de que "las de ayer ya no
+        -- cambian, las de hoy si". Eso estaba al reves de como funciona el
+        -- mundo, y por eso se perdian publicaciones.
+        --
+        -- Un dia no cambia cuando se termina: cambia mientras dura. Y este guion
+        -- pregunta el rango POR LA MANANA, a las seis y media. Lo que se publico
+        -- ayer a las tres de la tarde llego DESPUES de que el guion de las seis
+        -- y media de ayer marcara ese dia como descargado, y como ya no se volvia
+        -- a mirar, se perdia para siempre.
+        --
+        -- El fallo es silencioso y no se ve desde la base. No queda ninguna fila
+        -- que diga "esto se publico y no lo vimos": el dia aparece descargado y
+        -- con cero licitaciones, que es justo lo que un dia de verdad sin
+        -- publicaciones tambien parece.
+        --
+        -- Por eso la frontera ya no es HOY sino HOY MENOS @diasSondeo dias:
+        -- dentro de la ventana no se salta nada: se repite el dia tal cual.
+        -- Con el 3 por defecto son hoy, ayer y anteayer.
+        --
+        -- Lo que cuesta son tres peticiones al dia mas, sobre un cupo de 10.000.
+        -- Lo que compra es que el listado de ayer este completo cuando se
+        -- mire manana.
+        --
+        -- Los fines de semana no son un gasto extra de la ventana: se saltan
+        -- ANTES, con la regla de arriba, y en un fin de semana la ventana se
+        -- queda en cero sin gastar nada.
+        --
+        -- Con @diasSondeo = 0 se vuelve al comportamiento de antes, y queda como
+        -- la forma de comparar las dos cosas sin cambiar el codigo.
         --
         -- Un dia que salio FALLIDO tampoco se salta, que es lo que quiere decir
         -- "faltantes": se reintenta en esta pasada y, si vuelve a fallar, en la
         -- siguiente.
         IF @soloFaltantes = 1
-           AND @dia < @hoy
+           AND @dia < @desdeSondeo
            AND EXISTS (SELECT 1 FROM dbo.MpConsulta
                        WHERE CodigoProveedor = @codigoProveedor
                          AND FechaDia = @dia
                          AND Exito = 1)
         BEGIN
-            SET @diasSaltados = @diasSaltados + 1;
+            SET @diasYaDescargados = @diasYaDescargados + 1;
             SET @dia = DATEADD(DAY, 1, @dia);
             CONTINUE;
         END
@@ -819,11 +883,35 @@ BEGIN
     ------------------------------------------------------------------
     -- El resumen
     ------------------------------------------------------------------
+    --
+    -- LAS ETIQUETAS SON CORTOAS A PROPOSITO, por dos razones.
+    --
+    -- Una, la de todos los dias: esto se lee en el registro de la tarea
+    -- programada, y una linea que se sale de la pantalla obliga a ir a buscarla.
+    --
+    -- Dos, y esta sale de medir: sqlcmd recorta las columnas de longitud variable
+    -- a 256 caracteres salvo que se le pase -y 0, y el resumen entero es UN solo
+    -- valor nvarchar con saltos de linea dentro.
+    --
+    -- Medido: este resumen son 271 caracteres CON LAS ETIQUETAS CORTOAS. Sin -y 0
+    -- se veia entero hasta "Ventana de sondeo en dias" y luego una linea cortada
+    -- que decia "Deta", que parece un resumen que se acaba ahi en vez de texto
+    -- perdido. Con las etiquetas largas de antes eran 341.
+    --
+    -- El resumen anterior a todo esto ocupaba 241 y cabia de milagro, por dos
+    -- caracteres de margen. Anadir una linea lo empujó y nadie se dio cuenta,
+    -- porque el corte cae justo donde empieza la linea siguiente: no parece un
+    -- recorte, parece que el resumen se termina ahi.
+    --
+    -- Por eso acortar las etiquetas NO es la solucion: 271 sigue pasando de 256.
+    -- La unica cura es -y 0, y por eso cargar-base-remota.ps1 lo pasa.
     SET @resultado =
         N'Dias preguntados con exito : ' + CONVERT(nvarchar(10), @diasOk) + NCHAR(10)
       + N'Dias que fallaron         : ' + CONVERT(nvarchar(10), @diasFallidos) + NCHAR(10)
-      + N'Dias saltados (fin de semana, futuros o ya descargados): '
-      + CONVERT(nvarchar(10), @diasSaltados) + NCHAR(10)
+      + N'Saltados por fin de semana: ' + CONVERT(nvarchar(10), @diasFinDeSemana) + NCHAR(10)
+      + N'Saltados por ser futuros  : ' + CONVERT(nvarchar(10), @diasFuturos) + NCHAR(10)
+      + N'Saltados por ya descargado: ' + CONVERT(nvarchar(10), @diasYaDescargados) + NCHAR(10)
+      + N'Ventana de sondeo en dias : ' + CONVERT(nvarchar(10), @diasSondeo) + NCHAR(10)
       + N'Detalles guardados       : ' + CONVERT(nvarchar(10), @detallesOk) + NCHAR(10)
       + N'Detalles que fallaron    : ' + CONVERT(nvarchar(10), @detallesFallidos) + NCHAR(10)
       + N'Duracion total           : '

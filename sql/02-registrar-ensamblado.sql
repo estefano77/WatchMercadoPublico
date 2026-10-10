@@ -436,4 +436,10 @@ PRINT '         @desde = ''2026-10-01'',';
 PRINT '         @hasta = ''2026-10-05'',';
 PRINT '         @codigoProveedor = ''<codigo>'',';
 PRINT '         @ticket = ''<ticket>'';';
+PRINT '';
+PRINT '    Sin @soloFaltantes se vuelve a preguntar todo el rango. Con';
+PRINT '    @soloFaltantes = 1 se salta lo ya descargado, salvo los ultimos';
+PRINT '    @diasSondeo dias (3 por defecto): hoy, ayer y anteayer, que es lo que';
+PRINT '    hace falta porque lo publicado ayer por la tarde llega despues de que';
+PRINT '    el guion de la manana lo marcara como descargado.';
 GO

@@ -281,3 +281,53 @@ antes de un `GO` no sobrevive al siguiente, y el `ROLLBACK` del final revierte
 una transacción vacía mientras las filas se quedan. Se vio: el mensaje decía que
 no quedaba nada y había 13 filas. Por eso `99-prueba-esquema.sql` va entero en
 un solo lote, sin `GO`, y comprueba al final que la base quedó vacía.
+
+## El catálogo miente en tres cosas, y las tres muerden
+
+Las tres se encontraron escribiendo una prueba que comprobaba que un parámetro
+nuevo existía y valía lo que debía. Las tres dan **falso** con un procedimiento
+perfectamente bien creado.
+
+### `sys.parameters.name` lleva la `@`, `sys.columns.name` no
+
+```sql
+-- MAL: no encuentra nada, y el EXISTS sale falso
+WHERE object_id = OBJECT_ID(N'dbo.MpImportarRango') AND name = N'diasSondeo'
+
+-- BIEN
+WHERE object_id = OBJECT_ID(N'dbo.MpImportarRango') AND name = N'@diasSondeo'
+```
+
+Es el detalle que hace que un parámetro que **sí** está parezca que no está. Y
+el síntoma es el peor posible: `CREATE OR ALTER` no falla si el nombre está mal
+escrito dentro del procedimiento, porque el valor por defecto lo tapa.
+
+### `sys.parameters.has_default_value` viene a 0 en todos los parámetros
+
+En esta instancia (SQL Server 16.0.1190.2) la columna **no se rellena para
+procedimientos**: los quince parámetros de `MpImportarRango` salen con
+`has_default_value = 0`, incluidos los que llevan `= 1`, `= 6` o `= 30` en el
+`CREATE`. Una prueba que busque ahí que el valor por defecto es 3 falla siempre,
+y parece que el código está mal cuando lo que está mal es la comprobación.
+
+Lo que **tampoco** funciona es `sys.default_constraints`: sobre el procedimiento
+hay **cero** filas, porque los valores por defecto de parámetros no son
+restricciones.
+
+### Por eso el valor por defecto se prueba LLAMANDO
+
+Es mejor prueba y además es la que importa: lo que se quiere saber es que alguien
+que ejecute el `EXEC` a mano se lleve el comportamiento correcto.
+
+```sql
+-- Un rango de un sabado: se salta antes de preguntar nada, no gasta una llamada
+EXEC dbo.MpImportarRango @desde = '2026-10-03', @hasta = '2026-10-03',
+                         @codigoProveedor = '71284', @ticket = 'x',
+                         @resultado = @r OUTPUT;
+-- y se mira @r, no el catálogo
+```
+
+**Y una fecha fija, no una fecha relativa a `GETDATE()`.** Un rango que aimante
+contra "hoy" depende del día que se ejecute la prueba: un sábado tarda cero
+peticiones y un martes se gasta una. Con un sábado de 2026 escrito a mano, da
+igual cuándo se corra.
