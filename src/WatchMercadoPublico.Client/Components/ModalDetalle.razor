@@ -110,6 +110,13 @@
                                         {
                                             <p class="mt-1 text-muted">@unico.NombreProducto</p>
                                         }
+                                        @* Tambien aqui, y no solo en la tabla de varios items: con un
+                                           solo item la especificacion del comprador sigue siendo el
+                                           dato que dice que se adjudico exactamente eso. *@
+                                        @if (!string.IsNullOrWhiteSpace(unico.Descripcion))
+                                        {
+                                            <p class="mt-0.5 leading-relaxed text-ink-soft">@unico.Descripcion</p>
+                                        }
                                         @if (!string.IsNullOrWhiteSpace(unico.NombreProveedor))
                                         {
                                             <p class="mt-1 text-muted">
@@ -181,6 +188,20 @@
                                                                 ? $"Ítem {item.Correlativo}"
                                                                 : item.NombreProducto)
                                                         </p>
+                                                        @* La especificacion del comprador, que la pagina de
+                                                           MERCADOPUBLICO llama "Especificaciones del
+                                                           comprador" y la API llama Descripcion. Va DEBAJO
+                                                           del nombre y no en su lugar porque el nombre suele
+                                                           repetirse entre lineas de la misma adjudicacion, y es
+                                                           justo la descripcion lo que las separa. Sin esto, una
+                                                           adjudicacion con ocho lineas del mismo producto sale
+                                                           como ocho filas identicas. *@
+                                                        @if (!string.IsNullOrWhiteSpace(item.Descripcion))
+                                                        {
+                                                            <p class="mt-0.5 leading-snug text-[0.68rem] text-ink-soft">
+                                                                @item.Descripcion
+                                                            </p>
+                                                        }
                                                         @if (!string.IsNullOrWhiteSpace(item.NombreProveedor))
                                                         {
                                                             <p class="mt-0.5 text-[0.68rem] text-muted">

@@ -509,6 +509,27 @@ BEGIN
 
         NombreProducto    nvarchar(500)  NULL,
 
+        -- La especificacion del comprador, que la pagina de MERCADOPUBLICO
+        -- llama "Especificaciones del comprador" y la API llama "Descripcion".
+        --
+        -- Los dos NOMBRES son distintos y no es un descuido de traduccion: no
+        -- existe ninguna clave "Especificacion" en el JSON del item. Se
+        -- compruebo contra la API con la licitacion 2342-28-LR24, que tiene ocho
+        -- lineas y las ocho con el MISMO NombreProducto:
+        --
+        --     NombreProducto : Software del sistema de administracion de bases de datos
+        --     Descripcion    : Linea a) Sistemas Computacionales Juzgados - TECNICO RESIDENTE
+        --
+        -- Lo unico que distingue una linea de otra es este campo. Por eso se
+        -- guarda con el nombre que le pone la API y no con el que le pone la
+        -- pagina: las demas columnas del item tambien son nombres literales de
+        -- la API, y este es el sitio donde mas importa no inventarse uno.
+        --
+        -- 2000 caracteres, y no 500 como NombreProducto, porque aqui si cabe
+        -- texto largo de verdad. JSON_VALUE devuelve nvarchar(4000) como
+        -- maximo, asi que con 2000 hay margen de sobra para lo que se ha visto.
+        Descripcion       nvarchar(2000) NULL,
+
         -- "Unidad", "Metro", "Kg"…
         UnidadMedida      nvarchar(50)   NULL,
 
@@ -557,6 +578,31 @@ BEGIN
             REFERENCES dbo.MpLicitacionDetalle (LicitacionId)
     );
 END
+
+/* -----------------------------------------------------------------------
+   COLUMNAS QUE SE HAN ANADIDO DESPUES, y que por eso necesitan un ALTER.
+
+   Todo lo de arriba esta guardado con "IF OBJECT_ID(...) IS NULL", que es lo
+   que hace que este script se pueda volver a ejecutar sin romper nada. Pero esa
+   misma guarda significa que un CREATE TABLE guardado NO anade columnas a una
+   tabla que ya existe: se lo salta entero y sigue como estaba.
+
+   O sea que anadir una columna a una base ya instalada son DOS cosas: el
+   CREATE TABLE de arriba, para las bases nuevas, y este ALTER, para las que ya
+   hay. Con solo la primera, la base de desarrollo y la del hosting se quedan
+   sin la columna y no dicen nada: ni error ni aviso.
+
+   Y no es solo para esta columna. Cada vez que se anada una hay que volver
+   aqui, y volver a ejecutar este fichero. */
+
+IF COL_LENGTH(N'dbo.MpLicitacionItem', N'Descripcion') IS NULL
+BEGIN
+    ALTER TABLE dbo.MpLicitacionItem
+        ADD Descripcion nvarchar(2000) NULL;
+
+    PRINT '  Anadida dbo.MpLicitacionItem.Descripcion.';
+END
+
 GO
 
 

@@ -175,8 +175,14 @@ public sealed class MercadoPublicoCliente
     ///
     /// Se recorren todos los ítems, no solo el primero: una licitación puede
     /// tener varios productos y cada uno con su proveedor y su precio.
+    ///
+    /// Es <c>internal</c> y no privado para poder testear el parseo del JSON con
+    /// un fragmento real, sin red. Antes no había ninguna prueba de esta función
+    /// y justo aquí es donde un nombre de clave mal escrito se cuela sin que nada
+    /// lo note: lees "Descripcion", te lo inventas como "Especificacion" porque
+    /// es lo que dice la página, y el campo sale vacío sin un solo error.
     /// </summary>
-    private static List<ItemAdjudicado> LeerItems(JsonElement items)
+    internal static List<ItemAdjudicado> LeerItems(JsonElement items)
     {
         var resultado = new List<ItemAdjudicado>();
 
@@ -199,6 +205,12 @@ public sealed class MercadoPublicoCliente
             {
                 Correlativo = LeerEntero(item, "Correlativo") ?? resultado.Count + 1,
                 NombreProducto = Limpiar(Leer(item, "NombreProducto")),
+
+                // "Descripcion" y no "Especificacion": la pagina la llama
+                // "Especificaciones del comprador", pero no existe una clave
+                // "Especificacion" en el JSON del item. Comprobado contra la API.
+                Descripcion = Limpiar(Leer(item, "Descripcion")),
+
                 UnidadMedida = Limpiar(Leer(item, "UnidadMedida")),
                 Cantidad = LeerDecimal(item, "Cantidad"),
                 CantidadAdjudicada = LeerDecimal(adjudicacion, "Cantidad"),

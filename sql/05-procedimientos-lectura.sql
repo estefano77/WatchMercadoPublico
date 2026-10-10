@@ -549,6 +549,7 @@ BEGIN
         i.LicitacionId,
         i.Correlativo,
         i.NombreProducto,
+        i.Descripcion,
         i.UnidadMedida,
         i.Cantidad,
         i.CantidadAdjudicada,
@@ -626,7 +627,7 @@ BEGIN
     WHERE d.LicitacionId = @licitacionId;
 
     SELECT
-        i.Correlativo, i.NombreProducto, i.UnidadMedida,
+        i.Correlativo, i.NombreProducto, i.Descripcion, i.UnidadMedida,
         i.Cantidad, i.CantidadAdjudicada, i.MontoUnitario, i.Subtotal,
         i.RutProveedor, i.NombreProveedor
     FROM dbo.MpLicitacionItem AS i

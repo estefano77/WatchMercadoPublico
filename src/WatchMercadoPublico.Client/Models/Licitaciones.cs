@@ -145,6 +145,21 @@ public sealed class ItemAdjudicado
     public int Correlativo { get; set; }
     public string? NombreProducto { get; set; }
 
+    /// <summary>
+    /// La especificación del comprador, que la página de Mercado Público rotula
+    /// "Especificaciones del comprador" y la API llama <c>Descripcion</c>.
+    /// </summary>
+    /// <remarks>
+    /// Es lo único que distingue dos líneas del mismo producto: en
+    /// 2342-28-LR24 hay ocho líneas, las ocho con el mismo nombre de producto, y
+    /// todas se distinguen solo por este texto. Sin él la tabla de ítems
+    /// muestra ocho filas indistinguibles.
+    ///
+    /// El nombre es el de la API a propósito, como el resto de columnas de esta
+    /// clase. No existe una clave "Especificacion" en el JSON del item.
+    /// </remarks>
+    public string? Descripcion { get; set; }
+
     /// <summary>"Unidad", "Metro", "Kg"…</summary>
     public string? UnidadMedida { get; set; }
 

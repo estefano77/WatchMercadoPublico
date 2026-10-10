@@ -144,6 +144,32 @@ public sealed class ItemAdjudicado
 
     public string? NombreProducto { get; set; }
 
+    /// <summary>
+    /// La especificación del comprador, que la página de Mercado Público rotula
+    /// "Especificaciones del comprador".
+    /// </summary>
+    /// <remarks>
+    /// La propiedad se llama <c>Descripcion</c> y no <c>Especificacion</c> porque
+    /// así se llama en la API, y el resto de columnas de este tipo también
+    /// llevan el nombre literal del JSON. <b>No existe una clave
+    /// "Especificacion"</b> en el objeto del item: comprobado contra la API.
+    ///
+    /// Y no es un dato de adorno. En una adjudicación es lo único que
+    /// distingue dos líneas del mismo producto. Medido con 2342-28-LR24, que
+    /// tiene ocho líneas y las ocho con el mismo nombre de producto, repartidas
+    /// entre dos empresas:
+    ///
+    /// <code>
+    /// NombreProducto : Software del sistema de administración de bases de datos
+    /// Descripcion    : Línea a) Sistemas Computacionales Juzgados - TÉCNICO RESIDENTE
+    /// Descripcion    : Línea a) Sistemas Computacionales Juzgados - MANTENCIÓN MENSUAL
+    /// </code>
+    ///
+    /// Sin esto, esas ocho líneas salen idénticas y no hay forma de saber a qué
+    /// corresponde cada una.
+    /// </remarks>
+    public string? Descripcion { get; set; }
+
     /// <summary>"Unidad", "Metro", "Kg"…</summary>
     public string? UnidadMedida { get; set; }
 

@@ -774,6 +774,34 @@ En la pantalla el adjudicado va como cifra grande y el estimado debajo como
 referencia, con la diferencia en porcentaje. Con un solo ítem se muestra como
 tarjeta; con varios, como tabla con una fila por producto y su total.
 
+### ⚠️ "Especificaciones del comprador" se llama `Descripcion` en la API
+
+El campo de la ficha que separa dos líneas del mismo producto existe, pero **con
+otro nombre**: la página de MERCADOPUBLICO lo rotula "Especificaciones del
+comprador" y la API lo llama `Descripcion`. **No hay ninguna clave
+`Especificacion`** en el JSON del ítem, comprobado contra la API.
+
+Y no es un dato de adorno. Medido con `2342-28-LR24`, que tiene **ocho líneas con
+el mismo `NombreProducto`**, repartidas entre dos empresas:
+
+```
+NombreProducto : Software del sistema de administración de bases de datos
+Descripcion    : Línea a) Sistemas Computacionales Juzgados - TÉCNICO RESIDENTE
+Descripcion    : Línea a) Sistemas Computacionales Juzgados - MANTENCIÓN MENSUAL
+Descripcion    : Línea b) Sistemas Computacionales Recursos Humanos - IMPLEMENTACIÓN
+...
+```
+
+Sin ese texto esas ocho filas salen idénticas y no hay forma de saber a qué
+corresponde cada una. Va en `MpLicitacionItem.Descripcion`, se muestra debajo del
+nombre del producto en la tabla de ítems y también en la tarjeta de ítem único.
+
+> El error fácil aquí es leer `"Especificacion"` porque es lo que dice la
+> pantalla. No da ningún error: el campo sale a `null`, la fila se pinta igual, y
+> la única pista es que no hay texto donde debería haberlo. La columna se llama
+> `Descripcion` a propósito, que es el nombre literal del JSON, como las demás de
+> la tabla.
+
 ### ⚠️ Los montos son NÚMEROS JSON, no strings
 
 Vienen como `"MontoEstimado": 192000000.0`, con **punto** decimal. No son

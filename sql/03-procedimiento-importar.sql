@@ -742,14 +742,28 @@ BEGIN
                         DELETE FROM dbo.MpLicitacionItem WHERE LicitacionId = @licitacionId;
 
                         INSERT dbo.MpLicitacionItem
-                            (LicitacionId, Correlativo, NombreProducto, UnidadMedida,
-                             Cantidad, CantidadAdjudicada, MontoUnitario,
+                            (LicitacionId, Correlativo, NombreProducto, Descripcion,
+                             UnidadMedida, Cantidad, CantidadAdjudicada, MontoUnitario,
                              RutProveedor, NombreProveedor)
                         SELECT
                             @licitacionId,
                             COALESCE(TRY_CONVERT(int, JSON_VALUE(it.[value], '$.Correlativo')),
                                      ROW_NUMBER() OVER (ORDER BY (SELECT NULL))),
                             JSON_VALUE(it.[value], '$.NombreProducto'),
+                            /* La especificacion del comprador. La pagina la llama
+                               "Especificaciones del comprador" y la API la llama
+                               Descripcion; no hay clave "Especificacion" en el JSON
+                               del item, comprobado contra la API.
+
+                               El LEFT no es cosmetico: la columna es nvarchar(2000) y
+                               JSON_VALUE devuelve nvarchar(4000) como maximo, asi que
+                               una descripcion mas larga de 2000 reventaria el INSERT
+                               con "String or binary data would be truncated" y se
+                               perderian TODOS los items de esa licitacion, no solo el
+                               que trae el texto largo. Ahi se prefiere cortar el
+                               texto a que un dato largo se lleve por delante los
+                               demas. */
+                            LEFT(JSON_VALUE(it.[value], '$.Descripcion'), 2000),
                             JSON_VALUE(it.[value], '$.UnidadMedida'),
                             TRY_CONVERT(decimal(19,4), JSON_VALUE(it.[value], '$.Cantidad')),
                             TRY_CONVERT(decimal(19,4), JSON_VALUE(it.[value], '$.Adjudicacion.Cantidad')),

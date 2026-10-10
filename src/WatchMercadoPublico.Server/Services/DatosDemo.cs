@@ -135,10 +135,17 @@ public static class DatosDemo
         for (var n = 1; n <= cuantosItems; n++)
         {
             var cantidad = aleatorio.Next(1, 12);
+
+            // El MISMO nombre de producto en todas las lineas y la descripcion
+            // distinta, que es el caso real que hace falta este campo: sin ella
+            // el demo enseña dos filas identicas sin explicar por que.
+            var letra = (char)('a' + n - 1);
+
             itemsDemo.Add(new ItemAdjudicado
             {
                 Correlativo = n,
-                NombreProducto = $"Ítem de ejemplo {n} para {codigo}",
+                NombreProducto = $"Ítem de ejemplo para {codigo}",
+                Descripcion = $"Línea {letra}) Ítem de ejemplo - implementación",
                 UnidadMedida = "Unidad",
                 Cantidad = cantidad,
                 CantidadAdjudicada = cantidad,

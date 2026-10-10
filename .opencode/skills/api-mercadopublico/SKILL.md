@@ -144,6 +144,36 @@ Están en `Leer`, `LeerRuta` y `LeerItems` del cliente. **No los reimplementes**
 - Las fechas del bloque `Fechas` son `DateTimeOffset` con desfase de Chile
   (`-03:00`/`-04:00`). Leerlas en `DateTime` pierde ese desfase.
 
+## ⚠️ "Especificaciones del comprador" se llama `Descripcion`
+
+La página de MERCADOPUBLICO rotula un campo del ítem como **"Especificaciones
+del comprador"**. En la API ese campo se llama **`Descripcion`**, y **no existe
+ninguna clave `Especificacion`**. Comprobado contra la API.
+
+Claves que trae un `Items.Listado[]`, medidas:
+
+```
+Correlativo  CodigoProducto  CodigoCategoria  Categoria
+NombreProducto  Descripcion  UnidadMedida  Cantidad  Adjudicacion
+```
+
+Y por qué importa tanto acertar el nombre: es **lo único que distingue dos
+líneas del mismo producto**. `2342-28-LR24` tiene ocho líneas, las ocho con el
+mismo `NombreProducto`, repartidas entre dos empresas, y todas se separan solo
+por `Descripcion`:
+
+```
+Línea a) Sistemas Computacionales Juzgados - TÉCNICO RESIDENTE
+Línea a) Sistemas Computacionales Juzgados - MANTENCIÓN MENSUAL
+Línea b) Sistemas Computacionales Recursos Humanos - IMPLEMENTACIÓN
+```
+
+**Leerla como `Especificacion` no da ningún error**: sale `null`, la fila se
+pinta igual, y la única pista es que no hay texto donde debería haberlo. Es de
+los fallos que se buscan durante media tarde. Va con pruebas
+(`LecturaDeItemsTests`) y con el JSON real, porque un nombre de clave escrito a
+ojo es justo lo que un test evita.
+
 ## Antes de dar por buena una modificación
 
 1. ¿El rango de fechas que vas a probar incluye **algún día del 1 al 9**?

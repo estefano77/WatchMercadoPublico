@@ -259,6 +259,7 @@ public sealed class LectorMercadoPublico
                         {
                             Correlativo = lector.GetInt32(lector.GetOrdinal("Correlativo")),
                             NombreProducto = Leer(lector, "NombreProducto"),
+                            Descripcion = Leer(lector, "Descripcion"),
                             UnidadMedida = Leer(lector, "UnidadMedida"),
                             Cantidad = LeerDecimal(lector, "Cantidad"),
                             CantidadAdjudicada = LeerDecimal(lector, "CantidadAdjudicada"),
@@ -389,6 +390,7 @@ public sealed class LectorMercadoPublico
                         {
                             Correlativo = lector.GetInt32(lector.GetOrdinal("Correlativo")),
                             NombreProducto = Leer(lector, "NombreProducto"),
+                            Descripcion = Leer(lector, "Descripcion"),
                             UnidadMedida = Leer(lector, "UnidadMedida"),
                             Cantidad = LeerDecimal(lector, "Cantidad"),
                             CantidadAdjudicada = LeerDecimal(lector, "CantidadAdjudicada"),

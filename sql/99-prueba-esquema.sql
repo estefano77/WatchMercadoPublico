@@ -161,19 +161,28 @@ VALUES
 --    El primero trae CantidadAdjudicada distinta de la pedida, que es el caso
 --    que obliga a tener las dos columnas. El tercero no trae Cantidad y por eso
 --    el subtotal tiene que caer en la pedida.
+--
+--    Descripcion es la especificacion del comprador: la pagina la llama
+--    "Especificaciones del comprador" y la API la llama Descripcion. No existe
+--    ninguna clave "Especificacion", comprobado contra la API.
+--
+--    Se anade a los tres items, y el tercero va VACIA a proposito: "" y NULL no
+--    son lo mismo, y el primero significa "la API lo mando en blanco". Los datos
+--    de los tres -montos y productos- NO se tocan, porque las comprobaciones 7.1,
+--    7.2 y 7.3 suman los subtotales contra estos valores.
 -- ---------------------------------------------------------------
 INSERT INTO dbo.MpLicitacionItem
-    (LicitacionId, Correlativo, NombreProducto, UnidadMedida,
+    (LicitacionId, Correlativo, NombreProducto, Descripcion, UnidadMedida,
      Cantidad, CantidadAdjudicada, MontoUnitario, RutProveedor, NombreProveedor)
-SELECT d.LicitacionId, v.Correlativo, v.NombreProducto, v.UnidadMedida,
+SELECT d.LicitacionId, v.Correlativo, v.NombreProducto, v.Descripcion, v.UnidadMedida,
        v.Cantidad, v.CantidadAdjudicada, v.MontoUnitario, v.Rut, v.Proveedor
 FROM dbo.MpLicitacionDetalle AS d
 CROSS APPLY (VALUES
-    (1, N'Tuberia PVC',                N'Metro', 1000.0,  800.0, 2500000.0000, N'76.111.111-1', N'PROVEEDOR A SA'),
-    (2, N'Fitting deunion',            N'Unidad',  50.0,   50.0,   125000.5000, N'76.111.111-1', N'PROVEEDOR A SA'),
-    (3, N'Valvula de compuerta',       N'Unidad',   3.0,   NULL, 12345678.0000, N'76.222.222-2', N'PROVEEDOR B LTDA')
-) AS v(Correlativo, NombreProducto, UnidadMedida, Cantidad,
-        CantidadAdjudicada, MontoUnitario, Rut, Proveedor)
+    (1, N'Tuberia PVC',          N'Linea a) con canoneria de acero - instalacion',   N'Metro', 1000.0,  800.0, 2500000.0000, N'76.111.111-1', N'PROVEEDOR A SA'),
+    (2, N'Fitting deunion',      N'Linea a) con canoneria de acero - mantenimiento', N'Unidad',  50.0,   50.0,   125000.5000, N'76.111.111-1', N'PROVEEDOR A SA'),
+    (3, N'Valvula de compuerta', N'',                                             N'Unidad',   3.0,   NULL, 12345678.0000, N'76.222.222-2', N'PROVEEDOR B LTDA')
+) AS v(Correlativo, NombreProducto, Descripcion, UnidadMedida,
+        Cantidad, CantidadAdjudicada, MontoUnitario, Rut, Proveedor)
 JOIN dbo.MpLicitacion AS l ON l.LicitacionId = d.LicitacionId
 WHERE l.CodigoExterno = N'7000-D1-D2L510';
 
@@ -387,9 +396,51 @@ BEGIN
 END
 ELSE PRINT 'OK    7.11 los 3 items quedan en SU licitacion, y en ninguna otra';
 
+-- ---------------------------------------------------------------
+-- 7.12 La especificacion del comprador (Descripcion) llega y se guarda
+--
+-- Tres cosas, y las tres se pueden romper sin que salte ningun error:
+--
+--   a) Que la columna exista. Es lo que pasa si alguien anade el ALTER al
+--      CREATE TABLE y se olvida del ALTER de las bases ya instaladas: no hay
+--      error hasta que algo intenta usarla.
+--
+--   b) Que el texto llegue tal cual, con acentos y con la "Linea a)" del
+--      principio. Un "-q" que convierte a otra pagina de codigos deja el texto
+--      doblemente codificado y lo delata una comparacion, no un aviso.
+--
+--   c) Que "" NO se convierta en NULL al entrar y al salir. Son cosas distintas:
+--      la API no manda descripcion en unos items y la manda en blanco en otros.
+-- ---------------------------------------------------------------
+IF COL_LENGTH(N'dbo.MpLicitacionItem', N'Descripcion') IS NULL
+BEGIN
+    PRINT 'FALLO 7.12a: dbo.MpLicitacionItem no tiene la columna Descripcion.';
+    SET @fallos = @fallos + 1;
+END
+ELSE PRINT 'OK    7.12a la columna Descripcion existe';
+
+IF NOT EXISTS (SELECT 1 FROM dbo.MpLicitacionItem AS i
+               WHERE i.Correlativo = 2
+                 AND i.Descripcion = N'Linea a) con canoneria de acero - mantenimiento')
+BEGIN
+    PRINT 'FALLO 7.12b: la descripcion no se guardo tal cual.';
+    SET @fallos = @fallos + 1;
+END
+ELSE PRINT 'OK    7.12b la descripcion se guarda con sus acentos y su parentesis';
+
+/* Y la del tercero, que entra como cadena vacia, tiene que seguir siendo cadena
+   vacia y no NULL. Con bcp -k esto se pierde: el campo de longitud cero es NULL. */
+IF EXISTS (SELECT 1 FROM dbo.MpLicitacionItem AS i
+           WHERE i.Correlativo = 3 AND i.Descripcion IS NULL)
+BEGIN
+    PRINT 'FALLO 7.12c: la descripcion vacia se guardo como NULL.';
+    SET @fallos = @fallos + 1;
+END
+ELSE PRINT 'OK    7.12c la descripcion vacia sigue vacia y no se ha vuelto NULL';
+
 PRINT '';
 IF @fallos = 0
-    PRINT 'RESULTADO: las 11 comprobaciones pasan.'
+    PRINT 'RESULTADO: las 14 comprobaciones pasan.'
 ELSE
     PRINT 'RESULTADO: ' + CAST(@fallos AS varchar(10)) + ' comprobacion(es) FALLAN.';
 
