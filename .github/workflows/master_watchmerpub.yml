@@ -24,6 +24,51 @@ jobs:
         with:
           dotnet-version: '10.x'
 
+      # -----------------------------------------------------------------------
+      # El CSS versionado tiene que coincidir con el que genera Tailwind.
+      #
+      # app.css es un fichero GENERADO y versionado, y a la vez la unica forma que
+      # tiene el .razor de declarar clases: si el CSS no se recompila, una clase
+      # nueva no existe. Y eso no da ningun error. No hay fallo de compilacion, no
+      # hay aviso y la pantalla se ve igual de bien, solo que la clase no hace
+      # nada.
+      #
+      # Pasó de verdad: la tabla de Hitos (8bf2827, 8 de octubre) añadio sm:px-4,
+      # font-medium y sm:text-sm, y app.css no se recompilo hasta el 9. Siete
+      # commits en los que sm:px-4 no existia en ninguna parte. La fecha salia en
+      # peso normal contra la etiqueta en negrita, que es justo lo que el
+      # comentario de al lado dice que no debe pasar, y no habia forma de verlo
+      # sin medir el font-weight calculado en el navegador.
+      #
+      # El paso va ANTES de compilar, para que un CSS viejo tumbe la build en
+      # segundos en vez de desplegarlo. Y con --stat y --exit-code juntos: el stat
+      # explica que cambio y el codigo de salida es lo que decide.
+      # -----------------------------------------------------------------------
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: El CSS compilado tiene que ser el del repositorio
+        run: |
+          npm ci
+          npm run css
+
+          git diff --exit-code --stat -- src/WatchMercadoPublico.Client/wwwroot/css/app.css
+          $estado = $LASTEXITCODE
+
+          if ($estado -eq 1) {
+            Write-Host '::error::app.css no coincide con lo que genera Tailwind. Las clases nuevas del .razor no estan en el CSS. Ejecuta "npm run css" en local y commitea el resultado de src/WatchMercadoPublico.Client/wwwroot/css/app.css.'
+            exit 1
+          }
+          if ($estado -ne 0) {
+            Write-Host "::error::git diff devolvio $estado, que no es 0 ni 1. No se puede saber si el CSS esta al dia."
+            exit 1
+          }
+
+          Write-Host 'app.css coincide con lo que genera Tailwind.'
+
       - name: Build with dotnet
         run: dotnet build --configuration Release
 

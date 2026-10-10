@@ -51,6 +51,35 @@ npm run css:watch   # en modo vigilancia
 el repositorio y los estilos nuevos no se ven. El síntoma es desconcertante: la
 página carga bien y solo parece que el CSS no funciona.
 
+### ⚠️ Una clase que no está en el CSS no da ningún error
+
+`app.css` es un fichero **generado y versionado**, y a la vez la única forma que
+tiene el `.razor` de declarar clases. Si no se recompila, la clase nueva
+simplemente **no existe**: sin fallo de compilación, sin aviso, y la pantalla se
+ve igual de bien.
+
+Pasó de verdad. La tabla de Hitos (`8bf2827`, 8 de octubre) añadió `sm:px-4`,
+`font-medium` y `sm:text-sm`, y `app.css` no se recompiló hasta el día 9: siete
+commits en los que esas tres clases no estaban en ninguna parte. La fecha salía
+en peso 400 contra la etiqueta en 700, que es justo lo que el comentario de al
+lado dice que no debe pasar. No se veía sin medir el `font-weight` calculado en
+el navegador.
+
+**La CI lo comprueba.** El paso *"El CSS compilado tiene que ser el del
+repositorio"* del workflow corre `npm ci` + `npm run css` y falla la build si
+`app.css` cambia, con el mensaje de que hay que recompilar y commitear. Está
+antes de `dotnet build` para que un CSS viejo tumbe la build en segundos en vez
+de desplegarlo.
+
+> **Si añades una clase a un `.razor` o a un `.cs` del cliente, `npm run css` y
+> commitear `app.css` en el MISMO commit.** Si no, la build lo dice. Ese aviso
+> es información, no un estorbo: no lo quites y no lo silencies con
+> `continue-on-error`.
+>
+> El CSS se compila con `source(none)` y tres `@source` en
+> `Styles/tailwind.css`, que apuntan **solo al proyecto del cliente**. Una clase
+> usada únicamente en el servidor no se genera nunca.
+
 ## Los tests
 
 ```powershell
