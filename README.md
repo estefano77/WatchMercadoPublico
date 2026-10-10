@@ -639,9 +639,43 @@ Respuesta real:
 Dos cosas que no son las que dice la documentación, descubiertas contra la API:
 
 - La lista se llama **`listaEmpresas`**, no `Listado` como en los demás endpoints.
-- **El RUT tiene que ir con puntos, guion y dígito verificador.** Sin ellos la
-  API devuelve cero resultados y no avisa: parece un fallo de la plataforma
-  cuando en realidad es el RUT.
+  Con la clave equivocada la respuesta llega con `Cantidad: 1` y la lista vacía,
+  que es indistinguible de "no hay ninguna empresa con ese RUT".
+- El parámetro se llama **`rutempresaproveedor`**, no `rut`. Con `rut` la API
+  contesta `HTTP 500` sin decir por qué.
+
+**Y EL RUT TIENE UN FORMATO MUY CONCRETO**, medido el 10 de octubre de 2026:
+
+```
+GET .../Empresas/BuscarProveedor?rutempresaproveedor=86.130.200-8&ticket=...
+-> {"Cantidad":1,"listaEmpresas":[{"CodigoEmpresa":"71284","NombreEmpresa":"..."}]}
+
+86.130.200-8   -> 200    DD.DDD.DDD-D
+12.345.678-9   -> 200
+123.456.789-5  -> 500    tres dígitos delante
+ 1.234.567-8   -> 500    un dígito delante
+861302008      -> 500    sin puntos
+86130200-8     -> 500    sin puntos
+(vacío)        -> 500
+```
+
+> Lo que decía este README antes, que "sin puntos la API devuelve cero
+> resultados y no avisa", **era falso**: devuelve `HTTP 500`. Por eso el formato
+> se comprueba **antes** de gastar la llamada, no después de un error.
+
+**Y LA LISTA NO FILTRA. ESTA ES LA QUE CASI SE CUELA.** Un RUT bien escrito que no
+pertenece a nadie devuelve empresas de verdad:
+
+```
+99.999.999-9 -> Cantidad 2  ->  150821  "Canale"
+                             -> 1294859  "SANDRA CECILIA CISTERNA ALVIAL"
+```
+
+La búsqueda se parece a lo que haya en vez de filtrar. Por eso
+`BuscarProveedorAsync` **devuelve todas y no elige ninguna**, y el guion de carga
+**solo inserta con `Cantidad == 1`**: con un RUT mal escrito, coger "la primera"
+no daría sin resultado, daría **la empresa equivocada**, y todo lo demás
+—ingesta, copia— escribiría las licitaciones de un tercero sin un solo error.
 
 Por eso la aplicación normaliza (`70017820k` → `70.017.820-k`) y **valida el
 dígito verificador (módulo 11) antes de gastar una consulta**.

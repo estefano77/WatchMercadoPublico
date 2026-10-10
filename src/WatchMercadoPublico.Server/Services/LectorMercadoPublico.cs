@@ -47,6 +47,88 @@ public sealed class LectorMercadoPublico
     public sealed record DiaSinComprobar(DateOnly Fecha, string Motivo);
 
     /// <summary>
+    /// La fila de <c>MpEmpresa</c> que corresponde al RUT pedido.
+    /// </summary>
+    /// <param name="CodigoProveedor">El código que viaja en cada consulta a la
+    /// API. Viene de la tabla, no de la configuración.</param>
+    /// <param name="NombreEmpresa">El nombre registrado en Mercado Público.</param>
+    /// <param name="RutEmpresa">El RUT tal como está escrito en la tabla, que
+    /// puede no ser el mismo formato que el del appsettings aunque sea el mismo
+    /// número.</param>
+    /// <param name="UrlMercadoPublico">El enlace de la cabecera, o vacío si no
+    /// hay ninguno.</param>
+    public sealed record EmpresaLeida(
+        string CodigoProveedor,
+        string NombreEmpresa,
+        string RutEmpresa,
+        string UrlMercadoPublico);
+
+    /// <summary>
+    /// La empresa vigilada, o <c>null</c> si en la base no hay ninguna fila con
+    /// ese RUT.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>null</c> NO es un error. Es la respuesta a "esta base no tiene esa
+    /// empresa", que pasa de verdad: <c>MpEmpresa</c> se vacía en cada copia
+    /// que hace <c>cargar-base-remota.ps1</c> y solo se vuelve a llenar si el
+    /// guion encuentra el RUT. Que la aplicación se quede sin empresa
+    /// es preferible a que se caiga, porque sin empresa se dice por qué y con
+    /// una excepción solo sale un error 500.
+    /// </para>
+    /// </remarks>
+    public async Task<EmpresaLeida?> LeerEmpresaAsync(string? rut, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(rut))
+            return null;
+
+        await using var conexion = Abrir();
+        await conexion.OpenAsync(ct);
+
+        await using var comando = conexion.CreateCommand();
+
+        /* CommandType.StoredProcedure, y no Text como en LeerMesAsync, y la
+           diferencia es INTENCIONAL y en las dos direcciones. Con Text, un
+           nombre mal escrito se ve al abrir la conexión —"no existe el
+           procedimiento"—, que es un mensaje útil. Con StoredProcedure se ve
+           al ejecutar.
+
+           Aquí gana StoredProcedure. Este método se llama al arrancar, y si
+           mp.LeeEmpresa todavía no está instalado en la base —que es lo que
+           pasa si se publica la aplicación antes de correr 05 en el
+           hosting— un mensaje en el log vale mucho más que una excepción en
+           el arranque, porque avisa de lo que hay que hacer y no solo de que
+           algo falló. El que avisa es EmpresaVigilada, que es quien llama. */
+        comando.CommandType = CommandType.StoredProcedure;
+        comando.CommandText = "mp.LeeEmpresa";
+
+        comando.Parameters.Add("@rutEmpresa", SqlDbType.NVarChar, 20).Value = rut.Trim();
+
+        await using var lector = await comando.ExecuteReaderAsync(ct);
+
+        if (!await lector.ReadAsync(ct))
+            return null;
+
+        return new EmpresaLeida(
+            LeerTexto(lector, 0),
+            LeerTexto(lector, 1),
+            LeerTexto(lector, 2),
+            LeerTexto(lector, 3));
+    }
+
+    /// <summary>
+    /// Una columna como texto, treating NULL como vacío.
+    /// </summary>
+    /// <remarks>
+    /// Sin esto, un <c>NULL</c> devuelve <c>string?</c> y todos los
+    /// <c>NombreEmpresa</c> del consumidor tienen que admitir que puede ser
+    /// nulo. Con esto, el contrato es "nunca es nulo" y el compilador deja de
+    /// repetir esa pregunta en cada uso.
+    /// </remarks>
+    private static string LeerTexto(SqlDataReader lector, int ordinal) =>
+        lector.IsDBNull(ordinal) ? "" : lector.GetString(ordinal);
+
+    /// <summary>
     /// Todo lo que hay de un mes: las licitaciones, sus fichas y sus items.
     /// </summary>
     public sealed record MesLeido(

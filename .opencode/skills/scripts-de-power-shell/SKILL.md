@@ -166,6 +166,48 @@ tiene en cuenta: el padre antes que el hijo al cargar, y **al revés al borrar**
 que si no `MpLicitacionItem` deja filas apuntando a un `MpLicitacionDetalle` que
 ya no existe.
 
+### El guion que copia NO puede dejar una tabla clave vacía
+
+`MpEmpresa` es la **primera** tabla que copia `cargar-base-remota.ps1` y la
+**última** que borra. While el código de proveedor vivía en el `appsettings`,
+que la tabla estuviera vacía no era nada: no se usaba para nada. Ahora que la
+empresa sale de ahí, **una tabla vacía en el origen deja el remoto sin empresa y
+la web sin saber a quién mira.**
+
+De ahí las tres redes que tiene el guion, y las tres hacen falta:
+
+1. Al **empezar**, si la tabla está vacía la llena (o para si no puede).
+2. Con la tabla **ya llena**, no gasta nada: ni una llamada a la API.
+3. Justo **antes de borrar el destino**, vuelve a mirar. Es la red de la red,
+   porque entre el punto 1 y este pasa todo lo demás, y cualquier paso puede
+   fallar o interrumpirse.
+El punto 3 está **deliberadamente** donde está: después ya no hay vuelta atrás. Y
+la copia se corta también con `-SinLimpiar`, porque un destino con la fila vieja
+es un sitio con datos viejos, mientras que un destino sin empresa es un sitio
+caído, y de los dos solo se puede arreglar uno volviendo a copiar.
+
+Y el relleno **solo acepta `Cantidad == 1`**. Ver la skill de la API: con un RUT
+mal escrito, `BuscarProveedor` devuelve empresas de verdad, y coger la primera
+daría la empresa equivocada sin un solo error por el camino.
+
+### En PowerShell, `$1` seguido de un dígito NO es el grupo 1
+
+```powershell
+# MAL: '99.999.999-9' + '$1' pega un $199 y el fichero queda corrupto
+$t = $t -replace '(RUT"\s*:\s*")[^"]*("'), ('$1' + $rut + '$2')
+
+# BIEN: las llaves
+$t = $t -replace '(RUT"\s*:\s*")[^"]*("'), ('${1}' + $rut + '${2}')
+```
+
+`$1` seguido de `99` se lee como el grupo **199**, y el resultado es una línea
+que no es JSON. En un fichero de configuración eso es un `FormatException` al
+arrancar, o peor: un fichero a medio cambiar que parece que funciona.
+
+Ojo también con `-replace`, que **no distingue mayúsculas**: `-replace 'dise',
+'dise'` pasa `Diseno` a `diseno`. Y `WriteAllText` con el constructor de UTF-8
+sin BOM es lo que hay que usar en estos ficheros, que llevan acentos.
+
 ---
 
 ## Cuatro cosas que fallan en silencio

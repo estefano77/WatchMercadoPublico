@@ -453,41 +453,36 @@ public sealed class EstadoApi
     public bool BaseDeDatosUtilizable { get; set; } = true;
 
     /// <summary>
-    /// Qué falta para poder consultar, o null si no falta nada.
+    /// Qué falta para poder consultar, ya escrito en Castellano por el servidor,
+    /// o null si no falta nada.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ESTE TEXTO LO PONE EL SERVIDOR, y es el cambio más grande de los que trae
+    /// que la empresa salga de <c>MpEmpresa</c>. Antes esta propiedad era un
+    /// <c>get</c> que armaba el cliente con tres banderas binarias, y por eso
+    /// solo podía decir dos frases: "falta el ticket" o "falta el código de
+    /// proveedor".
+    /// </para>
     ///
     /// <para>
-    /// El caso de la base de datos va PRIMERO y por un motivo concreto: en modo
-    /// "sql" no hace falta ticket para leer, porque no se pregunta a Mercado
-    /// Público. Si se mirara primero el ticket, con fuente "sql" y sin ticket
-    /// aparecería un aviso pidiendo un ticket que no hace falta para nada, y
-    /// quien lo leyera pensaría que la aplicación está mal configurada.
+    /// Con la empresa viniendo de la base hay motivos que no son ninguno de esos
+    /// dos, y cada uno se arregla con una acción distinta:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>la tabla <c>MpEmpresa</c> está vacía para ese RUT</item>
+    /// <item><c>mp.LeeEmpresa</c> no está instalado en la base del hosting</item>
+    /// <item>el RUT del appsettings no tiene el formato que acepta la API</item>
+    /// <item>el RUT devuelve más de una empresa y no se sabe cuál es</item>
+    /// </list>
+    ///
+    /// <para>
+    /// Cuatro arreglos distintos detrás de la misma frase es un aviso que no dice
+    /// nada, que es justo lo que había. Y no se puede arreglar aquí: el cliente no
+    /// sabe por qué falló la resolución, solo sabe que no hay empresa.
     /// </para>
     /// </summary>
-    public string? FaltaConfiguracion
-    {
-        get
-        {
-            if (UsaBaseDeDatos)
-            {
-                // Sin ticket no pasa nada: aquí no se pregunta a Mercado Público.
-                // Pero el CÓDIGO DE PROVEEDOR sí sigue haciendo falta, porque lo
-                // que hay en la base está etiquetado por empresa y sin él no se
-                // sabe qué parte mirar.
-                if (!BaseDeDatosUtilizable)
-                    return "falta la cadena de conexión a la base de datos " +
-                           "(MercadoPublico__CadenaConexionSql)";
-
-                return EmpresaConfigurada
-                    ? null
-                    : "falta el código de proveedor de la empresa";
-            }
-
-            return Servible ? null
-                : !TicketConfigurado ? "falta el ticket de Mercado Público"
-                : !EmpresaConfigurada ? "falta el código de proveedor de la empresa"
-                : null;
-        }
-    }
+    public string? FaltaConfiguracion { get; set; }
 }
 
 /// <summary>Una semana del mes, tal como la calcula el servidor.</summary>

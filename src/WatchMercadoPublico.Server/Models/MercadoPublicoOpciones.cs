@@ -15,36 +15,51 @@ public sealed class MercadoPublicoOpciones
     public string Ticket { get; set; } = "";
 
     /// <summary>
-    /// Código de proveedor en Mercado Público. Es lo único que hace falta para
-    /// consultar; el nombre y el RUT son solo para que la pantalla diga a quién
-    /// está mirando.
-    ///
-    /// Con "demo" se puede dejar vacío y la app funciona con datos inventados.
+    /// RUT de la empresa vigilada. Es lo ÚNICO que queda de la empresa en la
+    /// configuración, y es la clave con la que se busca.
     /// </summary>
-    public string CodigoProveedor { get; set; } = "";
-
-    /// <summary>Nombre de la empresa, para la cabecera.</summary>
-    public string NombreEmpresa { get; set; } = "";
-
-    /// <summary>RUT de la empresa, para la cabecera.</summary>
+    /// <remarks>
+    /// <para>
+    /// Antes aquí había nombre, RUT, código de proveedor y URL, todo junto. Los
+    /// otros tres se fueron a <c>MpEmpresa</c>, y con ellos desapareció una
+    /// posibilidad de fallo que era real: que el RUT y el código no describieran
+    /// la misma empresa. No lo llegaron a hacer —el RUT que estaba escrito
+    /// pertenecía a "SISTEMAS MODULARES DE COMPUTACION SPA" y el nombre de al
+    /// lado era "SMC SPA"—, pero podía, y no había nada que lo detectara.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>El formato importa y no es el que parece.</b> La API acepta
+    /// <c>DD.DDD.DDD-D</c> y nada más, medido el 10 de octubre de 2026: con un
+    /// dígito delante (<c>1.234.567-8</c>) o tres (<c>123.456.789-5</c>) responde
+    /// 500, igual que sin puntos. <see cref="MercadoPublicoCliente.RutBienFormado"/>
+    /// lo comprueba antes de gastar la llamada, y el guion de carga lo comprueba
+    /// antes de insertar nada.
+    /// </para>
+    /// </remarks>
     public string RutEmpresa { get; set; } = "";
 
     /// <summary>
     /// A dónde lleva el enlace "Ir a Mercado Público" de la cabecera.
-    ///
-    /// Va en la configuración y no en el marcado por la misma razón que la
-    /// empresa: es un dato del entorno, no de la pantalla. Si algún día el
-    /// enlace tiene que apuntar a otra página —o a una intranet que lo replique—
-    /// se cambia aquí y no se toca el .razor, que además no es un sitio donde
-    /// tenga sentido cambiar URLs.
-    ///
-    /// Es configurable a propósito y no se valida contra una lista: no hay forma
-    /// barata de saber si una URL de Mercado Público existe hoy sin pedirla, y
-    /// una comprobación en cada carga sería peor que un enlace que alguien
-    /// pueda cambiar mal y ver enseguida.
     /// </summary>
-    public string UrlMercadoPublico { get; set; } =
-        "https://www.mercadopublico.cl/Home/BusquedaLicitacion";
+    /// <remarks>
+    /// ESTA SE QUITÓ DE AQUÍ. La URL de la cabecera es un dato de la empresa, y
+    /// los datos de la empresa ahora están en <c>MpEmpresa</c>. La API no la
+    /// devuelve —<c>Empresas/BuscarProveedor</c> solo trae código y nombre—, así
+    /// que la fila la escribe <c>cargar-base-remota.ps1</c> con el valor que
+    /// hace falta.
+    ///
+    /// Sigue siendo configurable, pero en la base. Y eso mejora una cosa: cambiar
+    /// el destino del enlace ya no obliga a tocar un fichero de configuración, y
+    /// no ha pasado por un reinicio.
+    ///
+    /// El valor por defecto ahora vive en
+    /// <see cref="EmpresaActual.UrlPorDefecto"/>, que es donde lo usa el modo API
+    /// —que no tiene tabla donde leerlo—. Cuidado con eso: está duplicado en
+    /// PowerShell, y el aviso para quien lo cambie está en el comentario de
+    /// aquella constante.
+    /// </remarks>
+    public string UrlMercadoPublicoObsoleta { get; set; } = "";
 
     /// <summary>
     /// El enlace solo se pinta si hay una URL detrás.
@@ -53,8 +68,8 @@ public sealed class MercadoPublicoOpciones
     /// hace con el resto de datos que pueden faltar.
     /// </summary>
     public bool TieneUrlMercadoPublico =>
-        !string.IsNullOrWhiteSpace(UrlMercadoPublico)
-        && UrlMercadoPublico.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+        !string.IsNullOrWhiteSpace(UrlMercadoPublicoObsoleta)
+        && UrlMercadoPublicoObsoleta.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>"v1" (diario) o "c2" (Compra Ágil).</summary>
     public string ModoConsulta { get; set; } = "v1";
@@ -241,37 +256,27 @@ public sealed class MercadoPublicoOpciones
     };
 
     /// <summary>
-    /// ¿Se puede atender una consulta?
-    ///
-    /// <para>
-    /// Lo que hace falta depende de la fuente, y por eso la condición está
-    /// partida y no es un "y" de tres cosas.
-    /// </para>
-    ///
-    /// <para>
-    /// En modo API hacen falta ticket y código de proveedor: sin ticket la API
-    /// responde 401 y sin código no hay a quién preguntar.
-    /// </para>
-    ///
-    /// <para>
-    /// En modo base de datos NO hace falta ticket, porque no se pregunta nada a
-    /// Mercado Público: lo que se necesita es poder abrir la conexión y saber a
-    /// qué empresa pertenece lo que se lee. Pedir ticket ahí no era un detalle
-    /// menor: <c>Servible</c> es lo que enciende el aviso de "la aplicación no
-    /// está configurada" y lo que decide si la pantalla pinta o no los
-    /// resultados, así que con la condición antigua una instalación correcta en
-    /// modo base de datos y sin ticket se quedaba mostrando un aviso que no
-    /// aplicaba y un hueco vacío debajo.
-    /// </para>
+    /// Lo que hace falta para poder preguntar a Mercado Público, sin mirar la
+    /// empresa.
     /// </summary>
-    public bool Servible =>
-        Modo == "demo"
-        || (UsaBaseDeDatos
-            ? BaseDeDatosUtilizable && TieneCodigoProveedor
-            : TieneTicket && TieneCodigoProveedor);
-
-    /// <summary>¿Hay un código de proveedor configurado?</summary>
-    public bool TieneCodigoProveedor => !string.IsNullOrWhiteSpace(CodigoProveedor);
+    /// <remarks>
+    /// <para>
+    /// Existió aquí una propiedad <c>Servible</c> que respondía a "se puede
+    /// atender una consulta". Ya no puede estar en las opciones, porque una de
+    /// las dos cosas que exigía —el código de proveedor— salió de la
+    /// configuración y ahora está en <c>MpEmpresa</c>.
+    /// </para>
+    ///
+    /// <para>
+    /// Y NO se ha puesto aquí una versión nueva que solo mire la configuración.
+    /// Sería una propiedad que nadie usa: los puntos donde importa preguntan a
+    /// <see cref="EmpresaVigilada"/>, que sí sabe las dos cosas. Las piezas sueltas
+    /// —<see cref="UsaBaseDeDatos"/>, <see cref="BaseDeDatosUtilizable"/> y
+    /// <see cref="TieneTicket"/>— ya están, y son las que se prueban por
+    /// separado.
+    /// </para>
+    /// </remarks>
+    public bool PuedePreguntarALaApi => Modo == "demo" || TieneTicket;
 
     /// <summary>Refresco automático acotado a un valor sensato.</summary>
     public int MinutosRefresco =>

@@ -13,17 +13,27 @@ namespace WatchMercadoPublico.Server.Tests;
 /// <remarks>
 /// <para>
 /// Esta clase existe por un fallo concreto que salió al poner la fuente en
-/// marcha. <c>Servible</c> exigía ticket SIEMPRE, y en modo base de datos no
-/// hace falta ticket para nada: no se pregunta a Mercado Público. Con la
-/// condición antigua, una instalación correcta en modo base de datos —base
-/// configurada, código de proveedor puesto, sin ticket— se quedaba con el
-/// aviso de "la aplicación no está configurada" y sin resultados, y no había
-/// ningún test que lo notara.
+/// marcha. La condición de "esto se puede servir" exigía ticket SIEMPRE, y en
+/// modo base de datos no hace falta ticket para nada: no se pregunta a Mercado
+/// Público. Con la condición antigua, una instalación correcta en modo base de
+/// datos —base configurada, sin ticket— se quedaba con el aviso de "la
+/// aplicación no está configurada" y sin resultados, y no había ningún test que
+/// lo notara.
 /// </para>
 ///
 /// <para>
 /// Por eso se prueban los DOS modos con la misma configuración incompleta, y
 /// no solo el que se usa por defecto.
+/// </para>
+///
+/// <para>
+/// <b>OJO CON LO QUE YA NO ESTÁ AQUÍ.</b> Estas pruebas usaban
+/// <c>MercadoPublicoOpciones.Servible</c> y <c>CodigoProveedor</c>, y las dos
+/// cosas ya no existen: el código de proveedor se lee de <c>MpEmpresa</c> y la
+/// pregunta de si se puede atender la responde <c>EmpresaVigilada</c>. Lo que
+/// queda en las opciones es solo si se puede <i>preguntar a la API</i>, que es
+/// otra pregunta. Los casos de "no se puede atender" que estaban aquí se han ido
+/// a <see cref="EmpresaVigiladaTests"/>.
 /// </para>
 /// </remarks>
 public class FuenteDeDatosTests
@@ -31,15 +41,20 @@ public class FuenteDeDatosTests
     private static MercadoPublicoOpciones Opciones(
         string fuente = "api",
         string ticket = "TICKET",
-        string codigo = "71284",
+        string rut = "86.130.200-8",
         string cadena = "Server=localhost;Database=WatchMerPub;Integrated Security=True")
         => new()
         {
             FuenteDatos = fuente,
             Ticket = ticket,
-            CodigoProveedor = codigo,
+            RutEmpresa = rut,
             CadenaConexionSql = cadena,
         };
+
+    /// <summary>Una empresa ya resuelta, para las pruebas que no miran cómo se resolvió.</summary>
+    private static EmpresaVigilada ConEmpresa(string codigo = "71284") =>
+        new(new EmpresaActual(codigo, "EMPRESA DE PRUEBA", "86.130.200-8", ""));
+
 
     // --- Normalización del valor escrito ---
 
@@ -83,73 +98,73 @@ public class FuenteDeDatosTests
     }
 
     // --- Qué hace falta en cada modo ---
+    //
+    // Esto mira las PIEZAS sueltas, no una propiedad que las reúna. Ya hubo aquí
+    // un "Servible" que las juntaba, y se quitó cuando el código de proveedor
+    // dejó de estar en la configuración: si se volviera a poner una propiedad
+    // así, volvería a ser la respuesta a una pregunta que no se puede responder
+    // solo con este fichero.
 
     [Fact]
     public void En_modo_base_de_datos_no_hace_falta_ticket()
     {
+        // El fallo que motivó esta clase: Servible exigía ticket siempre, y en
+        // modo base de datos no se pregunta nada a la API. Una instalación
+        // correcta sin ticket se quedaba con un aviso que no aplicaba.
         var opciones = Opciones(fuente: "sql", ticket: "");
 
         Assert.True(opciones.UsaBaseDeDatos);
-        Assert.True(opciones.Servible);
+        Assert.False(opciones.TieneTicket);
+        Assert.True(opciones.BaseDeDatosUtilizable);
     }
 
     [Fact]
-    public void En_modo_api_sin_ticket_no_es_servible()
+    public void En_modo_api_no_hay_base_de_datos_que_usable()
     {
-        Assert.False(Opciones(fuente: "api", ticket: "").Servible);
+        // Y al revés: en modo API la cadena vacía no es un problema. Sin esta
+        // pieza, el aviso de "falta la cadena de conexión" saldría en una
+        // instalación que ni la usa.
+        var opciones = Opciones(fuente: "api", cadena: "");
+
+        Assert.False(opciones.UsaBaseDeDatos);
+        Assert.False(opciones.BaseDeDatosUtilizable);
+        Assert.True(opciones.TieneTicket);
     }
 
     [Theory]
-    // Sin cadena de conexión el modo base de datos está pedido pero no se puede
-    // hacer, y el usuario tiene que poder distinguir esas dos cosas.
     [InlineData("")]
     [InlineData("   ")]
-    public void En_modo_base_de_datos_sin_cadena_no_es_servible(string cadena)
+    public void En_modo_base_de_datos_la_cadena_vacia_no_sirve_de_nada(string cadena)
     {
         var opciones = Opciones(fuente: "sql", cadena: cadena);
 
         Assert.True(opciones.UsaBaseDeDatos);
         Assert.False(opciones.BaseDeDatosUtilizable);
-        Assert.False(opciones.Servible);
-    }
-
-    [Theory]
-    // El código de proveedor sigue haciendo falta en los dos modos: lo que hay
-    // en la base está etiquetado por empresa.
-    [InlineData("api")]
-    [InlineData("sql")]
-    public void Sin_codigo_de_proveedor_no_hay_nada_que_mostrar(string fuente)
-    {
-        Assert.False(Opciones(fuente: fuente, codigo: "").Servible);
     }
 
     [Fact]
-    public void El_modo_demo_sigue_siendo_servible_sin_nada_configurado()
+    public void El_modo_demo_no_necesita_nada()
     {
         // Es lo que permite probar la pantalla sin tocar la base ni gastar
         // ticket. Si se rompiera esto, se pierde la forma de probar todo lo
         // demás.
         var opciones = new MercadoPublicoOpciones { ModoConsulta = "demo" };
 
-        Assert.True(opciones.Servible);
+        Assert.True(opciones.PuedePreguntarALaApi);
+        Assert.False(opciones.TieneTicket);
+        Assert.False(opciones.UsaBaseDeDatos);
     }
 
     [Fact]
-    public void La_cadena_vacia_no_molesta_en_modo_api()
+    public void El_rut_via_sin_normalizar_todavia_cuesta_lo_mismo()
     {
-        // La cadena vacía es el valor por defecto de appsettings.json. Si
-        // CUANTA para el modo API, aparecería un aviso de base de datos sin
-        // configurar en una instalación que ni la usa.
-        //
-        // Y es FALSE aquí a propósito, no un descuido: la propiedad responde a
-        // "¿está la base de datos usable?", y en modo API no hay base de datos
-        // en juego. Los dos sitios donde importa la comprueban con
-        // UsaBaseDeDatos delante, y por eso este false no se ve en pantalla.
-        var opciones = Opciones(fuente: "api", cadena: "");
-
-        Assert.False(opciones.UsaBaseDeDatos);
-        Assert.False(opciones.BaseDeDatosUtilizable);
-        Assert.True(opciones.Servible);
+        // La configuración no normaliza el RUT. Lo hace mp.LeeEmpresa al
+        // comparar, para que cambiarlo por otra forma del mismo número no rompa
+        // nada, y lo comprueba MercadoPublicoCliente.RutBienFormado antes de
+        // llamar a la API. Aquí solo se deja escrito que el valor llega tal cual,
+        // porque quien lo normaliza no son estas opciones.
+        Assert.Equal("86.130.200-8", Opciones().RutEmpresa);
+        Assert.Equal("  86130200-8  ", Opciones(rut: "  86130200-8  ").RutEmpresa);
     }
 
     // --- Ingesta automática ---
@@ -181,6 +196,21 @@ public class FuenteDeDatosTests
     }
 
     [Fact]
+    public void La_ingesta_no_corre_sin_el_codigo_de_proveedor_de_la_empresa()
+    {
+        // La cuarta pieza. Se añadió cuando el código de proveedor dejó de estar
+        // en la configuración y pasó a MpEmpresa: una ingesta sin empresa no
+        // sabe a quién preguntar, y sin esto se lanzaría a la API con el código
+        // vacío, que es una consulta que devuelve todo el país.
+        var sinEmpresa = new IngestaMercadoPublico(
+            Options.Create(Opciones(fuente: "sql", ticket: "TICKET", cadena: "Server=x")),
+            new EmpresaVigilada(null, "la tabla MpEmpresa está vacía"),
+            NullLogger<IngestaMercadoPublico>.Instance);
+
+        Assert.False(sinEmpresa.PuedeIngerir);
+    }
+
+    [Fact]
     public void La_ingesta_dice_que_le_falta_y_no_lo_dice_al_azar()
     {
         Assert.Contains("ticket", CrearIngesta("sql", "", "Server=x").FaltaParaIngerir!);
@@ -192,7 +222,8 @@ public class FuenteDeDatosTests
 
     private static IngestaMercadoPublico CrearIngesta(string fuente, string ticket, string cadena) =>
         new(
-            Options.Create(Opciones(fuente, ticket, "71284", cadena)),
+            Options.Create(Opciones(fuente, ticket, "86.130.200-8", cadena)),
+            ConEmpresa(),
             NullLogger<IngestaMercadoPublico>.Instance);
 
     // --- El texto del perodo: el mes entero, sin recortes ---

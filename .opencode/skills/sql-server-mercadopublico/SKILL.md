@@ -331,3 +331,40 @@ EXEC dbo.MpImportarRango @desde = '2026-10-03', @hasta = '2026-10-03',
 contra "hoy" depende del día que se ejecute la prueba: un sábado tarda cero
 peticiones y un martes se gasta una. Con un sábado de 2026 escrito a mano, da
 igual cuándo se corra.
+
+### Y una cuarta: `CREATE OR ALTER` con un parámetro mal escrito NO FALLA
+
+Un nombre mal escrito **dentro** del procedimiento no da error de compilación: el
+valor por defecto del parámetro lo tapa. El `CREATE OR ALTER` se ejecuta
+perfecto, el procedimiento queda instalado, y lo único que pasa es que la regla
+que dependía de ese parámetro deja de funcionar —sin un error, sin un aviso,
+solo datos que faltan.
+
+Es la razón de que una prueba pregunte al catálogo por el nombre exacto en lugar
+de probar el comportamiento:
+
+```sql
+-- MAL: no encuentra nada, y el EXISTS sale falso
+WHERE object_id = OBJECT_ID(N'dbo.MpImportarRango') AND name = N'diasSondeo'
+
+-- BIEN. OJO con la @: en sys.columns no la lleva, en sys.parameters sí
+WHERE object_id = OBJECT_ID(N'dbo.MpImportarRango') AND name = N'@diasSondeo'
+```
+
+## Una fila por empresa: se compara sin índice y con el RUT normalizado
+
+`mp.LeeEmpresa` busca por RUT, y compara **normalizado** —solo dígitos— en los
+dos lados:
+
+```sql
+REPLACE(REPLACE(ISNULL(@rutEmpresa, N''), N'.', N''), N'-', N'')
+```
+
+Sin normalizar, cambiar `"86.130.200-8"` por `"861302008"` en el appsettings —que
+es **el mismo RUT**— devolvería cero filas y la web diría que no hay empresa, sin
+más. Con la comparación normalizada las dos escrituras dan lo mismo.
+
+Y **no lleva índice, y no falta**: la tabla tiene una fila por empresa vigilada,
+no una por licitación. Recorrer dos filas enteras sale más barato que mantener un
+índice que nadie va a usar. Si algún día `MpEmpresa` guardara histórico, eso deja
+de ser cierto y hay que volver a mirarlo.

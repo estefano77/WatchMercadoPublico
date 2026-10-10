@@ -323,6 +323,160 @@ function SqlOrigen([string] $sql) {
     finally { Remove-Item $fichero -ErrorAction SilentlyContinue }
 }
 
+function LeerTicketLocal {
+    if (-not (Test-Path $configLocal)) { return $null }
+
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    $texto = [System.IO.File]::ReadAllText($configLocal, $utf8)
+    $limpio = ($texto -split "`n" | Where-Object { $_ -notmatch '^\s*//' }) -join "`n"
+
+    try { $config = $limpio | ConvertFrom-Json }
+    catch { return $null }
+
+    if (-not $config.MercadoPublico) { return $null }
+    return $config.MercadoPublico
+}
+
+# --- 2 ter. La empresa vigilada, antes que nada --------------------------------
+#
+# VA SIEMPRE, y no solo con -Ingerir. Ese es el punto de este bloque, y no es un
+# detalle: MpEmpresa es la PRIMERA tabla que copia este guion y la ULTIMA que
+# borra. Si la local va vacia, la copia deja el remoto sin empresa, y la web se
+# queda sin saber a quien esta mirando. Con el codigo de proveedor todavia en el
+# appsettings eso no pasaba, porque la tabla no se usaba para nada.
+#
+# Con la tabla ya llena, este bloque no gasta NADA. Ni una llamada a la API, ni
+# una consulta que sirva: solo mira cuantas filas hay. Y en una instalacion
+# normal siempre habra, asi que el coste diario es cero.
+function RutBienFormado([string] $rut) {
+    if (-not $rut) { return $false }
+    # Medido contra la API el 10 de octubre de 2026. El patron que parece
+    # evidente, \d{1,2}, NO vale: acepta 1.234.567-8 y la API contesta 500. Con
+    # dos digitos obligatorios si, que es lo que ella acepta.
+    return ($rut.Trim() -match '^\d{2}\.\d{3}\.\d{3}-\d$')
+}
+
+$configEmpresa = LeerTicketLocal
+$rutEmpresa = ''
+$ticketEmpresa = ''
+
+if ($configEmpresa) {
+    $rutEmpresa = ([string] $configEmpresa.RutEmpresa).Trim()
+    $ticketEmpresa = [string] $configEmpresa.Ticket
+}
+
+$cuantasEmpresas = 0
+$bruto = (SqlOrigen 'SELECT COUNT(*) FROM dbo.MpEmpresa;' | Select-Object -First 1)
+$intento = 0
+if ($bruto -and [int]::TryParse(($bruto -replace '[^\d]', ''), [ref] $intento)) { $cuantasEmpresas = $intento }
+
+if ($cuantasEmpresas -gt 0) {
+    # El caso normal. No dice ni una linea mas de las necesarias, porque si
+    # apareciera un aviso aqui se acabaria leyendo sin leer, y eso es peor que
+    # no avisar.
+    Info "La empresa ya esta en MpEmpresa ($cuantasEmpresas fila(s)). No se gasta nada."
+}
+else {
+    Titulo 'La empresa vigilada: MpEmpresa esta vacia, hay que llenarla'
+
+    if (-not $rutEmpresa) {
+        Malo 'No hay RutEmpresa en appsettings.Development.json.'
+        Malo 'Es lo unico que queda de la empresa en la configuracion, y es la clave con la que se busca.'
+        exit 1
+    }
+
+    # El formato se comprueba ANTES de gastar la llamada. Con un RUT mal formado
+    # la API responde 500 fijo, y una llamada que solo puede acabar mal es
+    # dinero y tiempo tirados.
+    if (-not (RutBienFormado $rutEmpresa)) {
+        Malo "El RUT [$rutEmpresa] no tiene el formato que acepta la API."
+        Malo 'Tiene que ser DD.DDD.DDD-D, con dos digitos delante: 86.130.200-8.'
+        Malo 'Sin puntos, con uno delante o con tres, la API responde 500.'
+        exit 1
+    }
+
+    if (-not $ticketEmpresa -or $ticketEmpresa.StartsWith('CAMBIAR-ESTE-VALOR')) {
+        Malo 'No hay ticket en appsettings.Development.json, y sin ticket no se puede buscar la empresa.'
+        Malo 'Y sin empresa NO SE COPIA NADA, porque la copia dejaria el remoto sin ella.'
+        exit 1
+    }
+
+    Info "Buscando el codigo de proveedor con el RUT $rutEmpresa"
+
+    $urlEmpresa = 'https://api.mercadopublico.cl/servicios/v1/Publico/Empresas/BuscarProveedor' +
+                  "?rutempresaproveedor=$([uri]::EscapeDataString($rutEmpresa))" +
+                  "&ticket=$([uri]::EscapeDataString($ticketEmpresa))"
+
+    try { $respuestaEmpresa = Invoke-RestMethod -Uri $urlEmpresa -TimeoutSec 40 }
+    catch {
+        Malo "La API no respondio: $($_.Exception.Message)"
+        exit 1
+    }
+
+    $empresas = @($respuestaEmpresa.listaEmpresas)
+    $cantidad = [int] $respuestaEmpresa.Cantidad
+
+    # UNA O NADA. Y esto no es desconfianza gratuita.
+    #
+    # BuscarProveedor con un RUT que no es de nadie NO devuelve una lista vacia:
+    # devuelve empresas de verdad. Medido con 99.999.999-9, que devolvio DOS:
+    # "Canale" y "SANDRA CECILIA CISTERNA ALVIAL". La busqueda se parece a lo que
+    # haya en vez de filtrar.
+    #
+    # O sea que con un RUT mal escrito, coger "la primera" no daria sin resultado:
+    # daria LA EMPRESA EQUIVOCADA, y todo lo de este guion escribiria las
+    # licitaciones de un tercero en la base y en el remoto, sin un solo error por
+    # el camino. Con mas de una se para y dice cuales son.
+    if ($cantidad -ne 1 -or $empresas.Count -ne 1) {
+        Malo "Mercado Publico devuelve $cantidad empresas para el RUT $rutEmpresa, y solo se acepta una."
+        foreach ($e in $empresas) { Malo "    $($e.CodigoEmpresa)  $($e.NombreEmpresa)" }
+        if ($cantidad -eq 0) {
+            Malo 'Revisa el RUT en appsettings.Development.json.'
+        }
+        else {
+            Malo 'Ese RUT tiene mas de un codigo en Mercado Publico. Correcto en el appsettings,'
+            Malo 'o escribe la fila correcta a mano en MpEmpresa.'
+        }
+        Malo 'No se inserta NADA y no se copia NADA.'
+        exit 1
+    }
+
+    $codigoEmpresa = [string] $empresas[0].CodigoEmpresa
+    $nombreEmpresa = [string] $empresas[0].NombreEmpresa
+
+    # ATOMICA. El INSERT y el SELECT de comprobacion van en el mismo lote. Con
+    # dos, y con otra cosa escribiendo en medio, se podria dar por buena una
+    # comprobacion de una fila que luego no sea la que se acaba insertando.
+    #
+    # Y la URL va con la constante. Esta es la OTRA mitad de
+    # EmpresaActual.UrlPorDefecto, en C#, y no se puede compartir. Si el dia de
+    # manana cambia, hay que cambiar LAS DOS: con una sola cambiada, la web se
+    # queda con el enlace viejo y sin ningun aviso.
+    $urlPorDefecto = 'https://www.mercadopublico.cl/Home/BusquedaLicitacion'
+
+    $sqlEmpresa = @"
+SET NOCOUNT ON;
+SET QUOTED_IDENTIFIER ON;
+INSERT INTO dbo.MpEmpresa (CodigoProveedor, NombreEmpresa, RutEmpresa, UrlMercadoPublico)
+VALUES (N'$($codigoEmpresa.Replace("'", "''"))',
+        N'$($nombreEmpresa.Replace("'", "''"))',
+        N'$($rutEmpresa.Replace("'", "''"))',
+        N'$($urlPorDefecto.Replace("'", "''"))');
+"@
+
+    SqlOrigen $sqlEmpresa | ForEach-Object { Info $_ }
+
+    $comprobacion = [string] (SqlOrigen "SELECT CAST(COUNT(*) AS varchar(4)) FROM dbo.MpEmpresa;")
+    if ($comprobacion -match '^\s*1\s*$') {
+        Info "Guardada: $codigoEmpresa  $nombreEmpresa"
+    }
+    else {
+        Malo "No se ha podido guardar la empresa. MpEmpresa tiene [$comprobacion] fila(s)."
+        Malo 'No se copia NADA.'
+        exit 1
+    }
+}
+
 # --- 2 bis. La ingesta, si se ha pedido ---------------------------------------
 #
 # Va ANTES de comparar los esquemas, y no por orden: va antes de la copia porque
@@ -344,30 +498,14 @@ function SqlOrigen([string] $sql) {
 # ya esta entero se salta solo, que es lo que evita la pasada mensual de una
 # tarea que correra cada dia.
 
-function LeerTicketLocal {
-    if (-not (Test-Path $configLocal)) { return $null }
-
-    $utf8 = New-Object System.Text.UTF8Encoding($false)
-    $texto = [System.IO.File]::ReadAllText($configLocal, $utf8)
-    $limpio = ($texto -split "`n" | Where-Object { $_ -notmatch '^\s*//' }) -join "`n"
-
-    try { $config = $limpio | ConvertFrom-Json }
-    catch { return $null }
-
-    if (-not $config.MercadoPublico) { return $null }
-    return $config.MercadoPublico
-}
-
 if ($Ingerir) {
     Titulo 'Ingesta: trayendo datos de Mercado Publico'
 
     $local = LeerTicketLocal
     $ticket = ''
-    $codigo = ''
 
     if ($local) {
         $ticket = [string] $local.Ticket
-        $codigo = [string] $local.CodigoProveedor
     }
 
     if (-not $ticket -or $ticket.StartsWith('CAMBIAR-ESTE-VALOR')) {
@@ -376,8 +514,17 @@ if ($Ingerir) {
         exit 1
     }
 
+    # El codigo de proveedor ya NO sale de appsettings: sale de MpEmpresa, y el
+    # bloque de arriba se ha encargado de que haya fila. Si no la hay, el guion
+    # ya ha parado antes de llegar aqui, asi que que salga vacio significa que
+    # algo se ha roto entre medias y no que falte configuracion.
+    $codigo = ''
+    if ($configEmpresa) {
+        $codigo = ([string] (SqlOrigen "SELECT TOP 1 CAST(CodigoProveedor AS nvarchar(50)) FROM dbo.MpEmpresa;")).Trim()
+    }
+
     if (-not $codigo) {
-        Malo 'No hay CodigoProveedor en appsettings.Development.json.'
+        Malo 'MpEmpresa no tiene ninguna fila, y sin ella no hay codigo de proveedor con el que preguntar.'
         exit 1
     }
 
@@ -682,6 +829,31 @@ if (-not $Si) {
         Remove-Item Env:\SQLCMDPASSWORD -ErrorAction SilentlyContinue
         return
     }
+}
+
+# ---------------------------------------------------------------------------
+# EL ULTIMO GUARD, Y VA AQUI PORQUE DESPUES YA NO HAY ATRAS
+# ---------------------------------------------------------------------------
+#
+# El bloque de arriba, el que llena MpEmpresa, va al principio. Este va aqui, a
+# un paso de borrar el destino, y es la red debajo de la red.
+#
+# Por que hace falta si el otro ya esta: porque entre uno y otro pasa todo lo
+# que viene a continuacion —comparar esquemas, contar filas— y cualquiera de
+# esos pasos puede fallar, se puede interrumpir, o alguien puede vaciar la tabla
+# a mano mientras tanto. Y si al final de todo MpEmpresa esta vacia, lo que va
+# a pasar es que el remoto se queda sin empresa y la web no sabe a quien mira.
+#
+# Por eso el destino NO se vacia con la tabla vacia, aunque se pidiera. Un
+# destino intacto es un sitio con datos viejos; un destino sin empresa es un
+# sitio caido, y de los dos solo se puede arreglar uno volviendo a copiar.
+$antesDeBorrar = @(SqlOrigen 'SELECT CAST(COUNT(*) AS VARCHAR) FROM dbo.MpEmpresa;')[0]
+if ($antesDeBorrar -notmatch '^\s*[1-9]') {
+    Malo "MpEmpresa esta vacia en el origen ($antesDeBorrar). NO SE COPIA NADA."
+    Malo 'La copia dejaria el remoto sin empresa, y la web se quedaria sin saber a quien mira.'
+    Malo 'Con -SinLimpiar tampoco: el destino seguiria teniendo la fila vieja, pero la'
+    Malo 'empresa nueva no llegaria nunca. Llena MpEmpresa y vuelve a lanzarlo.'
+    exit 1
 }
 
 # --- 5. Borrar el destino, en orden inverso ----------------------------------

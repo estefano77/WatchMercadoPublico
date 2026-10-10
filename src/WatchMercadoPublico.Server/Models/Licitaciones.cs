@@ -153,6 +153,57 @@ public sealed class DetalleLicitacion
 /// Público, que puede no ser el corto que se usa por dentro.</param>
 public sealed record EmpresaBuscada(string CodigoEmpresa, string NombreEmpresa);
 
+/// <summary>
+/// La empresa vigilada, ya resuelta. Es lo que la pantalla necesita saber y
+/// nada más.
+/// </summary>
+/// <remarks>
+/// Sale de <c>MpEmpresa</c> en modo base de datos y de
+/// <c>Empresas/BuscarProveedor</c> en modo API, y es el mismo dato en los dos
+/// casos. Que un usuario no tenga que saber de dónde salió cada versión es
+/// medio objetivo: si las dos rutas pudieran dar cosas distintas, habría que
+/// elegir una, y la elección sería la fuente de un fallo que solo aparecería en
+/// uno de los dos modos.
+/// </remarks>
+/// <param name="CodigoProveedor">Vacío solo en modo demostración, donde no se
+/// consulta nada real.</param>
+/// <param name="NombreEmpresa">El nombre que pone la cabecera.</param>
+/// <param name="RutEmpresa">El RUT tal y como lo tiene quien resuelve, que puede
+/// venir de la tabla o del appsettings.</param>
+/// <param name="UrlMercadoPublico">El enlace de la cabecera, o vacío si no hay.</param>
+public sealed record EmpresaActual(
+    string CodigoProveedor,
+    string NombreEmpresa,
+    string RutEmpresa,
+    string UrlMercadoPublico)
+{
+    /// <summary>
+    /// El enlace de la cabecera cuando no hay ninguno guardado.
+    /// </summary>
+    /// <remarks>
+    /// Va aquí y no en la configuración porque la configuración ya no lleva datos
+    /// de empresa, y el enlace es uno de ellos: la API no lo devuelve y la
+    /// tabla lo tiene porque el guion de ingesta lo escribe al rellenar la
+    /// fila.
+    ///
+    /// <b>Está duplicado</b> en <c>cargar-base-remota.ps1</c>, que no puede usar
+    /// esta constante. Si algún día cambia la URL, hay que cambiar el <c>INSERT</c>
+    /// de la fila que no existe todavía; cambiar solo esta constante dejaría la
+    /// web con el enlace viejo y sin ningún aviso.
+    /// </remarks>
+    public const string UrlPorDefecto =
+        "https://www.mercadopublico.cl/Home/BusquedaLicitacion";
+
+    /// <summary>¿El enlace es utilizable?</summary>
+    /// <remarks>
+    /// Solo <c>https://</c>. Con la vacía no se pinta enlace, en vez de pintar
+    /// uno roto: es lo mismo que se hace con el resto de datos que pueden faltar.
+    /// </remarks>
+    public bool TieneUrl =>
+        UrlMercadoPublico.Length > 0
+        && UrlMercadoPublico.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+}
+
 public sealed class ItemAdjudicado
 {
     public int Correlativo { get; set; }

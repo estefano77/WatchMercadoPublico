@@ -50,6 +50,27 @@ builder.Services.AddSingleton<IngestaMercadoPublico>();
 // y dos a la vez no se limitarían entre sí, que es el 429 que se quiere evitar.
 builder.Services.AddSingleton<RitmoDeLlamadas>();
 
+/* La empresa vigilada. Singleton por DOS razones, y las dos importan.
+
+   La primera es que no cambia: es una fila de MpEmpresa que solo cambia si
+   alguien escribe en la base. /api/estado la pide en cada carga de pantalla y en
+   cada refresco, y releerla sería abrir una conexión al servidor de base de
+   datos para leer algo que no ha cambiado.
+
+   La segunda es que IngestaMercadoPublico, que también es singleton, la
+   necesita. Si fuera scoped, un singleton no podría depender de ella sin
+   quedarse con una instancia caducada.
+
+   Y CON UN ÁMBITO PROPIO, porque sus dos dependencias —MercadoPublicoCliente y
+   LectorMercadoPublico— son scoped. Si este tomara uno por inyección directa,
+   se quedaría con el primero que se creara y lo reutilizaría para siempre:
+   una dependencia cautiva, que es un fallo que no da error al construir nada y
+   un día da uno en producción que no se puede repetir.
+
+   IServiceScopeFactory es la forma de que un singleton use algo scoped sin
+   quedarse con ello. */
+builder.Services.AddSingleton<EmpresaVigilada>();
+
 builder.Services.ConfigureHttpJsonOptions(opciones =>
 {
     // El cliente Blazor usa los mismos nombres en C# y en el JSON, así que la
@@ -75,7 +96,38 @@ if (opciones.Modo == "demo")
         "ponerlo en 'v1' y configurar el ticket.");
 }
 
-if (!opciones.Servible)
+/* La empresa se resuelve UNA vez al arrancar, y no cuando entre la primera
+   petición.
+
+   No es una optimización: /api/estado también la resuelve, así que aquí no hace
+   falta. Es para que el log diga AL ARRANCAR qué empresa se está vigilando, y
+   sobre todo para que diga POR QUÉ no se pudo resolver. Si se deja para la
+   primera petición, el aviso aparece en el log dentro de un contexto que no
+   dice qué es lo que se estaba arrancando, y en modo API la llamada se hace
+   en un sitio distinto del que se lee el resultado.
+
+   Y se resuelve antes de app.Run() a propósito: si la empresa no está, la
+   aplicación ARRANCA IGUAL y lo dice. Parar aquí dejaría la web caída, y lo que
+   falla no es la aplicación sino que a alguien le falta un paso. La pantalla
+   puede enseñar un "la tabla MpEmpresa está vacía, corre este comando"; una
+   pantalla en blanco no puede enseñar nada. */
+var empresaVigilada = app.Services.GetRequiredService<EmpresaVigilada>();
+await empresaVigilada.ResolverAsync(CancellationToken.None);
+
+if (empresaVigilada.Actual is { } empresa)
+{
+    app.Logger.LogInformation(
+        "Vigilando a {Nombre} (código {Codigo}, RUT {Rut}), leída de {Fuente}.",
+        empresa.NombreEmpresa, empresa.CodigoProveedor, empresa.RutEmpresa,
+        opciones.UsaBaseDeDatos ? "MpEmpresa" : "Mercado Público");
+}
+else if (empresaVigilada.FaltaAlgo)
+{
+    app.Logger.LogWarning(
+        "No se ha podido resolver la empresa vigilada: {Motivo}", empresaVigilada.Motivo);
+}
+
+if (!opciones.PuedePreguntarALaApi)
 {
     /* La plantilla se busca con ruta ABSOLUTA, y no con una relativa.
 
@@ -127,8 +179,10 @@ if (!opciones.Servible)
             consulta a la API fallará. En la sección "MercadoPublico" del
             appsettings hacen falta DOS cosas:
 
-              - Ticket: se pide en mercadopublico.cl y llega al correo.
-              - CodigoProveedor: el código de la empresa en Mercado Público.
+              - RutEmpresa: el RUT de la empresa, con el formato DD.DDD.DDD-D.
+
+            El nombre y el código de proveedor ya NO van aquí: se sacan de la
+            tabla MpEmpresa, y el guion de carga la llena con ese RUT.
 
             Para una instalación normal, copia la plantilla y rellénala. Esta
             ruta es absoluta, así que el comando funciona desde cualquier
@@ -148,12 +202,6 @@ else if (!opciones.TieneTicket)
     app.Logger.LogWarning(
         "No hay ticket de Mercado Público. La empresa se puede mostrar, " +
         "pero las consultas fallarán.");
-}
-else if (!opciones.TieneCodigoProveedor)
-{
-    app.Logger.LogWarning(
-        "No hay CodigoProveedor en la sección MercadoPublico. Sin el código " +
-        "de la empresa no hay a quién consultar.");
 }
 else if (opciones.Modo == "c2")
 {

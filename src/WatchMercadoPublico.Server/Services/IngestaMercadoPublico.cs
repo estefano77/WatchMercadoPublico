@@ -33,11 +33,22 @@ public sealed class IngestaMercadoPublico
     private readonly ILogger<IngestaMercadoPublico> _log;
     private readonly SemaphoreSlim _candado = new(1, 1);
 
+    /// <summary>
+    /// De dónde sale el código de proveedor, que ya no está en la configuración.
+    /// </summary>
+    /// <remarks>
+    /// Es un singleton y <see cref="EmpresaVigilada"/> también, así que no hay
+    /// dependencia cautiva: los dos viven el mismo tiempo que el proceso.
+    /// </remarks>
+    private readonly EmpresaVigilada _empresa;
+
     public IngestaMercadoPublico(
         IOptions<MercadoPublicoOpciones> opciones,
+        EmpresaVigilada empresa,
         ILogger<IngestaMercadoPublico> log)
     {
         Opciones = opciones.Value;
+        _empresa = empresa;
         _log = log;
     }
 
@@ -53,7 +64,7 @@ public sealed class IngestaMercadoPublico
     /// vez, que es lo que pasó el 8 de octubre de 2026.
     /// </remarks>
     public bool PuedeIngerir =>
-        Opciones.BaseDeDatosUtilizable && Opciones.TieneTicket;
+        Opciones.BaseDeDatosUtilizable && Opciones.TieneTicket && _empresa.TieneCodigoProveedor;
 
     /// <summary>
     /// Qué falta para poder ingerir, o null si no falta nada.
@@ -126,7 +137,7 @@ public sealed class IngestaMercadoPublico
 
             comando.Parameters.Add("@desde", SqlDbType.Date).Value = hoy.AddDays(-DiasMirandoAtras);
             comando.Parameters.Add("@hasta", SqlDbType.Date).Value = hoy;
-            comando.Parameters.Add("@codigoProveedor", SqlDbType.NVarChar, 50).Value = Opciones.CodigoProveedor;
+            comando.Parameters.Add("@codigoProveedor", SqlDbType.NVarChar, 50).Value = _empresa.CodigoProveedor;
             comando.Parameters.Add("@ticket", SqlDbType.NVarChar, 200).Value = Opciones.Ticket;
             comando.Parameters.Add("@conDetalle", SqlDbType.Bit).Value = true;
 

@@ -113,7 +113,7 @@ public static class LicitacionesEndpoints
     /// <summary>
     /// Estado de la configuración: qué empresa se mira y cada cuánto se refresca.
     /// La interfaz lo usa para la cabecera y para avisar de que falta el ticket o
-    /// el código, en vez de dejar pulsar botones que no van a funcionar.
+    /// la empresa, en vez de dejar pulsar botones que no van a funcionar.
     ///
     /// OJO: se inyecta IOptions&lt;MercadoPublicoOpciones&gt;, NO la clase
     /// concreta. 'Configure&lt;T&gt;()' registra IOptions&lt;T&gt;, y un parámetro
@@ -121,15 +121,27 @@ public static class LicitacionesEndpoints
     /// cuerpo de la petición y la ruta peta al arrancar con "Body was inferred…",
     /// que tumba TODAS las rutas, incluida la SPA.
     /// </summary>
+    /// <remarks>
+    /// ES ASÍNCRONA POR LA EMPRESA, no por los datos. Antes leía todo de la
+    /// configuración y podía ser <c>static</c>. Ahora tiene que preguntar a
+    /// <see cref="EmpresaVigilada"/>, que va a la base de datos o a la API. No
+    /// hace falta esperar de verdad —si ya está resuelta devuelve al instante—,
+    /// pero la firma tiene que poder esperar porque hay un primer arranque en el
+    /// que no lo está.
+    /// </remarks>
     /// <param name="anio">Mes cuyas semanas se detalla. Por defecto, el actual.</param>
     /// <param name="mes">Mes cuyas semanas se detalla. Por defecto, el actual.</param>
-    private static IResult ObtenerEstado(
+    private static async Task<IResult> ObtenerEstado(
         IOptions<MercadoPublicoOpciones> opciones,
+        EmpresaVigilada empresa,
         [FromQuery] int? anio = null,
-        [FromQuery] int? mes = null)
+        [FromQuery] int? mes = null,
+        CancellationToken ct = default)
     {
         var config = opciones.Value;
         var hoy = DateOnly.FromDateTime(DateTime.Today);
+
+        await empresa.ResolverAsync(ct);
 
         // El periodo pedido, ya saneado. Un año o un mes que no existen se
         // sustituyen por el actual en vez de propagar el error: un dato raro en
@@ -141,9 +153,21 @@ public static class LicitacionesEndpoints
         {
             // En modo demo no hace falta ticket: los datos son inventados.
             TicketConfigurado = config.Modo == "demo" || config.TieneTicket,
-            EmpresaConfigurada = config.Modo == "demo" || config.TieneCodigoProveedor,
-            Servible = config.Servible,
+            EmpresaConfigurada = config.Modo == "demo" || empresa.TieneCodigoProveedor,
+            Servible = config.Modo == "demo" || empresa.TieneCodigoProveedor,
             Modo = config.Modo,
+
+            /* POR QUÉ "Servible" ES "QUE HAYA EMPRESA" Y NO LO DE MERCADOPUBLICO.Opciones.
+               Antes, Servible miraba la configuración entera. Ahora lo que decide
+               si se puede consultar es si se sabe a quién se consulta, y eso ya
+               no está en la configuración: sale de MpEmpresa. La propiedad
+               antigua se queda en las opciones para lo que sí depende solo de
+               ellas, y aquí no se usa.
+
+               Fijate en que NO aparece BaseDeDatosUtilizable: una conexión que
+               falla y una empresa que no se encuentra son dos cosas distintas y
+               el aviso tiene que decir cuál de las dos es. Eso lo cuenta
+               EmpresaVigilada.Motivo, que lo sabe porque lo ha intentado. */
 
             // La fuente, y lo que se puede hacer con ella. El cliente lo
             // necesita para dos cosas: esconder el selector de semana en modo
@@ -157,18 +181,34 @@ public static class LicitacionesEndpoints
             UsaBaseDeDatos = config.UsaBaseDeDatos,
             BaseDeDatosUtilizable = config.BaseDeDatosUtilizable,
 
+            // El motivo, YA EN CASTELLANO Y EN UNA FRASE, porque aquí es donde se
+            // sabe de verdad. Antes lo armaba el cliente con tres banderas
+            // binarias y por eso solo podía decir dos cosas: "falta el ticket" o
+            // "falta el código de proveedor". Con la empresa viniendo de la base
+            // hay más motivos que eso y ninguno se parece a los otros:
+            //
+            //     - la tabla MpEmpresa está vacía para ese RUT
+            //     - mp.LeeEmpresa no está instalado en la base
+            //     - el RUT del appsettings no tiene el formato que acepta la API
+            //     - el RUT devuelve más de una empresa y no se sabe cuál
+            //
+            // Y son cuatro arreglos distintos. Decir "falta el código" cuatro
+            // veces sería un aviso que no dice nada, que es exactamente el
+            // problema que había.
+            FaltaConfiguracion = empresa.FaltaAlgo ? empresa.Motivo : null,
+
             Empresa = new
             {
-                config.NombreEmpresa,
-                config.RutEmpresa,
-                config.CodigoProveedor,
+                NombreEmpresa = empresa.Actual?.NombreEmpresa ?? "",
+                RutEmpresa = empresa.Actual?.RutEmpresa ?? "",
+                CodigoProveedor = empresa.Actual?.CodigoProveedor ?? "",
 
-                // El enlace de la cabecera, ya escrito desde la configuración.
-                // Viaja vacío si la URL no es utilizable, para que el cliente no
-                // tenga que decidir: pintar un enlace es cosa del servidor, que
-                // es quien sabe si la URL es válida.
-                UrlMercadoPublico = config.TieneUrlMercadoPublico
-                    ? config.UrlMercadoPublico
+                // El enlace de la cabecera. Viaja vacío si la URL no es
+                // utilizable, para que el cliente no tenga que decidir: pintar
+                // un enlace es cosa del servidor, que es quien sabe si la URL
+                // sirve.
+                UrlMercadoPublico = empresa.Actual is { } e && e.TieneUrl
+                    ? e.UrlMercadoPublico
                     : "",
             },
 
@@ -322,6 +362,7 @@ public static class LicitacionesEndpoints
     private static async Task<IResult> ObtenerMes(
         LectorMercadoPublico lector,
         IOptions<MercadoPublicoOpciones> opciones,
+        EmpresaVigilada empresa,
         ILoggerFactory registros,
         CancellationToken ct,
         [FromQuery] int anio,
@@ -329,6 +370,8 @@ public static class LicitacionesEndpoints
     {
         var config = opciones.Value;
         var log = registros.CreateLogger("Mes");
+
+        await empresa.ResolverAsync(ct);
 
         if (config.UsaBaseDeDatos && !config.BaseDeDatosUtilizable)
             return Results.Problem(
@@ -342,7 +385,7 @@ public static class LicitacionesEndpoints
 
         try
         {
-            var leido = await lector.LeerMesAsync(config.CodigoProveedor, anio, mes, ct);
+            var leido = await lector.LeerMesAsync(empresa.CodigoProveedor, anio, mes, ct);
 
             return Results.Ok(new
             {
@@ -405,6 +448,7 @@ public static class LicitacionesEndpoints
         MercadoPublicoCliente api,
         CacheMercadoPublico cache,
         IOptions<MercadoPublicoOpciones> opciones,
+        EmpresaVigilada empresa,
         ILoggerFactory registros,
         CancellationToken ct,
         [FromQuery] int anio,
@@ -416,11 +460,19 @@ public static class LicitacionesEndpoints
         var config = opciones.Value;
         var log = registros.CreateLogger("Semana");
 
-        if (!config.Servible)
+        await empresa.ResolverAsync(ct);
+
+        /* El mensaje sale de EmpresaVigilada y no de tres banderas de la
+           configuración. Antes podía decir dos cosas —"falta el ticket" o "falta
+           el código"—, y ahora hay motivos que no son ninguno de esos dos: que
+           la tabla MpEmpresa esté vacía, que mp.LeeEmpresa no esté instalado en
+           el hosting, que el RUT no tenga el formato, o que devuelva más de una
+           empresa. Todos se resuelven con una acción distinta, así que un
+           mensaje único para los cuatro dejaría a quien lo lee sin saber qué
+           hacer. */
+        if (config.Modo != "demo" && !empresa.TieneCodigoProveedor)
             return Results.Problem(
-                config.TieneTicket
-                    ? "Falta el código de proveedor de la empresa en la configuración del servidor."
-                    : "Falta el ticket de Mercado Público en la configuración del servidor.",
+                empresa.Motivo ?? "No se sabe a qué empresa se está mirando.",
                 statusCode: StatusCodes.Status503ServiceUnavailable,
                 title: "API no configurada");
 
@@ -517,7 +569,7 @@ public static class LicitacionesEndpoints
                     // refrescar = true. Es la única manera de hacerlo y por eso
                     // no puede quedarse sin efecto justo en el día que más
                     // urge reintentar.
-                    if (!refrescar && cache.DiaFallidoReciente(config.CodigoProveedor, dia))
+                    if (!refrescar && cache.DiaFallidoReciente(empresa.CodigoProveedor, dia))
                     {
                         // Ojo con lo que esto NO es: el día se sigue anotando como
                         // sin respuesta, igual que si se hubiera preguntado. Y
@@ -530,13 +582,13 @@ public static class LicitacionesEndpoints
                         continue;
                     }
 
-                    var lote = forzarConsulta ? null : cache.ObtenerDia(config.CodigoProveedor, dia);
+                    var lote = forzarConsulta ? null : cache.ObtenerDia(empresa.CodigoProveedor, dia);
 
                     if (lote is null)
                     {
                         desdeCache = false;
 
-                        lote = await ConsultarDiaAsync(config, api, cache, dia, log, intentos, ct);
+                        lote = await ConsultarDiaAsync(config, api, cache, empresa, dia, log, intentos, ct);
 
                         if (lote is null)
                         {
@@ -547,7 +599,7 @@ public static class LicitacionesEndpoints
 
                             // Y el fallo se guarda, que es lo que hace que la
                             // próxima consulta no vuelva a pagar los 60 s.
-                            cache.GuardarDiaFallido(config.CodigoProveedor, dia);
+                            cache.GuardarDiaFallido(empresa.CodigoProveedor, dia);
 
                             log.LogWarning("El día {Dia} de la semana no se pudo consultar", dia);
                             continue;
@@ -791,13 +843,16 @@ public static class LicitacionesEndpoints
         LectorMercadoPublico lector,
         CacheMercadoPublico cache,
         IOptions<MercadoPublicoOpciones> opciones,
+        EmpresaVigilada empresa,
         CancellationToken ct)
     {
         var config = opciones.Value;
 
-        if (!config.Servible)
+        await empresa.ResolverAsync(ct);
+
+        if (config.Modo != "demo" && !empresa.TieneCodigoProveedor)
             return Results.Problem(
-                "Falta la configuración de Mercado Público en el servidor.",
+                empresa.Motivo ?? "No se sabe a qué empresa se está mirando.",
                 statusCode: StatusCodes.Status503ServiceUnavailable,
                 title: "API no configurada");
 
@@ -829,7 +884,7 @@ public static class LicitacionesEndpoints
                 //
                 // El 404 es un resultado honesto y no un error: de esa licitacion
                 // no se ha importado la ficha todavía.
-                detalle = await lector.LeerDetalleAsync(config.CodigoProveedor, codigo, ct);
+                detalle = await lector.LeerDetalleAsync(empresa.CodigoProveedor, codigo, ct);
 
                 if (detalle is null)
                     return Results.NotFound(new
@@ -880,11 +935,17 @@ public static class LicitacionesEndpoints
     /// Antes esta rutina se llamaba ConsultarHoyAsync y solo había un día. Ahora
     /// hay hasta cinco en una semana, y por eso devuelve null en vez de Fallar:
     /// un día sin respuesta no puede ser motivo para perder los otros cuatro.
+    ///
+    /// El código de proveedor entra con <paramref name="empresa"/> y no sale de
+    /// <paramref name="config"/>, porque ya no está en la configuración. Se pasa
+    /// el resolvedor entero y no el string porque el que llama ya lo tiene, y
+    /// porque un string suelto se podría cambiar por error sin que nadie lo vea.
     /// </summary>
     private static async Task<List<Licitacion>?> ConsultarDiaAsync(
         MercadoPublicoOpciones config,
         MercadoPublicoCliente api,
         CacheMercadoPublico cache,
+        EmpresaVigilada empresa,
         DateOnly dia,
         ILogger log,
         int intentos,
@@ -898,9 +959,9 @@ public static class LicitacionesEndpoints
             {
                 var lote = config.Modo == "demo"
                     ? DatosDemo.Dia(dia)
-                    : await api.ListarLicitacionesDelDiaAsync(config.CodigoProveedor, dia, ct);
+                    : await api.ListarLicitacionesDelDiaAsync(empresa.CodigoProveedor, dia, ct);
 
-                cache.GuardarDia(config.CodigoProveedor, dia, lote);
+                cache.GuardarDia(empresa.CodigoProveedor, dia, lote);
                 return lote;
             }
             catch (OperationCanceledException)
@@ -954,9 +1015,15 @@ public static class LicitacionesEndpoints
         };
 
     /// <summary>Vacía la caché del proveedor para forzar consulta nueva.</summary>
-    private static IResult Refrescar(CacheMercadoPublico cache, IOptions<MercadoPublicoOpciones> opciones)
+    /// <remarks>
+    /// <c>EmpresaVigilada</c> entra aquí por el código de proveedor, que ya no
+    /// está en la configuración. No hace falta <c>ResolverAsync</c>: con la
+    /// empresa sin resolver el código sale vacío, y vaciar la caché de un
+    /// proveedor que no existe es lo mismo que no hacer nada.
+    /// </remarks>
+    private static IResult Refrescar(CacheMercadoPublico cache, EmpresaVigilada empresa)
     {
-        cache.Invalidar(opciones.Value.CodigoProveedor);
+        cache.Invalidar(empresa.CodigoProveedor);
         return Results.Ok(new { mensaje = "Caché actualizada." });
     }
 

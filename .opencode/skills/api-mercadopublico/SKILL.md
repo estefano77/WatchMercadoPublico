@@ -136,11 +136,63 @@ mostrará nada de hoy.** No es un fallo, es que no hay forma de preguntar. Los
 días laborables siguientes lo cubren igual, porque el rango sigue siendo de 30
 días.
 
-## 8. Un día cambia mientras dura, y se pregunta por la mañana
+## 8. `Empresas/BuscarProveedor`: RUT → código de proveedor
 
-**Este es el fallo más caro de los cinco, porque no se ve.**
+```
+GET https://api.mercadopublico.cl/servicios/v1/Publico/Empresas/BuscarProveedor
+    ?rutempresaproveedor=86.130.200-8&ticket=...
+```
 
-La regla que parecía obvia —"las publicaciones de ayer ya no cambian, las de hoy
+Medido el 10 de octubre de 2026. **Tres cosas que no son las que dice la
+documentación**, y las tres dan fallos que no dicen qué son.
+
+**El parámetro es `rutempresaproveedor`, no `rut`.** Con `rut` la API contesta
+`HTTP 500` sin decir por qué. El mensaje no menciona ni el RUT ni el parámetro:
+parece que se cayó la plataforma.
+
+**El RUT tiene un formato exacto, y un RUT mal formado da `500`, no cero
+resultados.**
+
+```
+86.130.200-8   -> 200     DD.DDD.DDD-D
+12.345.678-9   -> 200
+123.456.789-5  -> 500     tres dígitos delante
+ 1.234.567-8   -> 500     un dígito delante
+861302008      -> 500     sin puntos
+(vacío)        -> 500
+```
+
+El patrón que parece evidente, `\d{1,2}`, **no vale**: acepta `1.234.567-8` y la
+API lo rechaza. Son exactamente dos dígitos delante.
+
+**Y LA LISTA NO FILTRA. Esta es la que casi se cuela.**
+
+```
+86.130.200-8 -> Cantidad 1  ->  71284   (correcto)
+99.999.999-9 -> Cantidad 2  ->  150821  "Canale"
+                             -> 1294859 "SANDRA CECILIA CISTERNA ALVIAL"
+```
+
+Un RUT bien escrito que no es de nadie devuelve **empresas de verdad**. La
+búsqueda se parece a lo que haya. Por eso:
+
+- el cliente devuelve **todas y no elige ninguna**
+- quien llama decide, y **solo con `Cantidad == 1`**
+
+Con un RUT mal escrito, coger el primer elemento no da "sin resultado": da **la
+empresa equivocada**, y todo lo que viene después escribe sus licitaciones sin
+un solo error.
+
+La lista se llama `listaEmpresas`, no `Listado` como en los demás endpoints. Con
+la clave equivocada la respuesta llega con `Cantidad: 1` y lista vacía, que es
+indistinguible de "no hay ninguna empresa con ese RUT".
+
+Y `FechaCreacion` que viene en la respuesta es la hora del servidor, no la de
+Mercado Público. No sirve para nada.
+
+## 9. Un día cambia mientras dura, y se pregunta por la mañana
+
+**Y ES EL MÁS CARO DE TODOS, porque no se ve.**La regla que parecía obvia —"las publicaciones de ayer ya no cambian, las de hoy
 sí"— está al revés. Un día no cambia cuando se termina: cambia mientras dura, y
 este proyecto mira el rango **a las 06:30**.
 

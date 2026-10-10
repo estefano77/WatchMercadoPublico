@@ -1,107 +1,126 @@
+using System.Text.Json;
 using WatchMercadoPublico.Client.Models;
 using Xunit;
 
 namespace WatchMercadoPublico.Client.Tests;
 
 /// <summary>
-/// El aviso de "la aplicación no está configurada", en los dos modos de fuente.
+/// El aviso de "la aplicación no está configurada": que el cliente MIRE lo que
+/// dice el servidor y no lo invente.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Esta clase existe por un fallo que estuvo en pantalla al poner la fuente en
-/// marcha. En modo base de datos aparecía un aviso pidiendo un ticket, en una
-/// instalación que ya tenía la base configurada y el código de proveedor puesto,
-/// y no hacía falta para nada: en ese modo no se pregunta a Mercado Público.
+/// Antes esta clase comprobaba una propiedad <c>get</c> del cliente que armaba el
+/// mensaje con tres banderas binarias. Eso ya no existe: la empresa sale de
+/// <c>MpEmpresa</c> y hay motivos que el cliente no puede ni saber ni deducir.
+/// El mensaje llega escrito desde <c>/api/estado</c> y aquí se limita a mostrarse.
 /// </para>
 ///
 /// <para>
-/// El aviso es lo que más se lee de toda la pantalla cuando algo va mal, así que
-/// si dice la cosa equivocada manda sobre lo que haya.
+/// La consecuencia es que estas pruebas ya no pueden fijar el TEXTO de cada
+/// caso, porque el texto lo pone el servidor y no el cliente. Lo que fijan es lo
+/// contrario: que el cliente no lo sustituya por su cuenta.
+/// </para>
+///
+/// <para>
+/// Y el riesgo real que queda es otro, más aburrido y más probable: que la
+/// propiedad no se empareje con la clave del JSON y llegue siempre vacía. Eso
+/// dejaría el aviso sin pintar en cualquier instalación mal configurada, sin
+/// error ni aviso de nada. La primera prueba de esta clase es exactamente eso.
 /// </para>
 /// </remarks>
 public class AvisoDeConfiguracionTests
 {
-    private static EstadoApi Estado(
-        string fuente = "api",
-        bool baseUtilizable = true,
-        bool conTicket = true,
-        bool conEmpresa = true) => new()
-        {
-            Fuente = fuente,
-            BaseDeDatosUtilizable = baseUtilizable,
-            TicketConfigurado = conTicket,
-            EmpresaConfigurada = conEmpresa,
-            Servible = conTicket && conEmpresa,
-        };
-
-    // --- Modo base de datos ---
+    /// <summary>Las opciones con las que se deserializa el estado.</summary>
+    private static readonly JsonSerializerOptions Opciones = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true,
+    };
 
     [Fact]
-    public void En_modo_base_de_datos_no_se_pide_ticket()
+    public void El_mensaje_del_servidor_llega_tal_cual_incluso_con_acentos()
     {
-        // Lo que se rompió de verdad: con fuente "sql" y sin ticket, el aviso
-        // decía que faltaba el ticket. No faltaba nada y el mensaje era falso.
-        var estado = Estado(fuente: "sql", conTicket: false);
+        // El caso que más miedo da al cambiar esto. "afición" no es un ejemplo de
+        // laboratorio: el mensaje se arma en el servidor y se pinta en el
+        // cliente, y si el emparejamiento de la propiedad falla se queda en
+        // blanco sin decir nada. Lo que no se puede es "arreglarlo" sustituyendo
+        // un texto con otro que se parezca.
+        const string motivo =
+            "la tabla MpEmpresa está vacía para el RUT 86.130.200-8. Se llena sola: "
+            + "corre scripts\\cargar-base-remota.ps1 -Ingerir -Si en la máquina que carga la base.";
+
+        var estado = Deserializar("""
+            {
+              "servible": false,
+              "empresaConfigurada": false,
+              "usaBaseDeDatos": true,
+              "faltaConfiguracion": "%MOTIVO%"
+            }
+            """.Replace("%MOTIVO%", motivo.Replace("\\", "\\\\").Replace("\"", "\\\"")));
+
+        Assert.Equal(motivo, estado.FaltaConfiguracion);
+    }
+
+    [Fact]
+    public void Sin_mensaje_del_servidor_no_se_inventa_uno()
+    {
+        // Y la mitad que importa. Con empresa no configurada y SIN mensaje, el
+        // cliente tiene que callarse. Si apareciera un aviso, sería el cliente
+        // decidiendo que algo falta por su cuenta, que es exactamente lo que se
+        // quitó al hacer que el mensaje viaje desde el servidor: el cliente sabe
+        // que no hay empresa, pero no sabe POR QUÉ, y un motivo inventado puede
+        // mandar a alguien a donde no es.
+        var estado = Deserializar("""
+            {
+              "servible": false,
+              "empresaConfigurada": false,
+              "ticketConfigurado": true
+            }
+            """);
+
+        Assert.False(estado.EmpresaConfigurada);
+        Assert.Null(estado.FaltaConfiguracion);
+    }
+
+    [Theory]
+    // Los cuatro motivos que el servidor sabe dar y el cliente no. Se comprueba
+    // que ninguno se pierde por el camino, con su texto entero.
+    [InlineData("falta el ticket de Mercado Público.")]
+    [InlineData("en la base no está el procedimiento mp.LeeEmpresa.")]
+    [InlineData("el RUT de la sección MercadoPublico no tiene el formato DD.DDD.DDD-D.")]
+    [InlineData("el RUT 86.130.200-8 devuelve 2 empresas en Mercado Público.")]
+    public void Cualquier_motivo_sobrevive_al_viaje(string motivo)
+    {
+        var estado = Deserializar(
+            "{\"servible\":false,\"faltaConfiguracion\":\""
+            + motivo.Replace("\"", "\\\"") + "\"}");
+
+        Assert.Equal(motivo, estado.FaltaConfiguracion);
+    }
+
+    [Fact]
+    public void Un_estado_correcto_no_trae_motivo()
+    {
+        var estado = Deserializar("""
+            {"servible":true,"empresaConfigurada":true,"ticketConfigurado":true,
+             "faltaConfiguracion":null}
+            """);
 
         Assert.Null(estado.FaltaConfiguracion);
     }
 
     [Fact]
-    public void En_modo_base_de_datos_sin_cadena_si_se_avisa()
+    public void Un_estado_sin_la_clave_no_revienta()
     {
-        var aviso = Estado(fuente: "sql", baseUtilizable: false).FaltaConfiguracion;
+        // Y que falte la clave entero tampoco es un error. El servidor puede
+        // publicar una versión anterior que no la mande, y reventar la pantalla al
+        // arrancar por eso sería lo peor de todo: la web entera caída por una
+        // propiedad que falta.
+        var estado = Deserializar("""{"servible":true,"empresaConfigurada":true}""");
 
-        Assert.NotNull(aviso);
-        Assert.Contains("cadena de conexi", aviso!.Replace("ó", "o"));
+        Assert.Null(estado.FaltaConfiguracion);
     }
 
-    [Fact]
-    public void En_modo_base_de_datos_tambien_hace_falta_el_codigo_de_proveedor()
-    {
-        // Lo que se lee de la base está etiquetado por empresa. Sin esto no se
-        // sabe qué parte mirar, así que el aviso tiene que seguir apareciendo.
-        var estado = Estado(fuente: "sql", conEmpresa: false);
-
-        Assert.Contains("proveedor", estado.FaltaConfiguracion!);
-    }
-
-    [Fact]
-    public void En_modo_base_de_datos_la_cadena_falta_antes_que_el_codigo()
-    {
-        // El orden importa: si los dos faltan y el aviso dice lo de la empresa,
-        // el usuario configura el código, lo reinicia y sigue viendo un aviso.
-        var aviso = Estado(fuente: "sql", baseUtilizable: false, conEmpresa: false)
-            .FaltaConfiguracion!;
-
-        Assert.Contains("cadena", aviso.Replace("ó", "o"));
-    }
-
-    // --- Modo API: lo de antes, sin cambios ---
-
-    [Fact]
-    public void En_modo_api_sin_ticket_se_pide_el_ticket()
-    {
-        Assert.Contains("ticket", Estado(fuente: "api", conTicket: false).FaltaConfiguracion!);
-    }
-
-    [Fact]
-    public void En_modo_api_sin_codigo_de_proveedor_se_pide_el_codigo()
-    {
-        Assert.Contains("proveedor", Estado(fuente: "api", conEmpresa: false).FaltaConfiguracion!);
-    }
-
-    [Fact]
-    public void En_modo_api_todo_configurado_no_dice_nada()
-    {
-        Assert.Null(Estado(fuente: "api").FaltaConfiguracion);
-    }
-
-    [Fact]
-    public void En_modo_api_la_cadena_de_conexion_no_da_lo_mismo()
-    {
-        // La cadena de la base no tiene nada que ver con este modo. Que no se
-        // note es lo que evita un aviso fantasma en una instalación
-        // que nunca usa la base.
-        Assert.Null(Estado(fuente: "api", baseUtilizable: false).FaltaConfiguracion);
-    }
+    private static EstadoApi Deserializar(string json) =>
+        JsonSerializer.Deserialize<EstadoApi>(json, Opciones)!;
 }
