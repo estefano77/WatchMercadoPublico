@@ -579,6 +579,30 @@ foreach ($tabla in $tablas) {
         Malo "$tabla NO coincide:"
         $soloOrigen  | ForEach-Object { Malo "   solo en origen:  $_" }
         $soloDestino | ForEach-Object { Malo "   solo en destino: $_" }
+
+        # QUE HACER CON ESTO. Antes solo salia la lista de diferencias y se
+        # quedaba en "algo no casa". El caso real: se anadio Descripcion a
+        # MpLicitacionItem, se ejecuto 01 en la base de DESARROLLO y se lanzo
+        # este guion. El destino no la tenia, porque 01 no se habia ejecutado
+        # alla, y el mensaje decia:
+        #
+        #     solo en origen:  Descripcion nvarchar(4000) NULL
+        #
+        # que no dice nada de que hay que hacer. Se puede leer como "el destino
+        # esta mal" y no como "el destino necesita el ALTER".
+        #
+        # Y es que el CREATE TABLE guardado de 01 no anade columnas a una tabla
+        # que ya existe: hay un ALTER guardado aparte, con COL_LENGTH. Por eso
+        # la pista dice "01 entero" y no "la columna".
+        if ($soloOrigen) {
+            Write-Host ''
+            Malo '   El destino no tiene lo que tiene el origen.'
+            Malo '   Suele ser que 01-esquema-mercadopublico.sql no se ha ejecutado'
+            Malo '   en el destino DESPUES de anadir una columna al origen. Es un'
+            Malo '   ALTER guardado con COL_LENGTH, no el CREATE TABLE: correr solo'
+            Malo '   el CREATE no anade nada a una tabla que ya existe.'
+            Malo '   Aplicar 01 entero en el destino y volver a lanzar este guion.'
+        }
         $desajustes++
     }
     else {
