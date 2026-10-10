@@ -478,29 +478,40 @@ PRINT '';
      entre el primer y el ULTIMO dia de ese mes, calculado aqui con aritmetica
      independiente.
 
-     Esto detecta un @finDelMes mal hecho, y en esta base hay dias que lo
-     detectan: el 27 de febrero de 2026, que es el dia 27 de un mes de 28, y el
-     29 de julio, que es el dia 29 de uno de 31. Si el rango se quedara corto o
-     se comiera un dia de mas, uno de esos dos se caeria del total.
+     Esto detecta un @finDelMes mal hecho. Con una base que solo tiene 2026, el
+     27 de febrero y el 29 de julio lo detectaban: son el dia 27 de un mes de 28
+     y el dia 29 de uno de 31, asi que un rango corto o largo los deja fuera.
+     Con datos de varios anos la lista de (ano, mes) sale de los propios datos,
+     que es lo que hace que la comprobacion siga sirviendo en cualquier base.
 
-     Con YEAR(FechaPublicacion) = @anio AND MONTH(...) = @mes tambien pasaria:
-     las dos formas devuelven las mismas filas. Lo que cambia, y no se comprueba
-     aqui, es si el indice IX_MpLicitacion_FechaPublicacion se puede usar. */
-DECLARE @meses TABLE (Mes int, TotalDelMes int, RangoDelMes int);
+     OJO, Y ESTO SE ARREGLO PORQUE FALLO: la version anterior tomaba solo
+     MONTH(FechaPublicacion) y filtra con un rango fijo de 2026. En cuanto la
+     base tuvo licitaciones de 2024 y 2025 -que las tiene-, los meses que solo
+     existen en esos anos daban cero y la prueba se caia sin que hubiera nada
+     roto:
 
-INSERT @meses (Mes)
-SELECT DISTINCT MONTH(FechaPublicacion) FROM dbo.MpLicitacion WHERE CodigoProveedor = @proveedor;
+         [MAL] 18. ... -> mes 5: 0 vs 0; mes 6: 0 vs 0; mes 8: 0 vs 0
+
+     Es el mismo fallo que el de la prueba 13, y por el mismo motivo: una
+     comprobacion atada a los datos vigentes. Aqui la diferencia es que el ano va
+     con el mes, y con eso los dos metodos se comparan siempre sobre el mismo
+     conjunto. */
+DECLARE @meses TABLE (Anio int, Mes int, TotalDelMes int, RangoDelMes int);
+
+INSERT @meses (Anio, Mes)
+SELECT DISTINCT YEAR(FechaPublicacion), MONTH(FechaPublicacion)
+FROM dbo.MpLicitacion WHERE CodigoProveedor = @proveedor;
 
 UPDATE m
 SET TotalDelMes = (SELECT COUNT(*) FROM dbo.MpLicitacion AS l
                    WHERE l.CodigoProveedor = @proveedor
-                     AND l.FechaPublicacion >= '2026-01-01'
-                     AND l.FechaPublicacion <= '2026-12-31'
+                     AND YEAR(l.FechaPublicacion) = m.Anio
                      AND MONTH(l.FechaPublicacion) = m.Mes),
     RangoDelMes = (SELECT COUNT(*) FROM dbo.MpLicitacion AS l
                    WHERE l.CodigoProveedor = @proveedor
-                     AND l.FechaPublicacion >= DATEFROMPARTS(2026, m.Mes, 1)
-                     AND l.FechaPublicacion <= EOMONTH(DATEFROMPARTS(2026, m.Mes, 1))
+                     AND l.FechaPublicacion >= DATEFROMPARTS(m.Anio, m.Mes, 1)
+                     AND l.FechaPublicacion <= EOMONTH(DATEFROMPARTS(m.Anio, m.Mes, 1))
+                     AND YEAR(l.FechaPublicacion) = m.Anio
                      AND MONTH(l.FechaPublicacion) = m.Mes)
 FROM @meses AS m;
 
@@ -509,7 +520,8 @@ IF NOT EXISTS (SELECT 1 FROM @meses WHERE TotalDelMes <> RangoDelMes OR RangoDel
 ELSE
 BEGIN
     DECLARE @detalle nvarchar(300) = (
-        SELECT STRING_AGG(CONCAT('mes ', Mes, ': ', TotalDelMes, ' vs ', RangoDelMes), '; ')
+        SELECT STRING_AGG(CONCAT(Anio, '-', RIGHT('0' + CONVERT(varchar(2), Mes), 2), ': ',
+                                    TotalDelMes, ' vs ', RangoDelMes), '; ')
         FROM @meses WHERE TotalDelMes <> RangoDelMes OR RangoDelMes = 0);
 
     PRINT '  [MAL] 18. El rango y el filtro por mes no coinciden -> ' + @detalle;
