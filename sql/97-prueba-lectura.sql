@@ -679,5 +679,181 @@ BEGIN CATCH
 END CATCH
 
 PRINT '';
-PRINT '--- Las 22 comprobaciones pasaron. No queda nada escrito. ---';
+PRINT '=== mp.LeeEmpresa: la empresa vigilada ===';
+PRINT '';
+
+/* Esta sección ESCRIBE en MpEmpresa, y las de arriba no escriben nada. Por eso
+   va en su propia transacción, que se cierra aquí mismo con un ROLLBACK.
+
+   Y el motivo de que haga falta escribir es el que hace que estas pruebas
+   existan: mp.LeeEmpresa devuelve cero filas cuando la tabla está vacía, y
+   eso es una respuesta CORRECTA. Para comprobar que devuelve la fila cuando
+   tiene que devolverla hay que ponerla.
+
+   El caso que importa más que los otros es el del RUT escrito de otra forma.
+   La comparación es normalizada a propósito, y una prueba que solo pasara el
+   RUT tal como está en el appsettings no comprobaría NADA de esa decisión: el
+   día que alguien cambiara "86.130.200-8" por "861302008" —el mismo RUT— y
+   la comparación volviera a ser textual, estas pruebas seguirían en verde. */
+BEGIN TRY
+    BEGIN TRAN;
+
+    DECLARE @empresa TABLE (
+        CodigoProveedor   nvarchar(50),
+        NombreEmpresa     nvarchar(300),
+        RutEmpresa        nvarchar(20),
+        UrlMercadoPublico nvarchar(500),
+        UltimaActualizacion datetime2(3));
+
+    DECLARE @n int, @codigo nvarchar(50), @nombre nvarchar(300), @url nvarchar(500);
+    DECLARE @mal int = 0;
+
+    DELETE FROM dbo.MpEmpresa;
+
+    INSERT INTO dbo.MpEmpresa (CodigoProveedor, NombreEmpresa, RutEmpresa, UrlMercadoPublico)
+    VALUES (N'999001', N'EMPRESA DE PRUEBA UNO', N'86.130.200-8', N'https://ejemplo.invalid/prueba');
+
+    INSERT INTO dbo.MpEmpresa (CodigoProveedor, NombreEmpresa, RutEmpresa)
+    VALUES (N'999002', N'EMPRESA DE PRUEBA DOS', N'761234560');
+
+    /* 23. El RUT tal como lo escribe una persona, con puntos y guion. */
+    INSERT @empresa EXEC mp.LeeEmpresa @rutEmpresa = N'86.130.200-8';
+    SELECT @n = COUNT(*), @codigo = MAX(CodigoProveedor),
+           @nombre = MAX(NombreEmpresa), @url = MAX(UrlMercadoPublico) FROM @empresa;
+    IF @n = 1 AND @codigo = N'999001'
+       AND @nombre = N'EMPRESA DE PRUEBA UNO'
+       AND @url = N'https://ejemplo.invalid/prueba'
+        PRINT '  [OK] 23. mp.LeeEmpresa devuelve la fila entera con el RUT bien escrito.';
+    ELSE
+    BEGIN
+        PRINT '  [MAL] 23. mp.LeeEmpresa devolvió ' + CONVERT(varchar(2), @n)
+              + ' fila(s), código [' + ISNULL(@codigo, N'(nada)') + N'] y URL ['
+              + ISNULL(@url, N'(nada)') + '].';
+        SET @mal = @mal + 1;
+    END
+
+    /* 24. EL MISMO RUT, escrito SIN puntos ni guion. */
+    DELETE @empresa;
+    INSERT @empresa EXEC mp.LeeEmpresa @rutEmpresa = N'861302008';
+    SELECT @n = COUNT(*), @codigo = MAX(CodigoProveedor) FROM @empresa;
+    IF @n = 1 AND @codigo = N'999001'
+        PRINT '  [OK] 24. El mismo RUT sin puntos y sin guion también se encuentra.';
+    ELSE
+    BEGIN
+        PRINT '  [MAL] 24. Con el RUT normalizado devolvió ' + CONVERT(varchar(2), @n) + ' fila(s).';
+        SET @mal = @mal + 1;
+    END
+
+    /* 25. Y con puntos pero sin guion, que es el tercer formato de verdad. */
+    DELETE @empresa;
+    INSERT @empresa EXEC mp.LeeEmpresa @rutEmpresa = N'761234560';
+    SELECT @n = COUNT(*), @codigo = MAX(CodigoProveedor) FROM @empresa;
+    IF @n = 1 AND @codigo = N'999002'
+        PRINT '  [OK] 25. Un RUT con puntos y sin guion también se encuentra.';
+    ELSE
+    BEGIN
+        PRINT '  [MAL] 25. Con otro formato devolvió ' + CONVERT(varchar(2), @n) + ' fila(s).';
+        SET @mal = @mal + 1;
+    END
+
+    /* 26. Un RUT que no existe: CERO filas y NINGÚN error. Esto es lo que
+       permite que la pantalla diga "no hay ninguna empresa con ese RUT" en vez
+       de caerse. */
+    DELETE @empresa;
+    BEGIN TRY
+        INSERT @empresa EXEC mp.LeeEmpresa @rutEmpresa = N'99.999.999-9';
+        SELECT @n = COUNT(*) FROM @empresa;
+        IF @n = 0
+            PRINT '  [OK] 26. Un RUT que no está en la tabla devuelve cero filas, sin error.';
+        ELSE
+        BEGIN
+            PRINT '  [MAL] 26. Un RUT inexistente devolvió ' + CONVERT(varchar(2), @n) + ' fila(s).';
+            SET @mal = @mal + 1;
+        END
+    END TRY
+    BEGIN CATCH
+        PRINT '  [MAL] 26. mp.LeeEmpresa lanza un error en vez de devolver cero filas.';
+        SET @mal = @mal + 1;
+    END CATCH
+
+    /* 27. RUT vacío y RUT nulo: igual que no encontrar nada, y sin error. Que
+       falte el RUT en la configuración es un problema de arranque del
+       servidor, no un fallo de la base. */
+    DELETE @empresa;
+    BEGIN TRY
+        INSERT @empresa EXEC mp.LeeEmpresa @rutEmpresa = N'';
+        INSERT @empresa EXEC mp.LeeEmpresa @rutEmpresa = NULL;
+        SELECT @n = COUNT(*) FROM @empresa;
+        IF @n = 0
+            PRINT '  [OK] 27. RUT vacío y RUT nulo devuelven cero filas, sin error.';
+        ELSE
+        BEGIN
+            PRINT '  [MAL] 27. Con el RUT vacío devolvió ' + CONVERT(varchar(2), @n) + ' fila(s).';
+            SET @mal = @mal + 1;
+        END
+    END TRY
+    BEGIN CATCH
+        PRINT '  [MAL] 27. mp.LeeEmpresa lanza un error con el RUT vacío.';
+        SET @mal = @mal + 1;
+    END CATCH
+
+    /* 28. Y con la tabla ENTERA vacía, que es el estado en el que está una
+       base recién creada y también el que hace que el guion de ingesta se
+       ponga a llenarla. */
+    DELETE @empresa;
+    DELETE FROM dbo.MpEmpresa;
+    BEGIN TRY
+        INSERT @empresa EXEC mp.LeeEmpresa @rutEmpresa = N'86.130.200-8';
+        SELECT @n = COUNT(*) FROM @empresa;
+        IF @n = 0
+            PRINT '  [OK] 28. Con la tabla vacía devuelve cero filas, sin error.';
+        ELSE
+        BEGIN
+            PRINT '  [MAL] 28. Con la tabla vacía devolvió ' + CONVERT(varchar(2), @n) + ' fila(s).';
+            SET @mal = @mal + 1;
+    END
+    END TRY
+    BEGIN CATCH
+        PRINT '  [MAL] 28. mp.LeeEmpresa lanza un error con la tabla vacía.';
+        SET @mal = @mal + 1;
+    END CATCH
+
+    /* 29. Dos códigos con el MISMO RUT. La clave única está en
+       CodigoProveedor, no en el RUT, porque el RUT es la clave de búsqueda y
+       el código es lo que viaja en cada llamada. Dos códigos para la misma
+       empresa es raro, pero no puede ser un fallo: sale la más reciente. */
+    DELETE @empresa;
+    INSERT INTO dbo.MpEmpresa (CodigoProveedor, NombreEmpresa, RutEmpresa, UltimaActualizacion)
+    VALUES (N'999003', N'MAS VIEJA', N'86.130.200-8', SYSUTCDATETIME());
+    INSERT INTO dbo.MpEmpresa (CodigoProveedor, NombreEmpresa, RutEmpresa, UltimaActualizacion)
+    VALUES (N'999004', N'MAS NUEVA', N'861302008', DATEADD(SECOND, 60, SYSUTCDATETIME()));
+
+    INSERT @empresa EXEC mp.LeeEmpresa @rutEmpresa = N'86.130.200-8';
+    SELECT @n = COUNT(*), @codigo = MAX(CodigoProveedor) FROM @empresa;
+    IF @n = 1 AND @codigo = N'999004'
+        PRINT '  [OK] 29. Con dos filas del mismo RUT sale la más reciente, no un error.';
+    ELSE
+    BEGIN
+        PRINT '  [MAL] 29. Con dos filas del mismo RUT devolvió ' + CONVERT(varchar(2), @n)
+              + ' fila(s), código [' + ISNULL(@codigo, N'(nada)') + '].';
+        SET @mal = @mal + 1;
+    END
+
+    ROLLBACK TRAN;
+
+    IF @mal > 0
+        THROW 50023, 'mp.LeeEmpresa: hay comprobaciones que fallan', 1;
+END TRY
+BEGIN CATCH
+    /* El ROLLBACK va AQUÍ y no al final a secas: si algo de lo de arriba
+       falla, sin esto la transacción se queda abierta y las siguientes
+       pruebas de este mismo fichero salen todas en rojo por un motivo que no
+       es el suyo. Es la razón de que esto esté en TRY/CATCH y no suelto. */
+    IF @@TRANCOUNT > 0 ROLLBACK TRAN;
+    PRINT '  Se ha revertido todo lo de esta sección.';
+    THROW;
+END CATCH
+
+PRINT '';
+PRINT '--- Las 29 comprobaciones pasaron. No queda nada escrito. ---';
 PRINT '';

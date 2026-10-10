@@ -138,6 +138,21 @@ public sealed class DetalleLicitacion
 /// <summary>
 /// Un ítem adjudicado: producto, quién lo ganó, por cuánto la unidad y cuántas.
 /// </summary>
+/// <summary>
+/// Una empresa que Mercado Público asocia a un RUT, tal como la devuelve
+/// <c>Empresas/BuscarProveedor</c>.
+/// </summary>
+/// <remarks>
+/// Deliberadamente NO tiene el RUT, porque la API no lo devuelve: la respuesta
+/// trae el código y el nombre, y nada más. El RUT es la clave con la que se
+/// buscó, no un dato que venga de vuelta.
+/// </remarks>
+/// <param name="CodigoEmpresa">El código de proveedor, que es lo que viaja en
+/// cada consulta a la API.</param>
+/// <param name="NombreEmpresa">El nombre tal como está registrado en Mercado
+/// Público, que puede no ser el corto que se usa por dentro.</param>
+public sealed record EmpresaBuscada(string CodigoEmpresa, string NombreEmpresa);
+
 public sealed class ItemAdjudicado
 {
     public int Correlativo { get; set; }

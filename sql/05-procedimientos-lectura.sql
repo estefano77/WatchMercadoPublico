@@ -25,16 +25,22 @@
    ===========================================================================
 
    ---------------------------------------------------------------------------
-   SON TRES, Y POR QUÉ NO UNO
+   SON SEIS, Y POR QUÉ NO UNO
    ---------------------------------------------------------------------------
 
-   mp.LeeMes          Lo que usa la aplicación. Devuelve CINCO conjuntos.
+   mp.LeeEmpresa          La empresa vigilada. CERO o UN conjunto de una fila.
+   mp.LeeMes              Lo que usa la aplicación. Devuelve CINCO conjuntos.
+   mp.LeeDetalle          La ficha de una licitación.
    mp.CuentaDiasDelMes    Los ocho números del mes. UN conjunto.
    mp.DiasSinComprobarDelMes   Los días que no se pudieron mirar, con su motivo.
                               UN conjunto.
 
-   Los dos últimos existen porque la cuenta de días no se puede probar dentro de
-   mp.LeeMes. En T-SQL, "INSERT @tabla EXEC unProcedimiento" mete TODOS los
+   mp.TodosLosDiasDelMes  Los días de un rango, saltando fines de semana y
+                          futuros. Es el único que no habla de la empresa.
+
+   Los dos de mp.CuentaDiasDelMes y mp.DiasSinComprobarDelMes existen porque la
+   cuenta de días no se puede probar dentro de mp.LeeMes. En T-SQL,
+   "INSERT @tabla EXEC unProcedimiento" mete TODOS los
    conjuntos que devuelva en la MISMA tabla, así que una prueba no puede coger
    solo la cabecera de un procedimiento de cinco conjuntos. Y eso no es un
    capricho del lenguaje: es el mecanismo con el que se comprueba que la cuenta
@@ -77,6 +83,82 @@ GO
    la API, donde DiasSinRespuesta viaja al cliente, y no es un añadido: sin él,
    el modo base de datos no puede ser honesto.
    ------------------------------------------------------------------------- */
+
+
+/* -----------------------------------------------------------------------
+   mp.LeeEmpresa
+
+   La empresa vigilada, en UN conjunto y CERO o UNA fila.
+
+   Uso:
+
+       EXEC mp.LeeEmpresa @rutEmpresa = N'86.130.200-8';
+
+   POR QUÉ POR RUT Y NO POR CÓDIGO. El código de proveedor seguarda en la
+   MISMA tabla, así que podría buscarse por él. Pero el código no viene de
+   ningún sitio dentro de la base: hay que traerlo de la API. El RUT sí lo
+   escribe una persona, en el appsettings, y es la única empresa que se
+   vigila. Buscar por él convierte la tabla en algo que se rellena sola y no
+   depende de un dato que hay que acordarse de copiar.
+
+   Y de paso quita el modo de fallo que tenía la configuración: RUT y código
+   vivían juntos en el appsettings y podían no describir lo mismo. No es
+   hipotético — el RUT 86.130.200-8 es de SISTEMAS MODULARES DE COMPUTACION
+   SPA y el nombre que estaba escrito al lado era "SMC SPA". Con una sola
+   clave ese desajuste no tiene dónde esconderse.
+
+   EL RUT SE COMPARA NORMALIZADO, solo dígitos, en los dos lados. Es
+   deliberado. Comparar el texto tal cual haría que cambiar
+   "86.130.200-8" por "861302008" en el appsettings —que es el mismo RUT—
+   devolviese cero filas y la web dijera que no hay empresa, sin más. Con la
+   comparación normalizada las dos escrituras dan lo mismo.
+
+   No lleva índice y da igual: la tabla tiene una fila por empresa vigilada,
+   no una por licitación. Recorrer dos filas enteras sale más barato que
+   mantener un índice que nadie va a usar.
+
+   CERO FILAS NO ES UN ERROR. Es la respuesta a "no hay ninguna empresa con
+   ese RUT", que es justo lo que el servidor tiene que poder preguntar sin
+   que la pantalla se caiga. Por eso el RUT vacío sale por la misma puerta y
+   no por un RAISERROR: que falte el RUT en la configuración es un problema
+   de arranque del servidor, no un fallo de la base.
+
+   Y SI HUBIERA DOS FILAS CON EL MISMO RUT, sale la más reciente. La clave
+   única está en CodigoProveedor, no en el RUT, porque el RUT es la clave de
+   búsqueda y el código es lo que viaja en cada llamada a la API. Dos códigos
+   para la misma empresa es un dato raro pero no imposible; se resuelve
+   tomando el último y no parando el arranque por ello.
+
+   La normalización va INLINE y no en una función de 04 a propósito. Son dos
+   REPLACE, y con una función el remoto tendría que recibir 04 además de 05:
+   un paso más a mano en un panel donde ya hubo que correr 05. Duplicar una
+   expresión de sesenta caracteres en el mismo procedimiento sale más barato
+   que un paso manual de más.
+   -------------------------------------------------------------------- */
+CREATE OR ALTER PROCEDURE mp.LeeEmpresa
+     @rutEmpresa  nvarchar(20)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @buscado nvarchar(20) =
+        REPLACE(REPLACE(ISNULL(@rutEmpresa, N''), N'.', N''), N'-', N'');
+
+    IF @buscado = N'' RETURN;
+
+    SELECT TOP 1
+           e.CodigoProveedor,
+           e.NombreEmpresa,
+           e.RutEmpresa,
+           e.UrlMercadoPublico,
+           e.UltimaActualizacion
+    FROM dbo.MpEmpresa AS e
+    CROSS APPLY (SELECT REPLACE(REPLACE(ISNULL(e.RutEmpresa, N''), N'.', N''), N'-', N'') AS r) AS n
+    WHERE n.r = @buscado
+    ORDER BY e.UltimaActualizacion DESC, e.EmpresaId DESC;
+END
+GO
 
 
 /* -----------------------------------------------------------------------
@@ -637,11 +719,12 @@ END
 GO
 
 
-PRINT 'mp.LeeMes, mp.LeeDetalle, mp.CuentaDiasDelMes,';
+PRINT 'mp.LeeEmpresa, mp.LeeMes, mp.LeeDetalle, mp.CuentaDiasDelMes,';
 PRINT 'mp.DiasSinComprobarDelMes y mp.TodosLosDiasDelMes creados.';
 PRINT '';
 PRINT 'Para probarlos contra la base actual:';
 PRINT '';
+PRINT '    EXEC mp.LeeEmpresa @rutEmpresa = N''86.130.200-8'';';
 PRINT '    EXEC mp.LeeMes @codigoProveedor = N''71284'', @anio = 2026, @mes = 10;';
 PRINT '    EXEC mp.LeeDetalle @codigoProveedor = N''71284'', @codigo = N''1456839-6-LP26'';';
 PRINT '';

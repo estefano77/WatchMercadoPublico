@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
 using WatchMercadoPublico.Server.Models;
 
@@ -223,6 +224,82 @@ public sealed class MercadoPublicoCliente
         return resultado;
     }
 
+    // 3) RUT → código de proveedor
+    //    /Publico/Empresas/BuscarProveedor?rutempresaproveedor=…&ticket=…
+    // =====================================================================
+
+    /// <summary>
+    /// Las empresas que Mercado Público asocia a un RUT.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// SOLO se usa en modo API, y una vez al arrancar. En modo base de datos la
+    /// empresa sale de <c>MpEmpresa</c> y no hay nada que buscar.
+    /// </para>
+    ///
+    /// <para>
+    /// EL PARÁMETRO SE LLAMA <c>rutempresaproveedor</c>, no <c>rut</c>. Con
+    /// <c>rut</c> la API contesta <c>HTTP 500</c> y no dice por qué; se
+    /// probaron los dos nombres contra la API de verdad.
+    /// </para>
+    ///
+    /// <para>
+    /// Y DEVUELVE TODAS, SIN ELEGIR NINGUNA. Esto es lo importante, y no es una
+    /// précaution de estilo. Medido el 10 de octubre de 2026: un RUT bien escrito
+    /// que no corresponde a nadie —<c>99.999.999-9</c>— devuelve
+    /// <c>Cantidad: 2</c> con dos empresas de verdad, "Canale" y "SANDRA CECILIA
+    /// CISTERNA ALVIAL". La lista no filtra: se parece a lo que haya.
+    ///
+    /// O sea que coger el primer elemento con un RUT mal escrito no daría "sin
+    /// resultado", daría LA EMPRESA EQUIVOCADA. Y todo lo que viene detrás
+    /// —las licitaciones, la ingesta, la copia— escribiría los datos de un
+    /// tercero sin un solo error por el camino. Decide quien llama, y solo
+    /// cuando <c>Cantidad == 1</c>.
+    /// </para>
+    /// </remarks>
+    public async Task<IReadOnlyList<EmpresaBuscada>> BuscarProveedorAsync(
+        string? rut, CancellationToken ct)
+    {
+        // El formato se comprueba ANTES de gastar la llamada. Con un RUT mal
+        // formado la API responde 500 fijo, así que la llamada no puede
+        // devolver nada bueno: es dinero y tiempo tirados para leer un error
+        // que ya se sabe.
+        if (!RutBienFormado(rut))
+        {
+            log.LogWarning(
+                "No se busca el proveedor: el RUT [{Rut}] no tiene el formato que acepta la API.",
+                rut ?? "(vacio)");
+            return Array.Empty<EmpresaBuscada>();
+        }
+
+        using var doc = await LeerJsonAsync(
+            ConstruirUrlBuscarProveedor(rut!, opciones.Ticket), ct);
+
+        var resultado = new List<EmpresaBuscada>();
+
+        // "listaEmpresas", no "Listado" como en los demás endpoints. Y el error
+        // de mirar la clave equivocada es de los que no se ven: la respuesta
+        // llega con Cantidad 1 y la lista vacía, que parece exactamente lo
+        // mismo que "no hay ninguna empresa con ese RUT".
+        if (!doc.RootElement.TryGetProperty("listaEmpresas", out var lista) ||
+            lista.ValueKind != JsonValueKind.Array)
+            return resultado;
+
+        foreach (var e in lista.EnumerateArray())
+        {
+            // Una entrada sin código no sirve para nada: es el código lo que se
+            // consulta. Se salta en vez de devolver una empresa con el código
+            // vacío, que después daría una URL que parece correcta y no lo es.
+            var codigo = Limpiar(Leer(e, "CodigoEmpresa"));
+            if (string.IsNullOrWhiteSpace(codigo))
+                continue;
+
+            resultado.Add(new EmpresaBuscada(codigo, Limpiar(Leer(e, "NombreEmpresa")) ?? ""));
+        }
+
+        return resultado;
+    }
+
     // Utilidades puras, sin red: lo que se puede testear de verdad
     // =====================================================================
 
@@ -255,6 +332,57 @@ public sealed class MercadoPublicoCliente
         $"?fecha={fecha.ToString("ddMMyyyy", CultureInfo.InvariantCulture)}" +
         $"&CodigoProveedor={Uri.EscapeDataString(codigoProveedor)}" +
         $"&ticket={Uri.EscapeDataString(ticket)}";
+
+    /// <summary>
+    /// URL de la búsqueda de empresa por RUT.
+    ///
+    /// Va en un método aparte y no en línea, por lo mismo que
+    /// <see cref="ConstruirUrlDia"/>: es el sitio donde un cambio de nombre de
+    /// parámetro pasa desapercibido. Con <c>rut</c> en lugar de
+    /// <c>rutempresaproveedor</c> la API responde 500 y no dice por qué.
+    /// </summary>
+    internal static string ConstruirUrlBuscarProveedor(string rut, string ticket) =>
+        "Publico/Empresas/BuscarProveedor" +
+        $"?rutempresaproveedor={Uri.EscapeDataString(rut)}" +
+        $"&ticket={Uri.EscapeDataString(ticket)}";
+
+    /// <summary>
+    /// El formato de RUT que acepta la API, medido el 10 de octubre de 2026
+    /// contra el endpoint de verdad.
+    /// </summary>
+    /// <remarks>
+    /// Acepta <c>DD.DDD.DDD-D</c> y NADA MÁS: dos dígitos delante, ni uno ni
+    /// tres. Lo medido, con el código de cada respuesta:
+    /// <code>
+    /// 86.130.200-8   -> 200
+    /// 12.345.678-9   -> 200
+    /// 123.456.789-5  -> 500    tres dígitos delante
+    ///  1.234.567-8   -> 500    un dígito delante
+    /// 861302008      -> 500    sin puntos
+    /// 86130200-8     -> 500    sin puntos
+    ///  (vacío)       -> 500
+    /// </code>
+    ///
+    /// Lo de exigir DOS en vez de "uno o dos" salió de una prueba que falló. El
+    /// patrón que parece evidente, <c>\d{1,2}</c>, acepta <c>1.234.567-8</c>, que
+    /// la API rechaza con 500. Con dos obligatorios no cuela y el RUT llega con el
+    /// formato que ella quiere.
+    ///
+    /// Un RUT mal formado da <c>500</c>, no "cero resultados" -que es lo que decía
+    /// el README hasta que esto se midió- así que el formato se comprueba
+    /// antes de llamar y no después de un error.
+    /// </remarks>
+    private static readonly Regex FormatoRut = new(@"^\d{2}\.\d{3}\.\d{3}-\d$");
+
+    /// <summary>
+    /// ¿Tiene el RUT el formato que acepta la API?
+    /// </summary>
+    /// <remarks>
+    /// Acepta también el RUT con espacios alrededor, que es fácil de dejar
+    /// pegado en un appsettings y no es un RUT distinto.
+    /// </remarks>
+    internal static bool RutBienFormado(string? rut) =>
+        !string.IsNullOrWhiteSpace(rut) && FormatoRut.IsMatch(rut.Trim());
 
     /// <summary>
     /// Traduce una respuesta que no es 2xx en una excepción con un mensaje que
