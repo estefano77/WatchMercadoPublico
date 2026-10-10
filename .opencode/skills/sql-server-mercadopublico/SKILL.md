@@ -34,6 +34,52 @@ Y esto **requiere reiniciar el servicio de SQL Server**. El script lo avisa, per
 no reinicia solo: no debe hacerlo un script. Si el valor sigue en 0 después del
 `RECONFIGURE`, el reinicio está pendiente.
 
+### ⚠️ Añadir una columna son DOS cosas
+
+Todo el esquema está guardado con `IF OBJECT_ID(...) IS NULL`, que es lo que
+permite re-ejecutar `01` sin romper nada. Pero esa guarda significa que **un
+`CREATE TABLE` guardado no añade columnas a una tabla que ya existe**: se lo
+salta entero.
+
+Para que una columna nueva llegue a una base ya instalada:
+
+1. La columna dentro del `CREATE TABLE`, para bases nuevas.
+2. Un `ALTER TABLE ... ADD` guardado con `COL_LENGTH(...) IS NULL`, para las que
+   ya hay.
+
+Con solo la primera, la base se queda sin la columna **sin decir nada**. Y hay
+que ejecutar `01` en **las dos** bases: la de desarrollo y la del hosting, que
+no son el mismo fichero aplicado a la misma base.
+
+---
+
+## Antes de ejecutar una prueba: ¿escribe en la base de verdad?
+
+**Una prueba que mete filas no es inocua por estar en un fichero de pruebas.**
+Pasa de verdad: `98-prueba-importar.sql` tenía seis `DELETE FROM` sin
+transacción ni `ROLLBACK`, y se llevó una base de desarrollo entera — 921
+consultas, 48 licitaciones, 48 detalles y 57 ítems—. Recuperarlo costó
+reimportar 2024-2026 entero desde la API.
+
+`99-prueba-esquema.sql` sí estaba protegida y `98` no, y eso es precisamente el
+peligro: una está documentada como inocua y la otra no, así que el peso lo lleva
+la que nadie mira.
+
+Si una prueba toca datos de verdad, tiene que:
+
+- Va **entera en un solo lote, sin `GO`**: una transacción abierta antes de un
+  `GO` no sobrevive, y el `ROLLBACK` de otro lote revierte una transacción
+  vacía mientras las filas se quedan.
+- `BEGIN TRAN` antes de borrar, `ROLLBACK TRAN` en el **mismo** lote.
+- Una **fotografía** del antes: contos **y suma de checksums**. Con el número
+  solo no basta, porque tras un `ROLLBACK` fallido los números volverían a ser
+  "todas las filas" y solo el checksum delataría que ahora hay otras.
+- Comparar al final y **avisar** si no ha vuelto a como estaba.
+
+Y antes de ejecutar cualquier `9x-prueba-*.sql` contra la base de desarrollo,
+**léete el `DELETE` que tenga dentro**. No es paranoia: es lo que distingue una
+prueba de una bomba.
+
 ---
 
 ## Lo que T-SQL NO permite (y el error no lo dice)

@@ -176,6 +176,55 @@ END CATCH
 PRINT '';
 PRINT '=== 3. La consulta con ticket falso (contra la API de verdad) ===';
 
+/* -----------------------------------------------------------------------
+   ESTA PRUEBA BORRABA LA BASE DE VERDAD. YA NO.
+
+   Todo lo que hay entre aqui y el final va DENTRO de una transaccion que se
+   revierte al final. Antes no habia ninguna, y el paso 3 empezaba con seis
+   DELETE FROM sin mas:
+
+       DELETE FROM dbo.MpConsulta;
+       DELETE FROM dbo.MpLicitacionEstadoHistorico;
+       DELETE FROM dbo.MpLicitacionItem;
+       DELETE FROM dbo.MpLicitacionDetalle;
+       DELETE FROM dbo.MpLicitacion;
+       DELETE FROM dbo.MpEmpresa;
+
+   y se quedaban ahi. Pasa de verdad: se ejecuto este fichero contra la base de
+   desarrollo y se llevo por delante 921 consultas, 48 licitaciones, 48 detalles
+   y 57 items. Todo lo que habia. Para recuperar hubo que reimportar 2024-2026
+   entero desde la API.
+
+   Que sea una PRUEBA no la hace inocua, y esta es de las que de verdad borran.
+   Que 99-prueba-esquema.sql estuviera protegida y esta no es justo el fallo que
+   hace que la siguiente vez no se pise: las dos son, igual y llanamente, ficheros
+   de pruebas que se ejecutan contra la base de desarrollo.
+
+   Y NO HAY NINGUN GO EN ESTE FICHERO, a proposito. Una transaccion abierta
+   antes de un GO no sobrevive al siguiente lote: el ROLLBACK del final estaria
+   en otro lote y revirteria una transaccion vacia, mientras las filas se
+   quedan. Es el mismo motivo por el que 99-prueba-esquema.sql va entero en un
+   lote. Ver el paso final, que lo comprueba y avisa si alguna vez vuelve a
+   pasar.
+
+   FOTOGRAFIA DE LO QUE HAY ANTES DE EMPEZAR, para poder comprobar al final que
+   todo ha vuelto como estaba. Se guardan CONTOS y SUMAS DE CHECKSUM, no solo el
+   numero: si el ROLLBACK fallara, los numeros volverian a ser los mismos
+   -porque los de ahora tambien serian "todas las filas"- y solo el checksum
+   delataria que ahora hay otras filas. */
+BEGIN TRAN;
+
+DECLARE @antes98 TABLE (
+    Tabla sysname, Cuantas int, Suma int);
+
+INSERT @antes98 (Tabla, Cuantas, Suma)
+SELECT 'MpEmpresa', COUNT(*), CHECKSUM_AGG(CHECKSUM(CodigoProveedor)) FROM dbo.MpEmpresa
+UNION ALL SELECT 'MpConsulta', COUNT(*), CHECKSUM_AGG(CHECKSUM(FechaHora, TipoConsulta, FechaDia)) FROM dbo.MpConsulta
+UNION ALL SELECT 'MpLicitacion', COUNT(*), CHECKSUM_AGG(CHECKSUM(CodigoExterno)) FROM dbo.MpLicitacion
+UNION ALL SELECT 'MpLicitacionDetalle', COUNT(*), CHECKSUM_AGG(CHECKSUM(LicitacionId)) FROM dbo.MpLicitacionDetalle
+UNION ALL SELECT 'MpLicitacionItem', COUNT(*), CHECKSUM_AGG(CHECKSUM(LicitacionId, Correlativo, NombreProducto)) FROM dbo.MpLicitacionItem
+UNION ALL SELECT 'MpLicitacionEstadoHistorico', COUNT(*), CHECKSUM_AGG(CHECKSUM(LicitacionId, CodigoEstado)) FROM dbo.MpLicitacionEstadoHistorico;
+
 DELETE FROM dbo.MpConsulta;
 DELETE FROM dbo.MpLicitacionEstadoHistorico;
 DELETE FROM dbo.MpLicitacionItem;
@@ -208,7 +257,7 @@ DECLARE @nuevas bigint = (SELECT COUNT_BIG(*) FROM dbo.MpConsulta) - @antes;
 
    Y no son seis por dia. Esta comprobacion es la que mas valor tiene, y la que
    mas cosas destapa: cuando el procedimiento trataba el 203 como si fuera
-   reintentable, el rango entero tardaba 185 s yMpConsulta acababa con 18 filas
+   reintentable, el rango entero tardaba 185 s y MpConsulta acababa con 18 filas
    (6 por dia) para obtener 18 veces el mismo "no". Un ticket invalido se sabe
    en el primer intento; los dos minutos siguientes son espera pura. */
 IF @nuevas = 3
@@ -284,7 +333,50 @@ IF @fallosValidacion = 0
     PRINT 'Validaciones: todas pasan.'
 ELSE
     PRINT 'Validaciones: ' + CONVERT(nvarchar(10), @fallosValidacion) + ' FALLAN.';
-GO
+
+/* -----------------------------------------------------------------------
+   6. Se deshace TODO lo del paso 3, y se comprueba que se ha deshacido.
+
+   El ROLLBACK va en ESTE lote, que es el unico lote del fichero, y no en uno
+   aparte. Ver la nota de mas arriba: separado con un GO, revertiria una
+   transaccion vacia y las filas se quedarian, que es justo lo que pasaba antes
+   de que esto existiera. */
+ROLLBACK TRAN;
+
+DECLARE @despues98 TABLE (
+    Tabla sysname, Cuantas int, Suma int);
+
+INSERT @despues98 (Tabla, Cuantas, Suma)
+SELECT 'MpEmpresa', COUNT(*), CHECKSUM_AGG(CHECKSUM(CodigoProveedor)) FROM dbo.MpEmpresa
+UNION ALL SELECT 'MpConsulta', COUNT(*), CHECKSUM_AGG(CHECKSUM(FechaHora, TipoConsulta, FechaDia)) FROM dbo.MpConsulta
+UNION ALL SELECT 'MpLicitacion', COUNT(*), CHECKSUM_AGG(CHECKSUM(CodigoExterno)) FROM dbo.MpLicitacion
+UNION ALL SELECT 'MpLicitacionDetalle', COUNT(*), CHECKSUM_AGG(CHECKSUM(LicitacionId)) FROM dbo.MpLicitacionDetalle
+UNION ALL SELECT 'MpLicitacionItem', COUNT(*), CHECKSUM_AGG(CHECKSUM(LicitacionId, Correlativo, NombreProducto)) FROM dbo.MpLicitacionItem
+UNION ALL SELECT 'MpLicitacionEstadoHistorico', COUNT(*), CHECKSUM_AGG(CHECKSUM(LicitacionId, CodigoEstado)) FROM dbo.MpLicitacionEstadoHistorico;
+
+DECLARE @cambios98 TABLE (
+    Tabla sysname, Antes int, Despu int);
+
+INSERT @cambios98 (Tabla, Antes, Despu)
+SELECT a.Tabla, a.Cuantas, d.Cuantas
+FROM @antes98 AS a
+FULL OUTER JOIN @despues98 AS d ON a.Tabla = d.Tabla
+WHERE a.Tabla IS NULL OR d.Tabla IS NULL
+   OR a.Cuantas <> d.Cuantas
+   OR ISNULL(a.Suma, -1) <> ISNULL(d.Suma, -1);
+
+PRINT '';
+IF NOT EXISTS (SELECT 1 FROM @cambios98)
+    PRINT 'La base ha quedado como estaba: todo lo del paso 3 se ha revertido.'
+ELSE
+BEGIN
+    DECLARE @resumen98 nvarchar(600) = (
+        SELECT STRING_AGG(CONCAT(Tabla, ': antes ', Antes, ', ahora ', Despu), '; ')
+        FROM @cambios98);
+
+    PRINT 'AVISO: la base NO ha vuelto a como estaba -> ' + @resumen98
+        + '. La transaccion no ha cogido; ejecuta el paso 0 de limpieza a mano.';
+END
 
 SET ANSI_NULLS ON; SET QUOTED_IDENTIFIER ON; SET NOCOUNT ON;
 
@@ -295,4 +387,4 @@ PRINT '    la API no devuelve nada a un ticket falso. Eso esta en';
 PRINT '    99-prueba-esquema.sql, con datos con la forma exacta.';
 PRINT '  - Que una consulta correcta se escriba de verdad. Para eso hace falta';
 PRINT '    un ticket de verdad, y es lo que se ejecuta en produccion.';
-GO
+

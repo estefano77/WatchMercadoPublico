@@ -68,6 +68,28 @@ El `-f 65001` no es adorno: sin él, `sqlcmd` lee el fichero con la página de
 códigos del sistema y los acentos de los comentarios se descuelgan. En Management
 Studio no hace falta; ahí se pega el fichero entero.
 
+### ⚠️ Añadir una columna son DOS cosas, no una
+
+`01-esquema-mercadopublico.sql` se puede repetir porque todo va guardado con
+`IF OBJECT_ID(...) IS NULL`. Pero esa misma guarda significa que **un `CREATE
+TABLE` guardado no añade columnas a una tabla que ya existe**: se lo salta
+entero.
+
+Para que una columna nueva llegue a una base ya instalada hacen falta las dos
+cosas en `01`:
+
+1. La columna dentro del `CREATE TABLE`, para las bases nuevas.
+2. Un `ALTER TABLE ... ADD` guardado con `COL_LENGTH(...) IS NULL`, para las que
+   ya hay.
+
+Con solo la primera, la base de desarrollo y la del hosting se quedan sin la
+columna **sin decir nada**: ni error ni aviso. El síntoma es que la copia se
+negativa a continuar porque los esquemas no casan, o que un `SELECT` falla mucho
+después con el nombre de la columna.
+
+Y hay que acordarse de ejecutar `01` en **las dos** bases: la de desarrollo y la
+del hosting. No es el mismo fichero aplicado a la misma base.
+
 ## Los procedimientos de lectura
 
 | Procedimiento | Conjuntos | Para qué |
@@ -161,7 +183,7 @@ Aquí los días van en un `VALUES (0)…(31)` explícito.
 | `MpConsulta` | **petición a la API** | Tipo, fecha/código, intento, HTTP, código de error, duración |
 | `MpLicitacion` | licitación vista | Los 4 campos del listado, primera/última vez vista, cuántas veces |
 | `MpLicitacionDetalle` | licitación | Organismo, montos, las 7 fechas, adjudicación |
-| `MpLicitacionItem` | producto adjudicado | Cantidad, precio unitario, proveedor |
+| `MpLicitacionItem` | producto adjudicado | Cantidad, precio unitario, proveedor y la **especificación del comprador** |
 | `MpLicitacionEstadoHistorico` | **cambio de estado** | cuándo pasó de Publicada a Adjudicada |
 
 Vistas ya montadas: `vwMpLicitacion` (una fila por licitación, con el total
@@ -308,8 +330,16 @@ es justo lo que no hay que almacenar.
 ## Notas de la prueba
 
 `99-prueba-esquema.sql` mete datos con la forma exacta que produce el importador
-(los códigos y montos son los de una respuesta real), comprueba 11 cosas y se
+(los códigos y montos son los de una respuesta real), comprueba 14 cosas y se
 deshace todo. La base queda con las tablas y sin datos.
+
+Y **`98-prueba-importar.sql` también se deshace ahora**, y antes no. Tenía seis
+`DELETE FROM` sin transacción ni `ROLLBACK`, y se llevó por delante una base de
+desarrollo entera: 921 consultas, 48 licitaciones, 48 detalles y 57 ítems. Para
+recuperar hubo que reimportar 2024-2026 desde la API. Que `99` estuviera
+protegido y `98` no es justo el motivo por el que la siguiente vez no se pisa:
+las dos son ficheros de pruebas que se ejecutan contra la base de desarrollo, y
+que una esté documentada como inocua no la vuelve inocua.
 
 Va entero en **un solo lote, sin `GO`**. Dos cosas de `GO` que costaron un rato:
 
