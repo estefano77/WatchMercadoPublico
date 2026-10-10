@@ -38,43 +38,59 @@ Los tres engañan, y cada uno sale del color de la ayuda:
 | `bcp -q` | Pone `QUOTED_IDENTIFIER ON`. Sin él **toda** la carga falla, porque seis índices son filtrados y `MpLicitacionItem.Subtotal` es una columna calculada. En `sqlcmd` lo pone `-I`, y hace falta también: **el `DELETE` falla igual que el `INSERT`**. |
 | `bcp -c -C 65001` | UTF-8 en los dos lados. Además **distingue `NULL` de cadena vacía**: `NULL` es un campo de longitud cero y la vacía es el byte `00`. Con `-k` se pierde esa diferencia, y no se usa. |
 
-### ⚠️ `bcp -c` usa `\r\n` como terminador de fila, y puede estar DENTRO del dato
+### ⚠️ `bcp -c` usa TAB y `\r\n` como separadores, y los dos pueden estar DENTRO del dato
 
-El texto libre no tiene por qué estar en una línea. `MpLicitacionItem.Descripcion`
-es la especificación del comprador y en Mercado Público hay especificaciones de
-dos líneas. Con el terminador de por defecto, `bcp` cree que ahí acaba la fila,
-parte el registro en dos y la segunda mitad la intenta meter en una columna
-**numérica**. El error que sale:
+El texto libre no tiene por qué estar en una línea ni sin tabuladores.
+`bcp -c` usa `\t` para separar **campos** y `\r\n` para separar **filas**, y los
+dos pueden aparecer dentro de un valor.
 
-```
-#@ Row 4, Column 1: Invalid character value for cast specification @#
-```
+Son **dos bugs distintos**, con dos errores distintos, y arreglar uno no arregla
+el otro:
 
-que no menciona saltos de línea, ni el campo, ni dice que el dato estaba bien.
-Lo que se ve es que `Subtotal`, que es `decimal`, recibió texto.
+| Qué hay dentro del dato | Qué se rompe | El error que sale |
+|---|---|---|
+| `\r\n` | Se parte la **fila**; la segunda mitad cae en una columna numérica | `Invalid character value for cast specification` |
+| `\t` | Se parte el **campo**; el trozo cae en una columna corta | `String data, right truncation` |
 
-**El efecto es seis filas que no se copian y ninguna más.** No es un error
-ruidoso. Lo detecta la comparación de recuentos, pero para entonces el destino ya
-se ha tirado y se ha vuelto a llenar.
+Medido con datos de verdad, en dos tablas distintas:
 
-Se arregla con `-r`, y **el mismo valor al exportar y al importar**:
+- `MpLicitacionItem.Descripcion` (la especificación del comprador) con **CR LF**.
+  Se perdieron 6 filas de 58. El resto entró bien, así que la copia *parece*
+  funcionar.
+- `MpLicitacionDetalle.Descripcion` (`nvarchar(max)`, un pliego entero) con un
+  **TABULADOR**. Cayó en `Tipo nvarchar(20)`.
+
+Ninguno de los dos errores menciona saltos de línea ni tabuladores, y **ninguno
+es ruidoso**: son filas que no se copian y el resto entra bien. Solo los pilla la
+comparación de recuentos del final, cuando el destino ya se ha vaciado y
+rellenado.
+
+El arreglo son los dos flags, con **el mismo valor al exportar y al importar**:
 
 ```powershell
-$terminadorFila = '#!#'
-... 'out', $fichero, '-c', '-C', '65001', '-r', $terminadorFila
-... 'in',  $fichero, '-c', '-C', '65001', '-r', $terminadorFila
+$terminadorCampo = '%%F%%'
+$terminadorFila  = '%%R%%'
+... 'out', $fichero, '-c', '-C', '65001', '-t', $terminadorCampo, '-r', $terminadorFila
+... 'in',  $fichero, '-c', '-C', '65001', '-t', $terminadorCampo, '-r', $terminadorFila
 ```
 
-Medido con la tabla real (58 filas, 6 con CR LF, 2 descripciones vacías): 58
-filas importadas, las 6 CR LF conservadas, las 2 vacías siguen vacías y no `NULL`,
-y el checksum igual en origen y copia.
+`bcp` acepta **más de un carácter** en `-t` y en `-r`, que es lo que hace
+posible esto. Con `-r` solo, el TAB sigue partiendo campos.
+
+Medido con las dos tablas reales (53 detalles con 1 TAB y 9 CR LF; 62 ítems con 6
+CR LF y 2 descripciones vacías): todas las filas, y el **hash idéntico entre
+origen y copia** comparando por bytes. Los TAB y los CR LF se conservan dentro
+del texto y las vacías siguen siendo vacías, no `NULL`.
 
 No se limpia el dato para que quepa en el formato: **se cambia el formato**. Un
-`-k` o un `REPLACE` de los saltos de línea perdería información que el comprador
-escribió.
+`REPLACE` de saltos o tabuladores perdería información que escribió el comprador,
+que es justo lo que esa columna existe para guardar.
 
-> Y un `#!#` dentro de un pliego de condiciones, si apareciera, partiría la fila
-> igual. La comparación de recuentos lo detecta, que es justo para lo que está.
+> **Cualquier columna de texto libre puede disparar esto.** No es un caso
+> raro: es la primera vez que este proyecto tiene una columna donde el dato
+> puede llevar un salto de línea o un tabulador, y `bcp` lleva veinte años dando
+> por supuesto que no. Al añadir una columna `nvarchar` de texto libre, copiar
+> contra una base real y **mirar los avisos de bcp**, no solo el recuento final.
 
 ### ⚠️ `CHECKSUM()` sobre `nvarchar` cambia entre servidores con collation distinta
 

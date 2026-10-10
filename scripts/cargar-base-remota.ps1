@@ -688,54 +688,60 @@ Titulo 'Copiando'
 $fallos = 0
 
 # -----------------------------------------------------------------------
-# EL TERMINADOR DE FILA, que no es el de por defecto y tiene que ser el mismo
+# LOS TERMINADORES, que no son los de por defecto, y tienen que ser los mismos
 # al exportar y al importar.
 #
-# bcp -c usa \r\n para separar filas. Y \r\n PUEDE ESTAR DENTRO de un dato: el
-# campo Descripcion de MpLicitacionItem es texto libre del comprador, y en
-# Mercado Publico hay especificaciones que ocupan dos lineas. Se vio con seis
-# items de verdad, de agosto de 2024, con el texto partido asi:
+# bcp -c usa \t para separar CAMPOS y \r\n para separar FILAS. Y los dos pueden
+# ESTAR DENTRO de un dato, porque hay columnas de texto libre y lo que manda es
+# lo que escriba el comprador o la institucion. Se ha visto con datos de verdad,
+# en dos tablas distintas:
 #
-#     Sistemas de Gestion Municipal , segun bases de licitacion adjuntas.<CRLF>
+#   - CR LF dentro de MpLicitacionItem.Descripcion. Con el terminador de por
+#     defecto, bcp cree que ahi acaba la fila, parte el item en dos, y la
+#     segunda mitad la intenta meter en Subtotal, que es decimal:
 #
-# Con el terminador de por defecto, bcp cree que ahi acaba la fila, parte el item
-# en dos, y la segunda mitad la intenta meter en una columna numerica. El error
-# que sale es:
+#         #@ Row 4, Column 1: Invalid character value for cast specification @#
 #
-#     #@ Row 4, Column 1: Invalid character value for cast specification @#
+#     Se perdieron seis items de seis. El resto de la tabla entra bien, asi que
+#     la copia PARECE que funciona.
 #
-# que no menciona saltos de linea, ni el campo, ni dice que el dato estaba bien.
-# Lo que se ve es que la columna Subtotal, que es decimal, recibio texto.
+#   - Un TABULADOR dentro de MpLicitacionDetalle.Descripcion, que es
+#     nvarchar(max) y traia un pliego entero. El TAB parte el CAMPO, y el trozo
+#     largo que se queda delante cae en Tipo, que es nvarchar(20):
 #
-# Y el efecto NO es un error ruidoso: seis filas NO SE COPIAN y el resto entra.
-# Lo detecta la comparacion final de recuentos del guion, que por eso existe, pero
-# hasta ahi se ha tirado el destino y se ha vuelto a llenar: un bucle de
-# "carga, ve que no cuadra, carga otra vez" que no lleva a ningun sitio.
+#         #@ Row 53, Column 6: String data, right truncation @#
 #
-# Con -r se elige el terminador. "#!#" no aparece en un pliego de condiciones de
-# un municipio, y aunque apareciera, la fila se partiria y la comprobacion de
-# recuentos lo diria, que es justo el papel de esa comprobacion.
+#     Y con -r puesto pero sin -t seguia fallando, porque el TAB no es el
+#     terminador de fila: es el de campo. Son dos cosas distintas y hacen falta
+#     las dos.
 #
-# MEDIDO, con la copia real de la tabla de items (58 filas, 6 con CR LF y 2
-# descripciones vacias):
+# Por eso van los dos, y con valores que no aparecen en un pliego de condiciones
+# de un municipio pero que se ven a la primera si alguna vez se colaran.
 #
-#     con -r "#!#"   -> 58 filas, 6 con CR LF, 2 vacias, 0 NULL
-#     checksum igual en origen y copia
+# MEDIDO, con la tabla de detalle real (53 filas, 1 con TAB, 9 con CR LF) y con
+# la de items (58 filas, 6 con CR LF, 2 descripciones vacias):
 #
-# Y el CR LF se CONSERVA dentro del texto, que es lo que hay que hacer: no se
-# limpia el dato para que quepa en el formato, se cambia el formato.
+#     con -t y -r  ->  todas las filas, y el hash IDENTICO entre origen y copia
+#                      los TAB y los CR LF conservados dentro del texto
+#                      y las descripciones vacias siguen siendo vacias, no NULL
 #
-# OJO con lo que NO se puede tocar aqui: -k. Ese es el que convierte la cadena
-# vacia en NULL. Con -c y sin -k, vacia y NULL siguen siendo distintas.
+# No se limpia el dato para que quepa en el formato: SE CAMBIA EL FORMATO. Un
+# REPLACE de los saltos o de los tabuladores perderia informacion que escribio el
+# comprador, que es justo lo que esta columna existe para guardar.
+#
+# OJO con lo que NO se toca: -k. Ese es el que convierte la cadena vacia en NULL.
+# Con -c y sin -k, vacia y NULL siguen siendo distintas.
 # -----------------------------------------------------------------------
-$terminadorFila = '#!#'
+$terminadorCampo = '%%F%%'
+$terminadorFila = '%%R%%'
 
 foreach ($tabla in $tablas) {
     $fichero = Join-Path $env:TEMP ("cbr-{0}.txt" -f [guid]::NewGuid().ToString('N'))
     $errores = "$fichero.err"
 
     $aOrigen = @("$OrigenBase.$tabla", 'out', $fichero,
-        '-S', $Origen, '-c', '-C', '65001', '-E', '-r', $terminadorFila)
+        '-S', $Origen, '-c', '-C', '65001', '-E',
+        '-t', $terminadorCampo, '-r', $terminadorFila)
     if ($OrigenUsuario) {
         # -P tambien aqui: bcp no lee la contrasena del entorno en ningun
         # sentido, ni para salir ni para entrar.
@@ -764,7 +770,7 @@ foreach ($tabla in $tablas) {
     # bonito y no hay alternativa.
     $aDestino = @("$($kv['Database']).$tabla", 'in', $fichero,
         '-S', $kv['Server'], '-c', '-C', '65001', '-E', '-q', '-e', $errores,
-        '-r', $terminadorFila)
+        '-t', $terminadorCampo, '-r', $terminadorFila)
     if ($destinoUsaSqlAuth) { $aDestino += @('-U', $destinoUsuario, '-P', $destinoPassword) }
     else { $aDestino += '-T' }   # -T es la conexion de confianza en bcp
 
