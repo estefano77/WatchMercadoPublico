@@ -687,12 +687,55 @@ Titulo 'Copiando'
 
 $fallos = 0
 
+# -----------------------------------------------------------------------
+# EL TERMINADOR DE FILA, que no es el de por defecto y tiene que ser el mismo
+# al exportar y al importar.
+#
+# bcp -c usa \r\n para separar filas. Y \r\n PUEDE ESTAR DENTRO de un dato: el
+# campo Descripcion de MpLicitacionItem es texto libre del comprador, y en
+# Mercado Publico hay especificaciones que ocupan dos lineas. Se vio con seis
+# items de verdad, de agosto de 2024, con el texto partido asi:
+#
+#     Sistemas de Gestion Municipal , segun bases de licitacion adjuntas.<CRLF>
+#
+# Con el terminador de por defecto, bcp cree que ahi acaba la fila, parte el item
+# en dos, y la segunda mitad la intenta meter en una columna numerica. El error
+# que sale es:
+#
+#     #@ Row 4, Column 1: Invalid character value for cast specification @#
+#
+# que no menciona saltos de linea, ni el campo, ni dice que el dato estaba bien.
+# Lo que se ve es que la columna Subtotal, que es decimal, recibio texto.
+#
+# Y el efecto NO es un error ruidoso: seis filas NO SE COPIAN y el resto entra.
+# Lo detecta la comparacion final de recuentos del guion, que por eso existe, pero
+# hasta ahi se ha tirado el destino y se ha vuelto a llenar: un bucle de
+# "carga, ve que no cuadra, carga otra vez" que no lleva a ningun sitio.
+#
+# Con -r se elige el terminador. "#!#" no aparece en un pliego de condiciones de
+# un municipio, y aunque apareciera, la fila se partiria y la comprobacion de
+# recuentos lo diria, que es justo el papel de esa comprobacion.
+#
+# MEDIDO, con la copia real de la tabla de items (58 filas, 6 con CR LF y 2
+# descripciones vacias):
+#
+#     con -r "#!#"   -> 58 filas, 6 con CR LF, 2 vacias, 0 NULL
+#     checksum igual en origen y copia
+#
+# Y el CR LF se CONSERVA dentro del texto, que es lo que hay que hacer: no se
+# limpia el dato para que quepa en el formato, se cambia el formato.
+#
+# OJO con lo que NO se puede tocar aqui: -k. Ese es el que convierte la cadena
+# vacia en NULL. Con -c y sin -k, vacia y NULL siguen siendo distintas.
+# -----------------------------------------------------------------------
+$terminadorFila = '#!#'
+
 foreach ($tabla in $tablas) {
     $fichero = Join-Path $env:TEMP ("cbr-{0}.txt" -f [guid]::NewGuid().ToString('N'))
     $errores = "$fichero.err"
 
     $aOrigen = @("$OrigenBase.$tabla", 'out', $fichero,
-        '-S', $Origen, '-c', '-C', '65001', '-E')
+        '-S', $Origen, '-c', '-C', '65001', '-E', '-r', $terminadorFila)
     if ($OrigenUsuario) {
         # -P tambien aqui: bcp no lee la contrasena del entorno en ningun
         # sentido, ni para salir ni para entrar.
@@ -720,7 +763,8 @@ foreach ($tabla in $tablas) {
     # procesos de la maquina mientras dura el bcp, que dura segundos. No es
     # bonito y no hay alternativa.
     $aDestino = @("$($kv['Database']).$tabla", 'in', $fichero,
-        '-S', $kv['Server'], '-c', '-C', '65001', '-E', '-q', '-e', $errores)
+        '-S', $kv['Server'], '-c', '-C', '65001', '-E', '-q', '-e', $errores,
+        '-r', $terminadorFila)
     if ($destinoUsaSqlAuth) { $aDestino += @('-U', $destinoUsuario, '-P', $destinoPassword) }
     else { $aDestino += '-T' }   # -T es la conexion de confianza en bcp
 

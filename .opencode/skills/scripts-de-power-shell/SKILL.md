@@ -38,6 +38,64 @@ Los tres engañan, y cada uno sale del color de la ayuda:
 | `bcp -q` | Pone `QUOTED_IDENTIFIER ON`. Sin él **toda** la carga falla, porque seis índices son filtrados y `MpLicitacionItem.Subtotal` es una columna calculada. En `sqlcmd` lo pone `-I`, y hace falta también: **el `DELETE` falla igual que el `INSERT`**. |
 | `bcp -c -C 65001` | UTF-8 en los dos lados. Además **distingue `NULL` de cadena vacía**: `NULL` es un campo de longitud cero y la vacía es el byte `00`. Con `-k` se pierde esa diferencia, y no se usa. |
 
+### ⚠️ `bcp -c` usa `\r\n` como terminador de fila, y puede estar DENTRO del dato
+
+El texto libre no tiene por qué estar en una línea. `MpLicitacionItem.Descripcion`
+es la especificación del comprador y en Mercado Público hay especificaciones de
+dos líneas. Con el terminador de por defecto, `bcp` cree que ahí acaba la fila,
+parte el registro en dos y la segunda mitad la intenta meter en una columna
+**numérica**. El error que sale:
+
+```
+#@ Row 4, Column 1: Invalid character value for cast specification @#
+```
+
+que no menciona saltos de línea, ni el campo, ni dice que el dato estaba bien.
+Lo que se ve es que `Subtotal`, que es `decimal`, recibió texto.
+
+**El efecto es seis filas que no se copian y ninguna más.** No es un error
+ruidoso. Lo detecta la comparación de recuentos, pero para entonces el destino ya
+se ha tirado y se ha vuelto a llenar.
+
+Se arregla con `-r`, y **el mismo valor al exportar y al importar**:
+
+```powershell
+$terminadorFila = '#!#'
+... 'out', $fichero, '-c', '-C', '65001', '-r', $terminadorFila
+... 'in',  $fichero, '-c', '-C', '65001', '-r', $terminadorFila
+```
+
+Medido con la tabla real (58 filas, 6 con CR LF, 2 descripciones vacías): 58
+filas importadas, las 6 CR LF conservadas, las 2 vacías siguen vacías y no `NULL`,
+y el checksum igual en origen y copia.
+
+No se limpia el dato para que quepa en el formato: **se cambia el formato**. Un
+`-k` o un `REPLACE` de los saltos de línea perdería información que el comprador
+escribió.
+
+> Y un `#!#` dentro de un pliego de condiciones, si apareciera, partiría la fila
+> igual. La comparación de recuentos lo detecta, que es justo para lo que está.
+
+### ⚠️ `CHECKSUM()` sobre `nvarchar` cambia entre servidores con collation distinta
+
+Al comparar la base local con la del hosting, `CHECKSUM_AGG(CHECKSUM(ItemId,
+Descripcion))` daba **distinto en las dos** con los datos idénticos:
+
+```
+local   -2065125037     Modern_Spanish_CI_AS
+remoto  -2065125165     SQL_Latin1_General_CP1_CI_AS
+```
+
+`CHECKSUM()` sobre texto depende de la intercalación, y las dos bases no la
+comparten. Para comparar entre servidores hay que pasar por **bytes**:
+
+```sql
+CHECKSUM_AGG(CHECKSUM(ItemId, CONVERT(varbinary(8000), Descripcion)))
+```
+
+Con eso: `-899995822` en las dos. Antes de dar por rota una copia, comprobar si
+la intercalación es la misma.
+
 Sin `-E` cada tabla recibe IDs nuevos y las claves foráneas quedan apuntando a
 las filas equivocadas, sin ningún error. Sin `-q`/**`-I`** el error dice
 `INSERT failed because the following SET options have incorrect settings`, que
