@@ -195,7 +195,21 @@ public static class LicitacionesEndpoints
             // Y son cuatro arreglos distintos. Decir "falta el código" cuatro
             // veces sería un aviso que no dice nada, que es exactamente el
             // problema que había.
-            FaltaConfiguracion = empresa.FaltaAlgo ? empresa.Motivo : null,
+            //
+            // Y EL `??` DE AQUÍ NO ES COSMÉTICO. EmpresaVigilada devuelve Motivo
+            // nulo en un solo caso: que se esté resolviendo ahora mismo y esta
+            // petición haya llegado antes. Es una carrera, dura milisegundos y
+            // la siguiente petición la ve resuelta. Pero mientras dura, el
+            // cliente recibía un motivo vacío y pintaba esto:
+            //
+            //     "En esta pantalla , así que no se puede consultar nada."
+            //
+            // con un hueco donde debería estar la explicación. Un aviso con un
+            // hueco se lee como "no hay nada que explicar", que no es lo mismo
+            // que "no lo sé", y quien lo lee no tiene nada con que empezar.
+            FaltaConfiguracion = empresa.FaltaAlgo
+                ? empresa.Motivo ?? "la empresa todavía no se ha podido determinar. Espera un segundo y vuelve a recargar."
+                : null,
 
             Empresa = new
             {

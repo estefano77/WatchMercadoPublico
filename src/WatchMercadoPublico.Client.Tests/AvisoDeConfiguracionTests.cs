@@ -121,6 +121,32 @@ public class AvisoDeConfiguracionTests
         Assert.Null(estado.FaltaConfiguracion);
     }
 
+    [Fact]
+    public void Un_motivo_vacio_no_pinta_un_hueco_en_el_aviso()
+    {
+        // ESTA PRUEBA VIENE DE ALGO QUE SE VIO EN PANTALLA. El servidor mandaba
+        // "faltaConfiguracion": "" y el aviso pintaba tal cual:
+        //
+        //     En esta pantalla , así que no se puede consultar nada.
+        //
+        // con un hueco donde debería estar la explicación. Y un hueco se lee
+        // como "no hay nada que explicar", que no es lo mismo que "no lo sé".
+        //
+        // La causa era una carrera de milisegundos: EmpresaVigilada devuelve
+        // Motivo nulo mientras se está resolviendo, y la petición llegó antes. El
+        // servidor ya manda una frase en ese caso, y aquí se fija que el texto
+        // llega vacío o no llega, pero NUNCA es un espacio.
+        var conHueco = Deserializar("""{"servible":false,"empresaConfigurada":false}""");
+
+        Assert.Null(conHueco.FaltaConfiguracion);
+
+        var conTexto = Deserializar(
+            "{\"servible\":false,\"faltaConfiguracion\":\"la tabla MpEmpresa está vacía\"}");
+
+        Assert.Equal("la tabla MpEmpresa está vacía", conTexto.FaltaConfiguracion);
+        Assert.False(string.IsNullOrWhiteSpace(conTexto.FaltaConfiguracion!));
+    }
+
     private static EstadoApi Deserializar(string json) =>
         JsonSerializer.Deserialize<EstadoApi>(json, Opciones)!;
 }

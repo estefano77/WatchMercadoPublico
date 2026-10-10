@@ -235,20 +235,45 @@
 
     @if (Estado is { Servible: false })
     {
+        @* OJO CON EL TEXTO DE AQUÍ. Este bloque se lee entero cuando algo va mal,
+           así que lo que dice es lo que arregla. Y estuvo desactualizado mucho
+           tiempo: seguía diciendo que CodigoProveedor era la clave imprescindible,
+           cuando ese campo ya no lo lee NADIE — la empresa sale de la tabla
+           MpEmpresa y la única clave es el RUT.
+
+           Un aviso que manda a cambiar una clave que no hace nada es peor que no
+           tener aviso: quien lo sigue cambia el CodigoProveedor, reinicia, y el
+           aviso sigue ahí. Y no dice nada de lo que sí hay que hacer.
+
+           Y el texto del motivo lo pone el SERVIDOR, en una frase, porque hay
+           cuatro motivos distintos y cada uno se arregla de una manera. Aquí no
+           se intenta adivinar: se enseña. *@
         <Aviso Tipo="error" Titulo="La aplicación no está configurada" Cerrable="false">
             <p class="mt-2 text-sm leading-relaxed text-ink-soft">
-                En esta pantalla <strong>@Estado.FaltaConfiguracion</strong>, así que no se puede
-                consultar nada. Se pone en el servidor, en la sección
-                <span class="font-mono">MercadoPublico</span> del
-                <span class="font-mono">appsettings</span>:
+                @if (!string.IsNullOrWhiteSpace(Estado.FaltaConfiguracion))
+                {
+                    <text>Falta: <strong>@Estado.FaltaConfiguracion</strong>. Hasta entonces no se puede consultar nada.</text>
+                }
+                else
+                {
+                    @* Se queda sin motivo escrito solo cuando el servidor y el
+                       cliente se contradicen, que no debería pasar. Se dice
+                       igualmente, y no con un hueco: una frase que falta se lee
+                       como "no hay nada que explicar", y eso no es lo mismo que
+                       "no lo sé". *@
+                    <text>No se ha podido determinar qué falta. El servidor no ha dicho el motivo, y sin él no se puede saber qué corregir. Mira el registro de arranque, donde va escrito.</text>
+                }
             </p>
             <pre class="mt-3 overflow-x-auto rounded-lg border border-line bg-field px-3 py-2.5 font-mono text-[0.72rem] text-ink-soft">Copy-Item secrets\appsettings.Development.json.ejemplo `
         src\WatchMercadoPublico.Server\appsettings.Development.json</pre>
             <p class="mt-2 text-xs leading-relaxed text-muted">
-                El <span class="font-mono">CodigoProveedor</span> es el único imprescindible: sin él
-                no hay a quién consultar. El ticket se pide gratis en mercadopublico.cl y llega al
-                correo. Para probar la pantalla sin nada de eso,
-                <span class="font-mono">"ModoConsulta": "demo"</span>.
+                Lo único que hay que rellenar de la empresa es su
+                <span class="font-mono">RutEmpresa</span>, y con el formato
+                <span class="font-mono">DD.DDD.DDD-D</span>: el nombre y el código de proveedor
+                salen de la tabla <span class="font-mono">MpEmpresa</span>, y la llena sola
+                <span class="font-mono">cargar-base-remota.ps1</span> la primera vez. El ticket se
+                pide gratis en mercadopublico.cl y llega al correo. Para probar la pantalla sin
+                nada de eso, <span class="font-mono">"ModoConsulta": "demo"</span>.
             </p>
         </Aviso>
     }
